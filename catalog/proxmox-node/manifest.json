@@ -3,7 +3,7 @@
   "id": "proxmox-node",
   "version": "1.0.0",
   "displayName": "Proxmox node",
-  "category": "virtualisation",
+  "category": "virtualization",
   "icon": "proxmox",
   "docs": "https://neohomepage.dev/widgets/proxmox-node",
   "target": {

@@ -34,6 +34,30 @@ export const FIELD_KINDS = [
 export type FieldKind = (typeof FIELD_KINDS)[number]
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{1,48}$/, 'must be a lowercase slug')
+
+/**
+ * The categories a widget may claim. Closed, and that is the point.
+ *
+ * A free-form slug produced `virtualisation` and `virtualization`, `network` and `network-dns`,
+ * `media` and `media-server` in one sixteen-widget catalog — three pairs of near-duplicate
+ * headings in the editor's browse list, each with some of the widgets someone was looking for.
+ * A community catalog with a free-form field here would be unbrowsable within a month, and the
+ * category is a public contract: renaming one later moves widgets under people's feet.
+ *
+ * Spellings are en-US, matching everything else user-facing in the project.
+ */
+export const CATEGORIES = [
+  'virtualization',
+  'nas',
+  'media',
+  'media-automation',
+  'downloads',
+  'network',
+  'monitoring',
+  'information',
+  'misc',
+] as const
+export type Category = (typeof CATEGORIES)[number]
 const fieldName = z.string().regex(/^[a-z][A-Za-z0-9]{0,31}$/, 'must be a camelCase field name')
 
 /** UI hints ride along in a reserved key so one definition drives validation, form and docs. */
@@ -237,7 +261,7 @@ const commonManifest = {
   id: identifier,
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   displayName: z.string().min(1).max(48),
-  category: identifier,
+  category: z.enum(CATEGORIES),
   /** A slug into the bundled icon pack. Never a URL: that would be a tracking pixel. */
   icon: z.string().regex(/^[a-z0-9][a-z0-9-]{0,48}$/),
   docs: z.url().optional(),

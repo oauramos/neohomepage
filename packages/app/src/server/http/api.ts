@@ -70,6 +70,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
         shape: view.shape,
         operations: view.operations,
         needsCredential: view.needsCredential,
+        someKindsNeedNoCredential: view.someKindsNeedNoCredential,
       }
     })
     return c.json({ manifests })

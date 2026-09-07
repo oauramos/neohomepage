@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { dashboard } from '../../shared/board.ts'
+import { FAVICON_LINK } from '../../shared/favicon.ts'
 import { emitGridCss, type Breakpoint, type GridConfig } from '../../shared/grid-css.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import type { Resolved } from '../../shared/resolved.ts'
@@ -119,6 +120,7 @@ export function renderDocument(options: {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
+    ${FAVICON_LINK}
     <title>${escapeHtml(resolved.title)}</title>
     <style>${BASE_STYLESHEET}
 ${themeVariables(resolved.theme)}

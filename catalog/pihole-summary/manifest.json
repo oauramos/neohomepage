@@ -3,7 +3,7 @@
   "id": "pihole-summary",
   "version": "1.0.0",
   "displayName": "Pi-hole",
-  "category": "network-dns",
+  "category": "network",
   "icon": "pi-hole",
   "docs": "https://neohomepage.dev/widgets/pihole-summary",
   "target": {

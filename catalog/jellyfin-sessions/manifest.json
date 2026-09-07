@@ -3,7 +3,7 @@
   "id": "jellyfin-sessions",
   "version": "1.0.0",
   "displayName": "Jellyfin sessions",
-  "category": "media-server",
+  "category": "media",
   "icon": "jellyfin",
   "docs": "https://neohomepage.dev/widgets/jellyfin-sessions",
   "target": {

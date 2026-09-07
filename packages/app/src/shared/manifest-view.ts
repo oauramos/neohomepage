@@ -46,6 +46,14 @@ export type ManifestView = {
   readonly roles: readonly BindableRole[]
   /** True when any bindable surface declares a secret field, so the UI can warn before install. */
   readonly needsCredential: boolean
+  /**
+   * True when a composite has at least one kind that needs no credential.
+   *
+   * The calendar accepts four source kinds and only one of them — an iCalendar feed — needs
+   * nothing. Saying "needs an API key" flatly is what makes someone with a public .ics URL skip
+   * the widget that would have worked for them.
+   */
+  readonly someKindsNeedNoCredential: boolean
 }
 
 const hasSecret = (fields: readonly Field[]) => fields.some((field) => field.kind === 'secret')
@@ -84,6 +92,9 @@ export function manifestView(manifest: Manifest): ManifestView {
       operations: [],
       roles,
       needsCredential: roles.some((role) => role.kinds.some((kind) => kind.needsCredential)),
+      someKindsNeedNoCredential: roles.some((role) =>
+        role.kinds.some((kind) => !kind.needsCredential),
+      ),
     }
   }
 
@@ -94,5 +105,6 @@ export function manifestView(manifest: Manifest): ManifestView {
     operations: Object.keys(manifest.operations),
     roles: [],
     needsCredential: hasSecret(manifest.target.fields),
+    someKindsNeedNoCredential: false,
   }
 }

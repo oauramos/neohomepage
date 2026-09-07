@@ -17,6 +17,7 @@ type CatalogEntry = {
   template: string
   shape: 'single' | 'composite'
   needsCredential: boolean
+  someKindsNeedNoCredential: boolean
 }
 
 type BindableKind = {
@@ -328,7 +329,11 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
                   <span className="nh-catalog-name">{entry.displayName}</span>
                   <span className="nh-catalog-meta">
                     {entry.category}
-                    {entry.needsCredential ? ' · needs an API key' : ''}
+                    {entry.needsCredential
+                      ? entry.someKindsNeedNoCredential
+                        ? ' · some sources need an API key'
+                        : ' · needs an API key'
+                      : ''}
                   </span>
                 </button>
               </li>

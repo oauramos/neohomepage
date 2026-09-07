@@ -29,6 +29,7 @@ contributed by strangers safe to install.
 
 | Widget | Shows | Needs | Renders as |
 | --- | --- | --- | --- |
+| **Jellyfin sessions** <br><code>jellyfin-sessions</code> | sessions | API key <br><small>API key header</small> | `list` |
 | **Plex** <br><code>plex-sessions</code> | sessions | X-Plex-Token <br><small>API key header</small> | `list` |
 
 ## Media automation
@@ -37,12 +38,6 @@ contributed by strangers safe to install.
 | --- | --- | --- | --- |
 | **Radarr queue** <br><code>radarr-queue</code> | queue | API key <br><small>API key header</small> | `list` |
 | **Sonarr queue** <br><code>sonarr-queue</code> | queue | API key <br><small>API key header</small> | `list` |
-
-## Media server
-
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Jellyfin sessions** <br><code>jellyfin-sessions</code> | sessions | API key <br><small>API key header</small> | `list` |
 
 ## Misc
 
@@ -66,27 +61,17 @@ contributed by strangers safe to install.
 
 | Widget | Shows | Needs | Renders as |
 | --- | --- | --- | --- |
-| **Speedtest Tracker** <br><code>speedtest-tracker</code> | latest | API token <br><small>API key header</small> | `stat-grid` |
-
-## Network dns
-
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
 | **AdGuard Home** <br><code>adguard-stats</code> | stats | Password <br><small>username and password</small> | `stat-grid` |
 | **Pi-hole** <br><code>pihole-summary</code> | summary | API token <br><small>API key in the query string</small> | `stat-grid` |
-
-## Virtualisation
-
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Portainer** <br><code>portainer-containers</code> | containers | Access token <br><small>API key header</small> | `stat-grid` |
-| **Proxmox node** <br><code>proxmox-node</code> | status | Token secret <br><small>API key header</small> | `gauge-set` |
+| **Speedtest Tracker** <br><code>speedtest-tracker</code> | latest | API token <br><small>API key header</small> | `stat-grid` |
 
 ## Virtualization
 
 | Widget | Shows | Needs | Renders as |
 | --- | --- | --- | --- |
+| **Portainer** <br><code>portainer-containers</code> | containers | Access token <br><small>API key header</small> | `stat-grid` |
 | **Proxmox cluster** <br><code>proxmox-cluster</code> | resources | Token secret <br><small>API key header</small> | `stat-grid` |
+| **Proxmox node** <br><code>proxmox-node</code> | status | Token secret <br><small>API key header</small> | `gauge-set` |
 
 ## Adding one
 

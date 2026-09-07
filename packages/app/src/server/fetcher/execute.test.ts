@@ -33,7 +33,7 @@ const MANIFEST: SingleManifest = singleManifestSchema.parse({
   id: 'demo',
   version: '1.0.0',
   displayName: 'Demo',
-  category: 'test',
+  category: 'media-automation',
   icon: 'demo',
   target: { fields: [], auth: { kind: 'header', header: 'X-Api-Key', value: '{{secret:apiKey}}' } },
   config: [{ name: 'maxItems', kind: 'integer', label: 'Items', default: 5 }],

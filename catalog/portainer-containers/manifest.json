@@ -3,7 +3,7 @@
   "id": "portainer-containers",
   "version": "1.0.0",
   "displayName": "Portainer",
-  "category": "virtualisation",
+  "category": "virtualization",
   "icon": "portainer",
   "docs": "https://neohomepage.dev/widgets/portainer-containers",
   "target": {

@@ -29,6 +29,7 @@ export { DEFAULT_EVAL_LIMITS, ProjectionLimitError, runProjection } from './dsl/
 export type {
   Auth,
   AuthKind,
+  Category,
   Compose,
   CompositeManifest,
   Decoder,
@@ -47,6 +48,7 @@ export {
   auditManifest,
   authSchema,
   AUTH_KINDS,
+  CATEGORIES,
   composeSchema,
   compositeManifestSchema,
   DECODERS,

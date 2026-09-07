@@ -3,7 +3,7 @@
   "id": "adguard-stats",
   "version": "1.0.0",
   "displayName": "AdGuard Home",
-  "category": "network-dns",
+  "category": "network",
   "icon": "adguard-home",
   "docs": "https://neohomepage.dev/widgets/adguard-stats",
   "target": {
