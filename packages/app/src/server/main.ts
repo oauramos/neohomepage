@@ -2,13 +2,27 @@ import { setTimeout } from 'node:timers'
 import { serve } from '@hono/node-server'
 import { createApp } from './http/app.ts'
 import { env } from './env.ts'
+import { seedDataDirectory } from './store/seed.ts'
+import { seedStarterConfig } from './store/starter.ts'
 
 /**
  * Boot order, which later phases fill in:
  *   env -> lock -> migrate -> resolve -> publish -> listen
  * Today it is env -> listen. Keeping the shape visible is cheaper than rediscovering it.
  */
-function main(): void {
+async function main(): Promise<void> {
+  // Seeding first means `git init` on the data directory is safe before the user has read
+  // anything: secrets/ and state/ are already excluded by the time either exists.
+  const seeded = await seedDataDirectory({
+    dataDir: env.dataDir,
+    configDir: env.configDir,
+    assetsDir: env.assetsDir,
+    secretsDir: env.secretsDir,
+    stateDir: env.stateDir,
+  })
+  const starter = await seedStarterConfig(env.configDir)
+  for (const path of [...seeded, ...starter]) console.log(`seeded ${path}`)
+
   const app = createApp()
 
   const server = serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
@@ -32,4 +46,4 @@ function formatHost(address: string): string {
   return address.includes(':') ? `[${address}]` : address
 }
 
-main()
+await main()

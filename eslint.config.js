@@ -57,6 +57,19 @@ export default tseslint.config(
     rules: {
       // TypeScript resolves globals from `types`; core no-undef only yields false positives.
       'no-undef': 'off',
+      // Node runs TypeScript in strip-only mode: it erases types, it does not GENERATE code.
+      // Parameter properties, enums and namespaces all need generation, so a file using them
+      // typechecks, passes tests (vitest transpiles) and then fails at `node src/server/main.ts`.
+      '@typescript-eslint/parameter-properties': ['error', { prefer: 'class-property' }],
+      '@typescript-eslint/no-namespace': 'error',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TSEnumDeclaration',
+          message:
+            'enums are not supported by Node type stripping; use a const object with `as const`',
+        },
+      ],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'error',
     },

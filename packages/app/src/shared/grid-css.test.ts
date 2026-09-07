@@ -48,9 +48,9 @@ describe('emitGridCss', () => {
 
   it('refuses a widget id that could break out of the selector', () => {
     for (const hostile of ['a"]{color:red}[x', 'has space', '', '../etc', 'a}b']) {
-      expect(() =>
-        emitGridCss(CONFIG, { sm: [{ i: hostile, x: 0, y: 0, w: 1, h: 1 }] }),
-      ).toThrow(UnsafeWidgetIdError)
+      expect(() => emitGridCss(CONFIG, { sm: [{ i: hostile, x: 0, y: 0, w: 1, h: 1 }] })).toThrow(
+        UnsafeWidgetIdError,
+      )
     }
   })
 
@@ -97,7 +97,9 @@ describe('CSS geometry against react-grid-layout', () => {
               maxRows: Infinity,
             }
             for (let x = 0; x < breakpoint.cols; x++) {
-              for (const w of [1, 2, breakpoint.cols - x].filter((v) => v >= 1 && x + v <= breakpoint.cols)) {
+              for (const w of [1, 2, breakpoint.cols - x].filter(
+                (v) => v >= 1 && x + v <= breakpoint.cols,
+              )) {
                 for (const y of [0, 2]) {
                   for (const h of [1, 3]) {
                     const item: LayoutItem = { i: 'a', x, y, w, h }
@@ -121,7 +123,10 @@ describe('CSS geometry against react-grid-layout', () => {
     }
 
     expect(checked).toBeGreaterThan(10_000)
-    expect({ worst, worstCase }).toEqual({ worst: expect.any(Number), worstCase: expect.any(String) })
+    expect({ worst, worstCase }).toEqual({
+      worst: expect.any(Number),
+      worstCase: expect.any(String),
+    })
     expect(worst).toBeLessThan(1)
   })
 })

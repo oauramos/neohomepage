@@ -15,12 +15,28 @@ type Command = {
 const COMMANDS: readonly Command[] = [
   { name: 'serve', summary: 'Run the server in the foreground', phase: 'F0', run: runServe },
   { name: 'env', summary: 'Print the resolved data directories', phase: 'F0', run: runEnv },
-  { name: 'runtime', summary: 'Print the memory limits this process can see', phase: 'F1', run: runRuntime },
-  { name: 'validate', summary: 'Validate the config tree against the schema', phase: 'F4' },
+  { name: 'init', summary: 'Create and seed the data directory', phase: 'F4', run: runInit },
+  {
+    name: 'runtime',
+    summary: 'Print the memory limits this process can see',
+    phase: 'F1',
+    run: runRuntime,
+  },
+  {
+    name: 'validate',
+    summary: 'Validate the config tree against the schema',
+    phase: 'F4',
+    run: runValidate,
+  },
   { name: 'resolve', summary: 'Compile the sparse config into resolved.json', phase: 'F4' },
   { name: 'publish', summary: 'Render a new generation and flip the pointer', phase: 'F7' },
-  { name: 'backup', summary: 'Write a single restorable archive', phase: 'F4' },
-  { name: 'restore', summary: 'Restore a backup archive into the data directory', phase: 'F4' },
+  { name: 'backup', summary: 'Write a single restorable archive', phase: 'F4', run: runBackup },
+  {
+    name: 'restore',
+    summary: 'Restore a backup archive into the data directory',
+    phase: 'F4',
+    run: runRestore,
+  },
   { name: 'fetch', summary: 'Fetch one widget upstream and print its projection', phase: 'F5' },
   { name: 'doctor', summary: 'Report problems with the install', phase: 'F12' },
   { name: 'catalog', summary: 'sync | verify | test | record | snapshot', phase: 'F11' },
@@ -52,11 +68,84 @@ function runEnv(): number {
 }
 
 async function runRuntime(): Promise<number> {
-  const { describeMemoryEnvironment, formatMemoryEnvironment } = await import('../server/runtime.ts')
+  const { describeMemoryEnvironment, formatMemoryEnvironment } =
+    await import('../server/runtime.ts')
   const environment = describeMemoryEnvironment()
   console.log(formatMemoryEnvironment(environment))
   // Non-zero when V8 would outgrow the cgroup: this doubles as a check in `neo doctor`.
   return environment.heapLimitExceedsMemoryLimit ? 1 : 0
+}
+
+async function seedPaths() {
+  return {
+    dataDir: env.dataDir,
+    configDir: env.configDir,
+    assetsDir: env.assetsDir,
+    secretsDir: env.secretsDir,
+    stateDir: env.stateDir,
+  }
+}
+
+async function runInit(): Promise<number> {
+  const { seedDataDirectory } = await import('../server/store/seed.ts')
+  const { seedStarterConfig } = await import('../server/store/starter.ts')
+  const written = await seedDataDirectory(await seedPaths())
+  const starter = await seedStarterConfig(env.configDir)
+  console.log(`data directory ready at ${env.dataDir}`)
+  for (const path of [...written, ...starter]) console.log(`  created ${path}`)
+  if (written.length === 0 && starter.length === 0)
+    console.log('  (already seeded, nothing to write)')
+  console.log('\nMake it a backup by running, in that directory:  git init && git add -A')
+  return 0
+}
+
+async function runValidate(): Promise<number> {
+  const { ConfigStore } = await import('../server/store/configstore.ts')
+  const { validateTree } = await import('../server/store/tree.ts')
+  const store = new ConfigStore(env.configDir)
+
+  let loaded
+  try {
+    loaded = await store.load()
+  } catch (error) {
+    console.error(`invalid: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
+
+  for (const warning of loaded.warnings) console.log(`warning  ${warning.path}: ${warning.message}`)
+  const problems = validateTree(loaded.tree)
+  for (const problem of problems) console.error(`problem  ${problem.path}: ${problem.message}`)
+
+  const counts =
+    `${loaded.tree.pages.size} page(s), ${loaded.tree.widgets.size} widget(s), ` +
+    `${loaded.tree.targets.size} target(s)`
+  console.log(`\nrevision ${loaded.revision} — ${counts}`)
+  console.log(problems.length === 0 ? 'OK' : `${problems.length} problem(s)`)
+  return problems.length === 0 ? 0 : 1
+}
+
+async function runBackup(argv: readonly string[]): Promise<number> {
+  const { backup, defaultArchiveName } = await import('../server/store/backup.ts')
+  const explicit = argv.find((a) => !a.startsWith('-'))
+  const archive = explicit ?? defaultArchiveName(new Date())
+  const result = await backup({ dataDir: env.dataDir, archive })
+  console.log(`wrote ${result.archive}`)
+  console.log(`  included: ${result.included.join(', ')}`)
+  console.log('  secrets/ and state/ are never included — see docs/guide/backup.md')
+  return 0
+}
+
+async function runRestore(argv: readonly string[]): Promise<number> {
+  const archive = argv.find((a) => !a.startsWith('-'))
+  if (archive === undefined) {
+    console.error('usage: neo restore <archive.tar.gz>')
+    return 2
+  }
+  const { restore } = await import('../server/store/backup.ts')
+  const result = await restore({ archive, dataDir: env.dataDir })
+  console.log(`restored ${result.entries.length} entries into ${result.dataDir}`)
+  console.log('Provide your API keys (environment variables or secrets/), then start the server.')
+  return 0
 }
 
 async function runServe(): Promise<number> {

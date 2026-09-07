@@ -37,21 +37,26 @@ import {
  */
 
 export class ConfigConflictError extends Error {
-  constructor(
-    readonly expected: string,
-    readonly actual: string,
-  ) {
+  readonly expected: string
+  readonly actual: string
+
+  constructor(expected: string, actual: string) {
     super(`config changed underneath this edit (expected revision ${expected}, found ${actual})`)
     this.name = 'ConfigConflictError'
+    this.expected = expected
+    this.actual = actual
   }
 }
 
 export class ConfigInvalidError extends Error {
-  constructor(readonly problems: readonly Problem[]) {
+  readonly problems: readonly Problem[]
+
+  constructor(problems: readonly Problem[]) {
     super(
       `config would be invalid:\n${problems.map((p) => `  ${p.path}: ${p.message}`).join('\n')}`,
     )
     this.name = 'ConfigInvalidError'
+    this.problems = problems
   }
 }
 
@@ -179,25 +184,27 @@ export class ConfigStore {
     const snapshot = new Map<string, string>()
     const warnings: Problem[] = []
 
-    const dashboardRaw = (await readJson(this.paths.dashboard)) ?? {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
+    // A file that does not exist gets NO snapshot entry, so the rendered output differs from
+    // "what is on disk" and the file gets created. Recording a synthetic snapshot for an absent
+    // file makes an all-defaults file — dashboard.json, which is just `schemaVersion` — invisible
+    // to the change detector, and it would never land on disk at all.
+    const dashboardRaw = await readJson(this.paths.dashboard)
+    const dashboard = parseOrThrow(
+      dashboardSchema,
+      dashboardRaw ?? { schemaVersion: CURRENT_SCHEMA_VERSION },
+      this.paths.dashboard,
+    )
+    if (dashboardRaw !== undefined) {
+      snapshot.set(this.paths.dashboard, render(dashboardSchema, dashboard))
     }
-    const dashboard = parseOrThrow(dashboardSchema, dashboardRaw, this.paths.dashboard)
-    snapshot.set(this.paths.dashboard, render(dashboardSchema, dashboard))
 
-    const theme = parseOrThrow(
-      themeSchema,
-      (await readJson(this.paths.theme)) ?? {},
-      this.paths.theme,
-    )
-    snapshot.set(this.paths.theme, render(themeSchema, theme))
+    const themeRaw = await readJson(this.paths.theme)
+    const theme = parseOrThrow(themeSchema, themeRaw ?? {}, this.paths.theme)
+    if (themeRaw !== undefined) snapshot.set(this.paths.theme, render(themeSchema, theme))
 
-    const network = parseOrThrow(
-      networkSchema,
-      (await readJson(this.paths.network)) ?? {},
-      this.paths.network,
-    )
-    snapshot.set(this.paths.network, render(networkSchema, network))
+    const networkRaw = await readJson(this.paths.network)
+    const network = parseOrThrow(networkSchema, networkRaw ?? {}, this.paths.network)
+    if (networkRaw !== undefined) snapshot.set(this.paths.network, render(networkSchema, network))
 
     const pages = await this.loadCollection('pages', pageSchema, pageSchema, snapshot)
     const layouts = await this.loadCollection(
