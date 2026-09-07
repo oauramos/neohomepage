@@ -39,7 +39,7 @@
       "path": "/api/v3/queue",
       "decode": "json",
       "query": {
-        "pageSize": "{{config.maxItems}}",
+        "pageSize": "{{config:maxItems}}",
         "includeSeries": "true"
       }
     }

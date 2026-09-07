@@ -103,7 +103,13 @@ describe('schema introspection', () => {
 })
 
 describe('recursive schema ordering', () => {
-  const layoutItem = z.object({ i: z.string(), x: z.number(), y: z.number(), w: z.number(), h: z.number() })
+  const layoutItem = z.object({
+    i: z.string(),
+    x: z.number(),
+    y: z.number(),
+    w: z.number(),
+    h: z.number(),
+  })
   const file = z.object({
     page: z.string(),
     layouts: z.record(z.string(), z.array(layoutItem)),
@@ -124,14 +130,19 @@ describe('recursive schema ordering', () => {
   })
 
   it('orders values inside a record by the record value schema', () => {
-    const out = serialize({ page: 'home', layouts: {}, meta: { lg: { cols: 12, origin: 'authored' } } }, { schema: file })
+    const out = serialize(
+      { page: 'home', layouts: {}, meta: { lg: { cols: 12, origin: 'authored' } } },
+      { schema: file },
+    )
     const meta = out.slice(out.indexOf('"meta"'))
     expect(meta.indexOf('"origin"')).toBeLessThan(meta.indexOf('"cols"'))
   })
 
   it('orders nested objects reached through optional and default wrappers', () => {
     const schema = z.object({
-      grid: z.object({ rowHeight: z.number(), margin: z.array(z.number()) }).prefault({ rowHeight: 56, margin: [] }),
+      grid: z
+        .object({ rowHeight: z.number(), margin: z.array(z.number()) })
+        .prefault({ rowHeight: 56, margin: [] }),
     })
     const out = serialize({ grid: { margin: [1, 2], rowHeight: 40 } }, { schema })
     expect(out.indexOf('"rowHeight"')).toBeLessThan(out.indexOf('"margin"'))

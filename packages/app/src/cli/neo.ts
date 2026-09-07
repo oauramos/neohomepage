@@ -42,7 +42,12 @@ const COMMANDS: readonly Command[] = [
     phase: 'F4',
     run: runRestore,
   },
-  { name: 'fetch', summary: 'Fetch one widget upstream and print its projection', phase: 'F5' },
+  {
+    name: 'fetch',
+    summary: 'Fetch one widget upstream and print its projection',
+    phase: 'F5',
+    run: runFetch,
+  },
   { name: 'doctor', summary: 'Report problems with the install', phase: 'F12' },
   { name: 'catalog', summary: 'sync | verify | test | record | snapshot', phase: 'F11' },
   { name: 'mcp', summary: 'Serve the MCP tools over stdio', phase: 'F10' },
@@ -170,6 +175,82 @@ async function runResolve(argv: readonly string[]): Promise<number> {
   }
   for (const note of resolved.diagnostics) console.error(`diagnostic: ${note}`)
   return 0
+}
+
+async function runFetch(argv: readonly string[]): Promise<number> {
+  const widgetId = argv.find((a) => !a.startsWith('-'))
+  if (widgetId === undefined) {
+    console.error('usage: neo fetch <widget-id> [--operation=<name>]')
+    return 2
+  }
+
+  const { ConfigStore } = await import('../server/store/configstore.ts')
+  const { loadCatalogDirectory } = await import('../server/catalog/load.ts')
+  const { executeOperation } = await import('../server/fetcher/execute.ts')
+  const { loadSecrets } = await import('../server/secrets/vault.ts')
+  const { resolve: resolvePath } = await import('node:path')
+
+  const store = new ConfigStore(env.configDir)
+  const { tree } = await store.load()
+  const widget = tree.widgets.get(widgetId)
+  if (widget === undefined) {
+    console.error(
+      `no widget "${widgetId}" (have: ${[...tree.widgets.keys()].join(', ') || 'none'})`,
+    )
+    return 2
+  }
+
+  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog')
+  const { manifests } = await loadCatalogDirectory(catalogDir)
+  const manifest = manifests.get(widget.type)
+  if (manifest === undefined) {
+    console.error(`widget type "${widget.type}" is not in the catalog at ${catalogDir}`)
+    return 2
+  }
+
+  const target = widget.targetId === null ? undefined : tree.targets.get(widget.targetId)
+  if (target === undefined) {
+    console.error(`widget "${widgetId}" has no bound target`)
+    return 2
+  }
+
+  const vault = await loadSecrets(env.secretsDir)
+  const secrets: Record<string, string> = {}
+  for (const [field, ref] of Object.entries(target.secrets)) {
+    const value = vault.get(ref.$secret)
+    if (value !== undefined) secrets[field] = value
+  }
+
+  const requested = argv.find((a) => a.startsWith('--operation='))?.split('=')[1]
+  const operations = requested !== undefined ? [requested] : Object.keys(manifest.operations)
+
+  let failures = 0
+  for (const operation of operations) {
+    const startedAt = performance.now()
+    const result = await executeOperation({
+      manifest,
+      operation,
+      target: {
+        origin: `${target.base.scheme}://${target.base.host}:${target.base.port}`,
+        basePath: target.base.basePath,
+        allowLoopback: target.base.host === '127.0.0.1' || target.base.host === 'localhost',
+        insecureSkipVerify: target.tls.insecureSkipVerify,
+      },
+      config: widget.config,
+      auth: { secrets, config: target.fields },
+      now: new Date().toISOString(),
+    })
+    const ms = Math.round(performance.now() - startedAt)
+
+    if (result.ok) {
+      console.log(`✓ ${widgetId}/${operation}  ${manifest.presentation.template}  ${ms}ms`)
+      console.log(JSON.stringify(result.projection, null, 2))
+    } else {
+      console.error(`✗ ${widgetId}/${operation}  ${result.code}: ${result.message}  ${ms}ms`)
+      failures++
+    }
+  }
+  return failures === 0 ? 0 : 1
 }
 
 async function runBackup(argv: readonly string[]): Promise<number> {
