@@ -192,7 +192,7 @@ async function main(): Promise<number> {
   // Those are the two things a user actually experiences, and they are different by construction
   // rather than by luck.
   const bootDir = await mkdtemp(join(tmpdir(), 'neo-budget-boot-'))
-  let firstBoot = Number.NaN
+  let firstBoot: number
   const restarts: number[] = []
   try {
     await seedFixture(bootDir, options.widgets)
