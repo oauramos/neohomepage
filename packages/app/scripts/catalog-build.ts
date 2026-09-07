@@ -86,6 +86,15 @@ async function main(): Promise<number> {
         payload: payloadName,
         sha256,
         count: manifests.length,
+        /**
+         * Where this pointer has moved to, if it has.
+         *
+         * Present and null rather than absent, so a client written today already reads the field
+         * and a future move is a one-line change to this file instead of a client release. This
+         * is what makes serving the catalog from a path on the docs domain safe: when the catalog
+         * gets its own repository and host, the old pointer keeps working and says where to go.
+         */
+        movedTo: null,
         // No build timestamp. Two builds of identical input must produce identical bytes, or
         // "reproducible" is a word rather than a property.
       },

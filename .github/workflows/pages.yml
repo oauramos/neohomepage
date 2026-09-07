@@ -1,0 +1,65 @@
+name: Pages
+
+# The documentation site and the widget catalog are one deployment, because GitHub Pages allows
+# one site per repository. The catalog lands at /catalog/v1/ rather than on its own subdomain;
+# the pointer file's `movedTo` field is what makes that safe to bake into clients, so moving the
+# catalog to its own repository later costs a one-line change to a JSON file and no client release.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a deploy in progress: a half-published catalog pointer would name a payload that is
+# not there yet, and every client that refreshed in that window would fall back to its cache.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # VitePress reads git history for "last updated" timestamps.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate every manifest against its recorded fixtures
+        # The catalog is published from the same commit that passes this, so a manifest that fails
+        # its own fixture can never reach a user's install.
+        run: pnpm catalog:test
+
+      - run: pnpm docs:build
+      - run: pnpm catalog:build
+
+      - name: Place the catalog inside the docs site
+        run: |
+          mkdir -p docs/.vitepress/dist/catalog
+          cp -r catalog-dist/v1 docs/.vitepress/dist/catalog/v1
+          ls -la docs/.vitepress/dist/catalog/v1
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

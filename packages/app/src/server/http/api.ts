@@ -100,6 +100,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
       type?: string
       title?: string | null
       targetId?: string | null
+      /** Composite widgets: role name -> the targets bound to it. */
+      bindings?: Record<string, string[]>
       config?: Record<string, unknown>
       size?: { w?: number; h?: number }
     }
@@ -125,6 +127,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
               type: manifest.id,
               title: body.title ?? null,
               targetId: body.targetId ?? null,
+              bindings: body.bindings ?? {},
               config: body.config ?? {},
               catalogRev: manifest.version,
             }),
@@ -184,6 +187,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
       title?: string | null
       config?: Record<string, unknown>
       targetId?: string | null
+      bindings?: Record<string, string[]>
     }
 
     const result = await handle(() =>
@@ -198,6 +202,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
               ...widget,
               ...(body.title === undefined ? {} : { title: body.title }),
               ...(body.targetId === undefined ? {} : { targetId: body.targetId }),
+              ...(body.bindings === undefined ? {} : { bindings: body.bindings }),
               // Merge rather than replace: a form that posts one field must not wipe the others.
               ...(body.config === undefined
                 ? {}
@@ -303,17 +308,30 @@ export function createApiRoutes(options: ApiOptions): Hono {
           }
 
           // A target with no widgets left is dead weight, and leaving it means its credential
-          // stays on disk for a service nobody displays.
-          if (widget.targetId !== null) {
-            const stillUsed = [...draft.widgets.values()].some(
-              (other) => other.targetId === widget.targetId,
-            )
-            const target = draft.targets.get(widget.targetId)
-            if (!stillUsed && target !== undefined) {
-              orphaned.targets.push(target.id)
-              orphaned.secrets.push(...Object.values(target.secrets).map((ref) => ref.$secret))
-              draft.targets.delete(target.id)
-            }
+          // stays on disk for a service nobody displays. Every target the widget referenced is
+          // considered — a composite binds several, and cleaning up only `targetId` would leave a
+          // deleted calendar's four API keys behind.
+          const referenced = (candidate: {
+            targetId: string | null
+            bindings: Record<string, string[]>
+          }) =>
+            new Set([
+              ...(candidate.targetId === null ? [] : [candidate.targetId]),
+              ...Object.values(candidate.bindings).flat(),
+            ])
+
+          const stillUsed = new Set<string>()
+          for (const other of draft.widgets.values()) {
+            for (const targetId of referenced(other)) stillUsed.add(targetId)
+          }
+
+          for (const targetId of referenced(widget)) {
+            if (stillUsed.has(targetId)) continue
+            const target = draft.targets.get(targetId)
+            if (target === undefined) continue
+            orphaned.targets.push(target.id)
+            orphaned.secrets.push(...Object.values(target.secrets).map((ref) => ref.$secret))
+            draft.targets.delete(target.id)
           }
         },
         ifMatch(c.req.header('if-match')),

@@ -19,7 +19,8 @@
     "docs:build": "vitepress build docs",
     "catalog:validate": "pnpm --filter @neohomepage/app catalog validate",
     "catalog:test": "pnpm --filter @neohomepage/app catalog test",
-    "catalog:build": "pnpm --filter @neohomepage/app catalog:build"
+    "catalog:build": "pnpm --filter @neohomepage/app catalog:build",
+    "catalog:docs": "pnpm --filter @neohomepage/app catalog:docs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

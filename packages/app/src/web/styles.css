@@ -342,6 +342,36 @@ body {
   color: var(--nh-muted-foreground);
   padding: 0 4px;
 }
+/* One bound source inside a composite widget's role. */
+.nh-source {
+  border: 1px solid var(--nh-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nh-source-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nh-source-head .nh-input {
+  flex: 1;
+}
+.nh-source-index {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--nh-muted-foreground);
+  min-width: 1.25em;
+}
+.nh-source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .nh-button-quiet {
   border: 1px solid var(--nh-border);
   background: transparent;

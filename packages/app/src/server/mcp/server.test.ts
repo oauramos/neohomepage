@@ -260,3 +260,53 @@ describe('attribution', () => {
     expect(audit).toContain('"actor":"mcp:test"')
   })
 })
+
+describe('composite widget types', () => {
+  it('describes the roles an agent has to fill', async () => {
+    const result = await callJson('get_widget_schema', { type: 'unified-calendar' })
+    expect(result.isError).toBe(false)
+    const schema = (result as { value: Record<string, unknown> }).value as unknown as {
+      shape: string
+      roles: { name: string; min: number; kinds: { name: string }[] }[]
+    }
+    expect(schema.shape).toBe('composite')
+    expect(schema.roles[0]?.name).toBe('calendars')
+    expect(schema.roles[0]?.kinds.map((kind) => kind.name).sort()).toEqual([
+      'ics-feed',
+      'lidarr-albums',
+      'radarr-queue',
+      'sonarr-queue',
+    ])
+  })
+
+  it('refuses to create one with an unfilled role', async () => {
+    // A tile bound to nothing that reports success is worse than an error: the agent moves on and
+    // the user finds an empty widget later with no explanation.
+    const result = await callJson('add_widget', { type: 'unified-calendar' })
+    expect(result.isError).toBe(true)
+    expect(result.isError === true ? result.text : '').toMatch(/role "calendars"/)
+  })
+
+  it('creates one when the role is filled', async () => {
+    const target = await callJson('add_target', {
+      label: 'Bins',
+      type: 'ics-feed',
+      host: '10.0.0.9',
+      port: 5232,
+      basePath: '/bins.ics',
+    })
+    expect(target.isError).toBe(false)
+    const targetId = (target as { value: { id: string } }).value.id
+
+    const created = await callJson('add_widget', {
+      type: 'unified-calendar',
+      bindings: { calendars: [targetId] },
+    })
+    expect(created.isError).toBe(false)
+    const widgetId = (created as { value: { id: string } }).value.id
+
+    const listed = await callJson('list_widgets')
+    const widgets = (listed as { value: { widgets: { id: string; type: string }[] } }).value.widgets
+    expect(widgets.find((one) => one.id === widgetId)?.type).toBe('unified-calendar')
+  })
+})

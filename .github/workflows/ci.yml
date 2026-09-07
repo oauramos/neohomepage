@@ -32,6 +32,37 @@ jobs:
       - run: pnpm build
       - run: pnpm docs:build
 
+      - name: The widget reference matches the manifests
+        # A generated page nobody sees in a diff is a page nobody notices going wrong.
+        run: |
+          pnpm catalog:docs
+          git diff --exit-code docs/widgets/index.md || {
+            echo "::error::docs/widgets/index.md is stale — run: pnpm catalog:docs"
+            exit 1
+          }
+
+      - name: The catalog build is reproducible and small
+        # Two claims the publish design rests on, checked rather than asserted. Byte-identical
+        # rebuilds are the integrity story that stands in for signing at v1 — anyone can rebuild
+        # from the tag and compare the hash. The size cap is the trigger written into the plan for
+        # splitting the catalog out of this repository; crossing it should be a decision, not a
+        # surprise.
+        run: |
+          pnpm catalog:build
+          first=$(cat catalog-dist/v1/latest.json)
+          rm -rf catalog-dist
+          pnpm catalog:build
+          if [ "$first" != "$(cat catalog-dist/v1/latest.json)" ]; then
+            echo "::error::two builds of the same input produced different output"
+            exit 1
+          fi
+          bytes=$(gzip -9 -c catalog-dist/v1/catalog-*.json | wc -c)
+          echo "catalog payload: ${bytes} bytes gzipped"
+          if [ "$bytes" -gt 262144 ]; then
+            echo "::error::the catalog payload is over 256 KiB gzipped — time to split the repository"
+            exit 1
+          fi
+
   boundary:
     # The client/server boundary is load-bearing: src/web is bundled for the browser. Prove the
     # lint rule actually fails rather than trusting that it is configured.

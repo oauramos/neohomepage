@@ -18,7 +18,8 @@
     "catalog:build": "node scripts/catalog-build.ts",
     "neo": "node src/cli/neo.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "catalog:docs": "node scripts/catalog-docs.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

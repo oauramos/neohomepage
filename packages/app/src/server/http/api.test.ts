@@ -42,6 +42,59 @@ async function mockService(): Promise<number> {
   return address.port
 }
 
+/**
+ * Two upstreams behind one port: a Sonarr-shaped calendar and an iCalendar feed.
+ *
+ * Both on the same server so the test can bind two sources to one composite widget with two
+ * targets that differ only in `widgetType` and base path — which is exactly the case that would
+ * break if the source kind were chosen by anything other than the target's own shape.
+ */
+async function mockCalendarHost(): Promise<number> {
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith('/api/v3/calendar') === true) {
+      if (req.headers['x-api-key'] !== 'GOOD') {
+        res.writeHead(401)
+        res.end('no')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify([
+          { title: 'The Episode', airDateUtc: '2026-09-08T01:00:00Z', series: { title: 'A Show' } },
+        ]),
+      )
+      return
+    }
+    if (req.url === '/bins.ics') {
+      res.writeHead(200, { 'content-type': 'text/calendar' })
+      res.end(
+        [
+          'BEGIN:VCALENDAR',
+          'VERSION:2.0',
+          'PRODID:-//test//EN',
+          'BEGIN:VEVENT',
+          'UID:bin@example.invalid',
+          'SUMMARY:Bin collection',
+          'DTSTART:20260907T070000Z',
+          'DTEND:20260907T073000Z',
+          'END:VEVENT',
+          'END:VCALENDAR',
+          '',
+        ].join('\r\n'),
+      )
+      return
+    }
+    res.writeHead(404)
+    res.end('no')
+  })
+  upstream = server
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no address')
+  return address.port
+}
+
 async function request(
   method: string,
   path: string,
@@ -438,5 +491,131 @@ describe('every mutating route is behind the write gate', () => {
       const response = await app.request(path, { headers: { 'sec-fetch-site': 'cross-site' } })
       expect(response.status, path).toBe(200)
     }
+  })
+})
+
+describe('a composite widget, end to end', () => {
+  it('binds two sources of different shapes and merges them into one tile', async () => {
+    const port = await mockCalendarHost()
+
+    const sonarr = await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { scheme: 'http', host: '127.0.0.1', port },
+      secrets: { apiKey: 'GOOD' },
+    })
+    expect(sonarr.status).toBe(201)
+
+    const feed = await request('POST', '/api/targets', {
+      label: 'Bins',
+      widgetType: 'ics-feed',
+      // The feed's whole path lives in the target, which is what the bare "/" operation path is
+      // for. Through a config hole it would be percent-encoded into one segment.
+      base: { scheme: 'http', host: '127.0.0.1', port, basePath: '/bins.ics' },
+    })
+    expect(feed.status).toBe(201)
+
+    const created = await request('POST', '/api/widgets', {
+      type: 'unified-calendar',
+      bindings: {
+        calendars: [(sonarr.body as { id: string }).id, (feed.body as { id: string }).id],
+      },
+    })
+    expect(created.status).toBe(201)
+    const widgetId = (created.body as { id: string }).id
+
+    // The config on disk names two targets and no URL, path, header or method — and stays sparse:
+    // `targetId` is absent rather than written as null, because it equals the schema default.
+    const onDisk = JSON.parse(
+      await readFile(join(dataDir, 'config', 'widgets', `${widgetId}.json`), 'utf8'),
+    ) as Record<string, unknown>
+    expect((onDisk.bindings as Record<string, string[]>).calendars).toHaveLength(2)
+    expect(onDisk).not.toHaveProperty('targetId')
+    expect(JSON.stringify(onDisk)).not.toMatch(/http|api\/v3|x-api-key/i)
+
+    await context.reload()
+    expect(await context.refreshWidget(widgetId)).toBe(true)
+
+    const data = context.widgetData() as Record<
+      string,
+      { projection: { items: { title: string }[]; status: string } | null; sources: unknown }
+    >
+    const composed = data[widgetId]
+    expect(composed?.sources).toEqual({ total: 2, ok: 2 })
+    // One item from each source, and in date order across the two — which is the whole feature.
+    expect(composed?.projection?.items.map((item) => item.title)).toEqual([
+      'Bin collection',
+      'A Show',
+    ])
+    expect(composed?.projection?.status).toBe('ok')
+  })
+
+  it('renders the sources that answered when one is down', async () => {
+    const port = await mockCalendarHost()
+
+    const good = await request('POST', '/api/targets', {
+      label: 'Bins',
+      widgetType: 'ics-feed',
+      base: { scheme: 'http', host: '127.0.0.1', port, basePath: '/bins.ics' },
+    })
+    const bad = await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { scheme: 'http', host: '127.0.0.1', port },
+      secrets: { apiKey: 'WRONG' },
+    })
+
+    const created = await request('POST', '/api/widgets', {
+      type: 'unified-calendar',
+      bindings: {
+        calendars: [(good.body as { id: string }).id, (bad.body as { id: string }).id],
+      },
+    })
+    const widgetId = (created.body as { id: string }).id
+
+    await context.reload()
+    await context.refreshWidget(widgetId)
+
+    const data = context.widgetData() as Record<
+      string,
+      { projection: { items: unknown[]; status: string } | null; meta: { errorCode?: string } }
+    >
+    // One dead Radarr must not blank out the calendars that answered — the whole reason
+    // `compose.partial` exists.
+    expect(data[widgetId]?.projection?.items).toHaveLength(1)
+    expect(data[widgetId]?.projection?.status).toBe('degraded')
+    expect(data[widgetId]?.meta.errorCode).toBe('partial')
+  })
+
+  it('removes every bound target and its credentials when the widget is deleted', async () => {
+    const port = await mockCalendarHost()
+    const sonarr = await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { scheme: 'http', host: '127.0.0.1', port },
+      secrets: { apiKey: 'GOOD' },
+    })
+    const feed = await request('POST', '/api/targets', {
+      label: 'Bins',
+      widgetType: 'ics-feed',
+      base: { scheme: 'http', host: '127.0.0.1', port, basePath: '/bins.ics' },
+    })
+    const created = await request('POST', '/api/widgets', {
+      type: 'unified-calendar',
+      bindings: {
+        calendars: [(sonarr.body as { id: string }).id, (feed.body as { id: string }).id],
+      },
+    })
+
+    const deleted = await request('DELETE', `/api/widgets/${(created.body as { id: string }).id}`)
+    expect(deleted.status).toBe(200)
+    // Cleaning up only `targetId` would leave a deleted calendar's API keys on disk forever.
+    expect((deleted.body as { orphaned: { targets: string[] } }).orphaned.targets).toHaveLength(2)
+    expect(await readdir(join(dataDir, 'config', 'targets'))).toEqual([])
+
+    const secrets = JSON.parse(
+      await readFile(join(dataDir, 'secrets', 'secrets.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(Object.keys(secrets)).toEqual([])
   })
 })

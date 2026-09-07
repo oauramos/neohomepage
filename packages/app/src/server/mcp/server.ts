@@ -273,6 +273,12 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         page: z.string().max(64).optional(),
         title: z.string().max(64).optional(),
         targetId: z.string().max(64).optional(),
+        /**
+         * Composite widget types bind targets by ROLE instead of through `targetId`. An agent that
+         * only knew about `targetId` would create a calendar bound to nothing and report success,
+         * so `get_widget_schema` names the roles and this is where they are filled.
+         */
+        bindings: z.record(z.string().max(32), z.array(z.string().max(64)).max(16)).optional(),
         config: z
           .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
           .optional(),
@@ -284,6 +290,22 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     async (input) => {
       const manifest = context.catalog().get(input.type)
       if (manifest === undefined) return fail(`no widget type "${input.type}" — try search_catalog`)
+
+      // Refuse a composite with an unsatisfied role here rather than creating a tile that fetches
+      // nothing: the agent gets a message naming the role, not a silently empty widget.
+      const view = manifestView(manifest)
+      for (const role of view.roles) {
+        const bound = input.bindings?.[role.name]?.length ?? 0
+        if (bound < role.min) {
+          return fail(
+            `"${input.type}" needs at least ${role.min} target bound to role "${role.name}" ` +
+              `(${role.label}); call get_widget_schema to see which kinds it accepts`,
+          )
+        }
+        if (bound > role.max) {
+          return fail(`role "${role.name}" accepts at most ${role.max} targets`)
+        }
+      }
 
       const id = newId('w')
       const refused: string[] = []
@@ -303,6 +325,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
                 type: manifest.id,
                 title: input.title ?? null,
                 targetId: input.targetId ?? null,
+                bindings: input.bindings ?? {},
                 config: input.config ?? {},
                 catalogRev: manifest.version,
               }),

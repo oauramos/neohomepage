@@ -29,7 +29,14 @@ export const dashboardSchema = z
     pages: z.array(idSchema).min(1).default(['home']),
     catalog: z
       .object({
-        url: z.url().default('https://catalog.neohomepage.dev/v1/latest.json'),
+        /**
+         * A path on the docs domain, not a `*.github.io/<repo>/` URL, and not yet a subdomain.
+         *
+         * One GitHub Pages site per repository, so the catalog ships alongside the docs. That is
+         * safe to bake in because the pointer carries `movedTo`: when the catalog moves to its own
+         * repository and host, this URL keeps answering and says where the payload went.
+         */
+        url: z.url().default('https://neohomepage.dev/catalog/v1/latest.json'),
         pinnedRelease: z.string().max(64).nullable().default(null),
         autoUpdate: z.boolean().default(true),
       })
