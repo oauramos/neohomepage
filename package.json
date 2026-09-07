@@ -21,7 +21,9 @@
     "catalog:test": "pnpm --filter @neohomepage/app catalog test",
     "catalog:build": "pnpm --filter @neohomepage/app catalog:build",
     "catalog:docs": "pnpm --filter @neohomepage/app catalog:docs",
-    "e2e": "pnpm --filter @neohomepage/app e2e"
+    "e2e": "pnpm --filter @neohomepage/app e2e",
+    "budgets": "pnpm --filter @neohomepage/app budgets",
+    "drill": "pnpm --filter @neohomepage/app drill"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

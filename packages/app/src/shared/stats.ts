@@ -25,7 +25,7 @@ export function percentile(values: readonly number[], p: number): number {
  * Growth from the first window to the last, as a percentage of the first.
  *
  * This is the number that matters for a dashboard left open on a wall tablet for a month: a
- * process can sit comfortably under its budget and still be leaking. Comparing窗 means rather
+ * process can sit comfortably under its budget and still be leaking. Comparing window means rather
  * than single samples keeps GC sawtooth from being read as a trend.
  */
 export function drift(values: readonly number[], windowFraction = 0.25): number {

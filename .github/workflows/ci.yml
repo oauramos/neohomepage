@@ -63,6 +63,39 @@ jobs:
             exit 1
           fi
 
+  budgets:
+    # Two of the three numbers the plan commits to. The third — RSS under a soak — needs real
+    # linux/arm64 under a cgroup and is measured by scripts/memcheck.ts on hardware, because a
+    # memory figure taken on a GitHub runner would be a number about GitHub.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Cold start and publish latency, at 60 widgets
+        run: pnpm budgets --runs=3
+
+  restore-drill:
+    # The backup claim, executed rather than described: build a dashboard, commit /data, clone it
+    # onto an empty directory, boot with the credential in the environment only, and require the
+    # resolved tree and the served board to come back identical.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm drill
+
   browser:
     # The checks that need a real layout engine: axe, the keyboard-only edit session, the board
     # with JavaScript disabled, and tap targets at phone width. Everything else is in vitest,
