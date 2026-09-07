@@ -68,9 +68,13 @@ services:
     # can reach that, so the entrypoint fixes it on first boot and drops to an unprivileged user.
     # CHOWN to take ownership, SETUID and SETGID to give it up again.
     #
-    # If you would rather have no root in the picture at all: create the directory yourself with
-    # `mkdir -p data && sudo chown -R 1000:1000 data`, then remove this whole `cap_add` block and
-    # add `user: "1000:1000"`. The entrypoint detects that and does nothing but start the server.
+    # If you would rather have no root in the picture at all, remove this whole `cap_add` block
+    # and add `user: "1000:1000"`. The entrypoint detects that and does nothing but start the
+    # server. Two ways to give it a directory it can already write:
+    #
+    #   - a named volume (`neohomepage-data:/data` plus a top-level `volumes:` key) — it inherits
+    #     the image's ownership, so this needs nothing else. You lose `git init` on a real path.
+    #   - a bind mount you own: `mkdir -p data && sudo chown -R 1000:1000 data` on the host.
     cap_add:
       - CHOWN
       - SETUID
