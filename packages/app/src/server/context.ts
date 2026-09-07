@@ -7,7 +7,12 @@ import { overridesSchema, EMPTY_OVERRIDES, type Overrides } from './config/overr
 import { env } from './env.ts'
 import { executeOperation } from './fetcher/execute.ts'
 import { EventHub } from './http/events.ts'
-import { publish, type PublishResult } from './render/publish.ts'
+import {
+  assetsFingerprint,
+  currentAssetTags,
+  publish,
+  type PublishResult,
+} from './render/publish.ts'
 import { resolve as resolveTree, type Resolved } from './resolve/resolve.ts'
 import { PollScheduler } from './scheduler/scheduler.ts'
 import { fetchKey } from './scheduler/key.ts'
@@ -37,6 +42,7 @@ export type AppContext = {
   state(): Promise<{ resolved: Resolved; revision: string }>
   widgetData(): Record<string, unknown>
   pending(): Promise<{ pending: boolean; generation: number | null; revision: string }>
+  refreshWidget(widgetId: string): Promise<boolean>
   requestPublish(actor: string, mode?: PublishMode): Promise<PublishResult | null>
   publishNow(actor: string, label?: string): Promise<PublishResult>
   shutdown(): Promise<void>
@@ -226,6 +232,22 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       return { resolved: resolved as Resolved, revision }
     },
 
+    /**
+     * Refresh one widget now.
+     *
+     * The caller names a WIDGET, never a URL. The server resolves it to a fetch key and the key to
+     * a request — which is the whole invariant, stated as an endpoint.
+     */
+    async refreshWidget(widgetId: string) {
+      if (resolved === null) await rebuild()
+      const widget = (resolved as Resolved).widgets.find((candidate) => candidate.id === widgetId)
+      if (widget === undefined) return false
+      const key = widgetKeyFor(widget)
+      if (key === null) return false
+      await scheduler.refreshNow(key)
+      return true
+    },
+
     widgetData() {
       const data: Record<string, unknown> = {}
       if (resolved === null) return data
@@ -258,8 +280,13 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       const current = await generations.current()
       if (current === null) return { pending: true, generation: null, revision }
       const meta = await generations.meta(current)
+      // Two ways to be out of date: the config moved, or the app did. The second is what an
+      // upgrade looks like — same config, different bundle filenames — and missing it leaves the
+      // published page loading a script the new build deleted.
+      const assetsHash = assetsFingerprint(await currentAssetTags(options.webDistDir))
       return {
-        pending: meta === null || meta.configRevision !== revision,
+        pending:
+          meta === null || meta.configRevision !== revision || meta.assetsHash !== assetsHash,
         generation: current,
         revision,
       }

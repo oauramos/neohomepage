@@ -35,7 +35,7 @@ function renderValue(value: unknown): ReactNode {
 }
 
 function statsBlock(envelope: ProjectionEnvelope, template: string): ReactNode {
-  const stats = envelope.projection.stats
+  const stats = envelope.projection?.stats
   if (stats === undefined || stats.length === 0) return null
   return h(
     'dl',
@@ -54,7 +54,7 @@ function statsBlock(envelope: ProjectionEnvelope, template: string): ReactNode {
 }
 
 function itemsBlock(envelope: ProjectionEnvelope): ReactNode {
-  const items = envelope.projection.items
+  const items = envelope.projection?.items
   if (items === undefined || items.length === 0) return null
   return h(
     'ul',
@@ -74,7 +74,7 @@ function itemsBlock(envelope: ProjectionEnvelope): ReactNode {
 }
 
 function gaugesBlock(envelope: ProjectionEnvelope): ReactNode {
-  const gauges = envelope.projection.gauges
+  const gauges = envelope.projection?.gauges
   if (gauges === undefined || gauges.length === 0) return null
   return h(
     'div',
@@ -104,6 +104,75 @@ function gaugesBlock(envelope: ProjectionEnvelope): ReactNode {
   )
 }
 
+/** A status pill: up, degraded, down, or nothing known yet. */
+function statusBlock(envelope: ProjectionEnvelope): ReactNode {
+  const status = envelope.projection?.status ?? 'unknown'
+  const label = status === 'ok' ? 'up' : status === 'down' ? 'down' : status
+  return h('div', { className: 'nh-status', 'data-neo-status': status }, [
+    h('span', { className: 'nh-status-dot', key: 'dot', 'aria-hidden': 'true' }),
+    h('span', { className: 'nh-status-label', key: 'label' }, label),
+  ])
+}
+
+/** A plain link to the service, for widgets that are a bookmark rather than a reading. */
+function linkBlock(widget: ResolvedWidget, envelope: ProjectionEnvelope | undefined): ReactNode {
+  const first = envelope?.projection?.items?.[0]
+  const href = first?.href
+  const label = first?.subtitle ?? widget.title
+  return href === undefined
+    ? h('p', { className: 'nh-placeholder' }, label)
+    : h('a', { className: 'nh-link', href, rel: 'noreferrer' }, label)
+}
+
+/**
+ * The five presentation templates.
+ *
+ * Closed on purpose, with an exhaustive switch: this is what fixes the number of React components
+ * while leaving the number of integrations unbounded. A manifest that names a template this build
+ * does not compile in is refused when the catalog is loaded, not discovered here as a blank tile.
+ */
+export const TEMPLATES = ['stat-grid', 'list', 'gauge-set', 'status-badge', 'link-tile'] as const
+export type TemplateName = (typeof TEMPLATES)[number]
+
+export function isTemplate(value: string): value is TemplateName {
+  return (TEMPLATES as readonly string[]).includes(value)
+}
+
+function renderTemplate(
+  template: TemplateName,
+  widget: ResolvedWidget,
+  envelope: ProjectionEnvelope | undefined,
+): ReactNode {
+  if (template === 'link-tile') return linkBlock(widget, envelope)
+  // No envelope means nothing has been fetched yet; a null projection means it was fetched and
+  // failed before ever succeeding. Both render as a placeholder, and the tile's chip carries the
+  // error code — reading through either one is what crashed the first paint.
+  if (envelope === undefined || envelope.projection === null) {
+    return h(
+      'p',
+      { className: 'nh-placeholder' },
+      envelope?.meta.errorCode === undefined ? 'No data yet' : 'Unavailable',
+    )
+  }
+
+  switch (template) {
+    case 'stat-grid':
+      return (
+        statsBlock(envelope, template) ?? h('p', { className: 'nh-placeholder' }, 'No readings')
+      )
+    case 'list':
+      return [statsBlock(envelope, template), itemsBlock(envelope)]
+    case 'gauge-set':
+      return gaugesBlock(envelope) ?? h('p', { className: 'nh-placeholder' }, 'No gauges')
+    case 'status-badge':
+      return [statusBlock(envelope), statsBlock(envelope, template)]
+    default: {
+      const exhaustive: never = template
+      throw new Error(`unhandled template ${String(exhaustive)}`)
+    }
+  }
+}
+
 export function widgetTile(
   widget: ResolvedWidget,
   envelope: ProjectionEnvelope | undefined,
@@ -113,9 +182,9 @@ export function widgetTile(
     ? // A widget whose type is missing from the catalog renders as a labelled placeholder.
       // Vanishing would read as data loss; this reads as "install something".
       h('p', { className: 'nh-placeholder' }, `Unknown widget type "${widget.type}"`)
-    : envelope === undefined
-      ? h('p', { className: 'nh-placeholder' }, 'No data yet')
-      : [statsBlock(envelope, widget.template), gaugesBlock(envelope), itemsBlock(envelope)]
+    : isTemplate(widget.template)
+      ? renderTemplate(widget.template, widget, envelope)
+      : h('p', { className: 'nh-placeholder' }, `Unsupported layout "${widget.template}"`)
 
   return h(
     'article',
@@ -123,6 +192,7 @@ export function widgetTile(
       key: widget.id,
       'data-neo-i': widget.id,
       'data-neo-state': state,
+      'data-neo-template': widget.template,
       className: 'nh-tile',
       'aria-labelledby': `${widget.id}-title`,
     },

@@ -3,51 +3,42 @@ import tseslint from 'typescript-eslint'
 
 /**
  * The client/server boundary is enforced here, not by a package split.
- * `src/web/**` is bundled for the browser: a `node:` builtin or a reach into
- * `src/server/**` must fail lint, not fail at runtime in someone's homelab.
+ *
+ * `src/web` is bundled for the browser and `src/shared` is pulled in with it, so neither may take
+ * a VALUE import from a Node builtin or from `src/server` — that is what would put server code in
+ * the bundle. Type-only imports are allowed everywhere, because they vanish at compile time and
+ * describing a server-owned shape is exactly what `src/shared` is for.
+ *
+ * Tests are exempt: they run in Node and are never bundled, so a test asserting that the server
+ * and the browser agree has to be able to import both.
  */
 const NODE_BUILTINS = [
-  'assert',
-  'buffer',
-  'child_process',
-  'cluster',
-  'crypto',
-  'dgram',
-  'dns',
-  'fs',
-  'http',
-  'http2',
-  'https',
-  'inspector',
-  'module',
-  'net',
-  'os',
-  'path',
-  'perf_hooks',
-  'process',
-  'querystring',
-  'readline',
-  'repl',
-  'stream',
-  'string_decoder',
-  'timers',
-  'tls',
-  'tty',
-  'url',
-  'util',
-  'v8',
-  'vm',
-  'worker_threads',
-  'zlib',
+  'assert', 'buffer', 'child_process', 'cluster', 'crypto', 'dgram', 'dns', 'fs', 'http',
+  'http2', 'https', 'inspector', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
+  'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'timers', 'tls', 'tty',
+  'url', 'util', 'v8', 'vm', 'worker_threads', 'zlib',
 ]
+
+function boundaryRule(message) {
+  return [
+    'error',
+    {
+      paths: NODE_BUILTINS.map((name) => ({ name, message, allowTypeImports: true })),
+      patterns: [
+        { group: ['node:*'], message, allowTypeImports: true },
+        { group: ['**/server/**'], message, allowTypeImports: true },
+      ],
+    },
+  ]
+}
+
+const WEB_MESSAGE =
+  'src/web is bundled for the browser: no Node builtins and no value imports from src/server. ' +
+  'Share types and pure helpers through src/shared instead.'
 
 const SHARED_MESSAGE =
   'src/shared is bundled into the browser through src/web: type-only imports from src/server are ' +
   'fine because they vanish at runtime, but a value import would pull server code into the bundle.'
-
-const BOUNDARY_MESSAGE =
-  'src/web is bundled for the browser: no Node builtins, no imports from src/server. ' +
-  'Share types and pure helpers through src/shared instead.'
 
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/node_modules/**', 'docs/.vitepress/cache/**', '**/*.d.ts'] },
@@ -79,40 +70,15 @@ export default tseslint.config(
     },
   },
   {
-    // src/shared is bundled into the browser through src/web, so the same ban applies — except
-    // for type-only imports, which vanish at runtime and let shared describe server-owned shapes
-    // without pulling any of that code into the bundle.
     files: ['packages/app/src/shared/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/no-restricted-imports': [
-        'error',
-        {
-          paths: NODE_BUILTINS.map((name) => ({
-            name,
-            message: SHARED_MESSAGE,
-            allowTypeImports: true,
-          })),
-          patterns: [
-            { group: ['node:*'], message: SHARED_MESSAGE, allowTypeImports: true },
-            { group: ['**/server/**'], message: SHARED_MESSAGE, allowTypeImports: true },
-          ],
-        },
-      ],
-    },
+    rules: { '@typescript-eslint/no-restricted-imports': boundaryRule(SHARED_MESSAGE) },
   },
   {
     files: ['packages/app/src/web/**/*.{ts,tsx}'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: NODE_BUILTINS.map((name) => ({ name, message: BOUNDARY_MESSAGE })),
-          patterns: [
-            { group: ['node:*'], message: BOUNDARY_MESSAGE },
-            { group: ['**/server/**', '../server/*'], message: BOUNDARY_MESSAGE },
-          ],
-        },
-      ],
-    },
+    rules: { '@typescript-eslint/no-restricted-imports': boundaryRule(WEB_MESSAGE) },
+  },
+  {
+    files: ['**/*.test.{ts,tsx}', '**/*.smoke.test.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-restricted-imports': 'off' },
   },
 )

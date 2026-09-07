@@ -1,4 +1,14 @@
 import type { Theme } from '../config/schema.ts'
+import {
+  DARK_DEFAULTS,
+  LIGHT_DEFAULTS,
+  resolveTokens,
+  THEME_TOKENS,
+  type ThemeToken,
+} from '../../shared/theme-tokens.ts'
+
+export { DARK_DEFAULTS, LIGHT_DEFAULTS, THEME_TOKENS }
+export type { ThemeToken }
 
 /**
  * Theme tokens and the base stylesheet baked into a published generation.
@@ -8,53 +18,6 @@ import type { Theme } from '../config/schema.ts'
  * paths to one appearance, which is exactly the shape that produced the layout parity test, so
  * they get one too: `THEME_TOKENS` is the single list both sides iterate.
  */
-
-export const THEME_TOKENS = [
-  'background',
-  'foreground',
-  'surface',
-  'surface-foreground',
-  'muted',
-  'muted-foreground',
-  'border',
-  'accent',
-  'accent-foreground',
-  'ok',
-  'warn',
-  'bad',
-] as const
-
-export type ThemeToken = (typeof THEME_TOKENS)[number]
-
-export const LIGHT_DEFAULTS: Record<ThemeToken, string> = {
-  background: 'oklch(0.985 0 0)',
-  foreground: 'oklch(0.21 0.006 285)',
-  surface: 'oklch(1 0 0)',
-  'surface-foreground': 'oklch(0.21 0.006 285)',
-  muted: 'oklch(0.96 0.002 286)',
-  'muted-foreground': 'oklch(0.53 0.012 286)',
-  border: 'oklch(0.91 0.004 286)',
-  accent: 'oklch(0.55 0.19 258)',
-  'accent-foreground': 'oklch(0.99 0 0)',
-  ok: 'oklch(0.63 0.16 149)',
-  warn: 'oklch(0.72 0.17 71)',
-  bad: 'oklch(0.58 0.22 27)',
-}
-
-export const DARK_DEFAULTS: Record<ThemeToken, string> = {
-  background: 'oklch(0.16 0.004 285)',
-  foreground: 'oklch(0.96 0.001 286)',
-  surface: 'oklch(0.21 0.006 285)',
-  'surface-foreground': 'oklch(0.96 0.001 286)',
-  muted: 'oklch(0.27 0.006 286)',
-  'muted-foreground': 'oklch(0.71 0.013 286)',
-  border: 'oklch(0.31 0.007 286)',
-  accent: 'oklch(0.7 0.15 254)',
-  'accent-foreground': 'oklch(0.16 0.004 285)',
-  ok: 'oklch(0.72 0.15 149)',
-  warn: 'oklch(0.79 0.16 71)',
-  bad: 'oklch(0.7 0.19 22)',
-}
 
 function block(selector: string, tokens: Record<string, string>): string {
   const declarations = Object.entries(tokens)
@@ -72,11 +35,12 @@ function block(selector: string, tokens: Record<string, string>): string {
  * setting still follows the OS.
  */
 export function themeVariables(theme: Theme): string {
-  const light = { ...LIGHT_DEFAULTS, ...theme.cssVars.light }
-  const dark = { ...DARK_DEFAULTS, ...theme.cssVars.dark }
-  const shared = theme.cssVars.theme
+  // Both emitted blocks come from resolveTokens, the same function the browser calls when the
+  // editor changes a colour. That is what makes the parity test meaningful rather than decorative.
+  const light = resolveTokens(theme, 'light')
+  const dark = resolveTokens(theme, 'dark')
 
-  const parts = [block(':root', { ...light, ...shared })]
+  const parts = [block(':root', light)]
   parts.push(
     `@media (prefers-color-scheme: dark){${block(':root:not([data-theme="light"])', dark)}}`,
   )

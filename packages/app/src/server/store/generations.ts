@@ -19,6 +19,14 @@ export type GenerationMeta = {
   readonly label: string
   readonly actor: string
   readonly configRevision: string
+  /**
+   * Fingerprint of the built asset tags this generation embedded.
+   *
+   * Generations are cut when the CONFIG changes, but an app upgrade changes the bundle filenames
+   * without touching config — leaving every published page pointing at a script that no longer
+   * exists. Recording the fingerprint is what lets the boot check notice.
+   */
+  readonly assetsHash: string
 }
 
 const GENERATION_DIGITS = 6
@@ -91,6 +99,7 @@ export class Generations {
     readonly configDir: string
     readonly configRevision: string
     readonly actor: string
+    readonly assetsHash?: string
     readonly label?: string
   }): Promise<GenerationMeta> {
     const existing = await this.list()
@@ -112,6 +121,7 @@ export class Generations {
       label: options.label ?? '',
       actor: options.actor,
       configRevision: options.configRevision,
+      assetsHash: options.assetsHash ?? '',
     }
     await writeFileDurable(join(directory, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`)
     await writeFileDurable(this.pointer, `${next}\n`)

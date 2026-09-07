@@ -42,6 +42,7 @@ export type PublishInput = {
 
 export type PublishResult = {
   readonly generation: number
+  readonly assetsHash: string
   readonly html: string
   readonly bytes: number
   readonly durationMs: number
@@ -179,6 +180,7 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     configDir: input.configDir,
     configRevision: input.configRevision,
     actor: input.actor,
+    assetsHash: assetsFingerprint(assets),
     ...(input.label === undefined ? {} : { label: input.label }),
   })
 
@@ -191,13 +193,25 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
 
   return {
     generation: meta.generation,
+    assetsHash: meta.assetsHash,
     html,
     bytes: Buffer.byteLength(html, 'utf8'),
     durationMs: Math.round(performance.now() - startedAt),
   }
 }
 
-/** Content hash of a config tree, for the "N pending changes" badge. */
-export function configHash(revision: string): string {
-  return createHash('sha256').update(revision).digest('hex').slice(0, 16)
+/**
+ * Fingerprint the asset tags a generation embedded.
+ *
+ * Compared on boot against the current build: an app upgrade changes the bundle filenames without
+ * touching config, and without this the published page keeps pointing at a script that was deleted
+ * by the new build.
+ */
+export function assetsFingerprint(assets: string): string {
+  return createHash('sha256').update(assets).digest('hex').slice(0, 16)
+}
+
+/** Read the asset tags the current build would emit, for the boot-time staleness check. */
+export async function currentAssetTags(webDistDir: string | undefined): Promise<string> {
+  return assetTags(webDistDir)
 }

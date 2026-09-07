@@ -56,9 +56,16 @@ export const projectionSchema = z.object({
 
 export type Projection = z.infer<typeof projectionSchema>
 
-/** Runtime envelope: what the browser actually receives for one widget. */
+/**
+ * Runtime envelope: what the browser actually receives for one widget.
+ *
+ * `projection` is nullable, and saying so is the point. A widget that has never succeeded has no
+ * projection to show — only an error code — and a type that claimed otherwise produced exactly one
+ * bug: the renderer read `.stats` off null and took the whole page down on first paint, before any
+ * service had answered.
+ */
 export type ProjectionEnvelope = {
-  readonly projection: Projection
+  readonly projection: Projection | null
   readonly meta: {
     readonly fetchedAt: string
     readonly ageMs: number

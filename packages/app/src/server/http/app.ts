@@ -110,6 +110,19 @@ export function createApp(options: AppOptions): Hono {
     })
   })
 
+  /**
+   * Refresh one widget.
+   *
+   * The client names a widget id. It cannot name a URL, a path, a header or a method — the server
+   * derives all four from the widget's target and its manifest. That is the invariant the whole
+   * egress design rests on, and this is the only shape of request that can reach an upstream.
+   */
+  app.post('/api/widgets/:id/refresh', async (c) => {
+    const ok = await context.refreshWidget(c.req.param('id'))
+    if (!ok) return c.json({ error: 'unknown widget' }, 404)
+    return c.json({ data: context.widgetData() })
+  })
+
   app.post('/api/publish', async (c) => {
     const result = await context.publishNow('ui')
     return c.json({

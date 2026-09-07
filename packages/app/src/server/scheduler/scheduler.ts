@@ -152,6 +152,19 @@ export class PollScheduler {
     return this.cache.view(key, this.#deps.now())
   }
 
+  /**
+   * Fetch one key immediately, ignoring its backoff.
+   *
+   * This is what the refresh button and "test connection" call. Backoff exists to stop the app
+   * hammering a dead service on its own; a person explicitly asking is different, and making them
+   * wait out a fifteen-minute ladder after fixing the actual problem would be absurd.
+   */
+  async refreshNow(key: string): Promise<void> {
+    const registration = this.#registrations.get(key)
+    if (registration === undefined || registration.inFlight) return
+    await this.#run(key, registration)
+  }
+
   /** Run everything currently due. Exposed so tests drive time rather than wait for it. */
   async tick(): Promise<void> {
     const now = this.#deps.now()
