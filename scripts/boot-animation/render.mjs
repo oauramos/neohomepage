@@ -29,7 +29,7 @@ const OUT = resolve(ROOT, 'media')
 const FRAMES = resolve(ROOT, 'media/.frames')
 
 const FPS = 25
-const DURATION = 7.5
+const DURATION = 8.15
 const WIDTH = 640
 const HEIGHT = 480
 

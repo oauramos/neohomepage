@@ -101,9 +101,13 @@
   const easeOut = (x) => 1 - Math.pow(1 - x, 3)
   const grey = (v) => `rgb(${v},${v},${v})`
 
-  const ZOOM_END = 1.55
-  const CROSS_END = 2.45
-  const DURATION = 7.5
+  /* The cabinet holds on black before it does anything. Faithful to the reference, but shortened:
+     it runs 1.1s there, and a looping GIF in a README that opens on a second of nothing reads as
+     a broken image. Long enough to be a beat, short enough not to look empty. */
+  const BLACK_HOLD = Number(P.get('hold') ?? 0.6)
+  const ZOOM_END = BLACK_HOLD + 1.55
+  const CROSS_END = ZOOM_END + 0.9
+  const DURATION = CROSS_END + 5.1
 
   /**
    * The whole sequence as a pure function of time.
@@ -125,6 +129,20 @@
    * headless capture spaces the frames unevenly and shows at the loop seam.
    */
   window.renderAt = function (t) {
+    // The opening hold. The reference cuts from black to white rather than fading, so this does
+    // too — everything below simply stays at its t=0 state until the cut.
+    if (t < BLACK_HOLD) {
+      stage.style.background = '#000'
+      mark.style.opacity = '0'
+      tag1.style.clipPath = 'inset(0 100% 0 0)'
+      tag2.style.clipPath = 'inset(0 100% 0 0)'
+      maker.style.opacity = '0'
+      scan.style.opacity = '1'
+      stage.style.opacity = '1'
+      return
+    }
+    mark.style.opacity = '1'
+
     // Two opposite ramps. Before the crossing: white ground, black mark. After: the reverse.
     const cross = span(t, ZOOM_END, CROSS_END)
     const ground = Math.round(255 * (1 - cross))
@@ -139,17 +157,42 @@
     // and ink are the same value, so there is nothing on screen to see it happen.
     const mirrored = cross < 0.5
     // Growing from almost nothing, and it keeps the size it reaches.
-    const zoom = 0.07 + 0.93 * easeOut(span(t, 0.0, ZOOM_END))
+    const zoom = 0.07 + 0.93 * easeOut(span(t, BLACK_HOLD, ZOOM_END))
     mark.style.transform = `scaleX(${mirrored ? -zoom : zoom}) scaleY(${zoom})`
 
+    const darkness = 1 - ground / 255
+
     // Scanlines belong to the dark field; on the white opening the reference shows none.
-    scan.style.opacity = String(1 - ground / 255)
+    scan.style.opacity = String(darkness)
+
+    /* Bloom, and this is why the mark looks heavier on black than on white.
+     *
+     * Measuring the reference settles it: the same glyphs at the same scale have visibly thinner
+     * strokes in the black-on-white phase than in the white-on-black one. A phosphor spreads a
+     * bright stroke and does nothing for a dark one, so the apparent weight is the display, not
+     * the typeface. Reaching for a fatter Didone would have matched the final frame and made the
+     * opening wrong.
+     *
+     * Tied to darkness, so it arrives exactly as the ground goes down. */
+    const glow = darkness
+    mark.style.textShadow = glow < 0.02 ? 'none' :
+      `0 0 ${1.2 * glow}px rgba(255,255,255,${0.95 * glow}),` +
+      `0 0 ${3.5 * glow}px rgba(255,255,255,${0.45 * glow}),` +
+      `0 0 ${9 * glow}px rgba(255,255,255,${0.18 * glow})`
+    const smallGlow = glow < 0.02 ? 'none' :
+      `0 0 ${1 * glow}px rgba(255,255,255,${0.7 * glow}),` +
+      `0 0 ${3 * glow}px rgba(255,255,255,${0.28 * glow})`
+    tag1.style.textShadow = smallGlow
+    tag2.style.textShadow = smallGlow
+    maker.style.textShadow = glow < 0.02 ? 'none' :
+      `0 0 ${1.5 * glow}px rgba(80,150,255,${0.8 * glow}), 0 0 ${5 * glow}px rgba(40,110,230,${0.4 * glow})`
 
     // The spec lines wipe in from the left, the second overlapping the first so the pair reads as
     // one gesture rather than two events.
-    tag1.style.clipPath = `inset(0 ${100 - easeOut(span(t, 2.6, 3.6)) * 100}% 0 0)`
-    tag2.style.clipPath = `inset(0 ${100 - easeOut(span(t, 3.45, 4.45)) * 100}% 0 0)`
-    maker.style.opacity = String(easeOut(span(t, 4.6, 5.2)))
+    const after = (a, b) => span(t, CROSS_END + a, CROSS_END + b)
+    tag1.style.clipPath = `inset(0 ${100 - easeOut(after(0.15, 1.15)) * 100}% 0 0)`
+    tag2.style.clipPath = `inset(0 ${100 - easeOut(after(1.0, 2.0)) * 100}% 0 0)`
+    maker.style.opacity = String(easeOut(after(2.15, 2.75)))
 
     // Fade to black at the end so the loop closes on itself instead of cutting.
     stage.style.opacity = String(1 - span(t, DURATION - 0.4, DURATION))
