@@ -1,14 +1,17 @@
+import { resolve } from 'node:path'
 import { setTimeout } from 'node:timers'
 import { serve } from '@hono/node-server'
 import { createApp } from './http/app.ts'
+import { createContext } from './context.ts'
 import { env } from './env.ts'
 import { seedDataDirectory } from './store/seed.ts'
 import { seedStarterConfig } from './store/starter.ts'
 
 /**
- * Boot order, which later phases fill in:
- *   env -> lock -> migrate -> resolve -> publish -> listen
- * Today it is env -> listen. Keeping the shape visible is cheaper than rediscovering it.
+ * Boot order: env, seed, load, resolve, publish, listen.
+ *
+ * Publishing before listening means the first request is answered by a file that already exists,
+ * rather than by a render happening while someone waits.
  */
 async function main(): Promise<void> {
   // Seeding first means `git init` on the data directory is safe before the user has read
@@ -23,17 +26,42 @@ async function main(): Promise<void> {
   const starter = await seedStarterConfig(env.configDir)
   for (const path of [...seeded, ...starter]) console.log(`seeded ${path}`)
 
-  const app = createApp()
+  const webDistDir =
+    process.env.NEOHOMEPAGE_WEB_DIST ?? resolve(import.meta.dirname, '../../dist/web')
+  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolve(process.cwd(), 'catalog')
 
+  const context = await createContext({
+    catalogDir,
+    webDistDir,
+    ...(process.env.NEOHOMEPAGE_PUBLISH_MODE === 'manual'
+      ? { publishMode: 'manual' as const }
+      : {}),
+  })
+  await context.reload()
+
+  // A generation may be missing (first boot) or stale (someone edited config with the app down).
+  // Either way, publishing now costs milliseconds and means `GET /` serves a file immediately.
+  const pending = await context.pending()
+  if (pending.pending) {
+    const result = await context.publishNow('boot', 'boot')
+    console.log(
+      `published generation ${result.generation} (${result.bytes} bytes, ${result.durationMs}ms)`,
+    )
+  }
+
+  context.scheduler.start()
+  context.watcher.start()
+
+  const app = createApp({ context, webDistDir })
   const server = serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
     console.log(`neohomepage listening on http://${formatHost(info.address)}:${info.port}`)
     console.log(`data dir: ${env.dataDir}`)
   })
 
-  // A container that ignores SIGTERM gets SIGKILLed mid-write. Flushing pending writes lands
-  // with the config store in F4; the handler exists from the start so it is never forgotten.
+  // A container that ignores SIGTERM gets SIGKILLed mid-write.
   const shutdown = (signal: NodeJS.Signals) => {
     console.log(`\n${signal} received, shutting down`)
+    void context.shutdown()
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(1), 10_000).unref()
   }

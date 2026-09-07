@@ -34,7 +34,13 @@ const COMMANDS: readonly Command[] = [
     phase: 'F4',
     run: runResolve,
   },
-  { name: 'publish', summary: 'Render a new generation and flip the pointer', phase: 'F7' },
+  {
+    name: 'publish',
+    summary: 'Render a new generation and flip the pointer',
+    phase: 'F7',
+    run: runPublish,
+  },
+  { name: 'generations', summary: 'list | rollback <n>', phase: 'F7', run: runGenerations },
   { name: 'backup', summary: 'Write a single restorable archive', phase: 'F4', run: runBackup },
   {
     name: 'restore',
@@ -175,6 +181,62 @@ async function runResolve(argv: readonly string[]): Promise<number> {
   }
   for (const note of resolved.diagnostics) console.error(`diagnostic: ${note}`)
   return 0
+}
+
+async function runPublish(argv: readonly string[]): Promise<number> {
+  const { createContext } = await import('../server/context.ts')
+  const { resolve: resolvePath } = await import('node:path')
+  const context = await createContext({
+    catalogDir: process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
+    ...(process.env.NEOHOMEPAGE_WEB_DIST === undefined
+      ? {}
+      : { webDistDir: process.env.NEOHOMEPAGE_WEB_DIST }),
+  })
+  await context.reload()
+  const label = argv.find((a) => a.startsWith('--label='))?.slice('--label='.length)
+  const result = await context.publishNow('cli', label)
+  console.log(`published generation ${result.generation}`)
+  console.log(`  ${result.bytes} bytes in ${result.durationMs}ms`)
+  await context.shutdown()
+  return 0
+}
+
+async function runGenerations(argv: readonly string[]): Promise<number> {
+  const { Generations } = await import('../server/store/generations.ts')
+  const generations = new Generations(env.stateDir)
+  const [sub, argument] = argv.filter((a) => !a.startsWith('-'))
+
+  if (sub === undefined || sub === 'list') {
+    const all = await generations.list()
+    const current = await generations.current()
+    if (all.length === 0) {
+      console.log('no generations yet')
+      return 0
+    }
+    for (const n of all) {
+      const meta = await generations.meta(n)
+      const marker = n === current ? '*' : ' '
+      console.log(
+        `${marker} ${String(n).padStart(6, '0')}  ${meta?.createdAt ?? '?'}  ` +
+          `${meta?.actor ?? '?'}${meta?.label ? `  ${meta.label}` : ''}`,
+      )
+    }
+    return 0
+  }
+
+  if (sub === 'rollback') {
+    const n = Number(argument)
+    if (!Number.isInteger(n)) {
+      console.error('usage: neo generations rollback <n>')
+      return 2
+    }
+    await generations.rollback(n)
+    console.log(`now serving generation ${n}`)
+    return 0
+  }
+
+  console.error('usage: neo generations [list | rollback <n>]')
+  return 2
 }
 
 async function runFetch(argv: readonly string[]): Promise<number> {

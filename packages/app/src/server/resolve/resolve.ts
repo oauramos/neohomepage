@@ -1,7 +1,7 @@
 import { cloneLayout, correctBounds, getCompactor } from 'react-grid-layout/core'
 import type { Manifest } from '@neohomepage/catalog-schema'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
-import type { Page, Target, Theme, Widget } from '../config/schema.ts'
+import type { Target, Widget } from '../config/schema.ts'
 import type { Overrides } from '../config/overrides.ts'
 import { EMPTY_OVERRIDES } from '../config/overrides.ts'
 import type { ConfigTree } from '../store/tree.ts'
@@ -25,48 +25,14 @@ import type { ConfigTree } from '../store/tree.ts'
  * inputs produce byte-identical output, which is what lets the publish step skip a no-op render.
  */
 
-export type ResolvedWidget = {
-  readonly id: string
-  readonly page: string
-  readonly type: string
-  readonly title: string
-  readonly template: string
-  readonly icon: string
-  readonly targetId: string | null
-  readonly config: Readonly<Record<string, unknown>>
-  readonly operations: readonly string[]
-  readonly pollIntervalMs: number
-  /** Absent from the catalog: renders as a labelled placeholder instead of vanishing. */
-  readonly unsupported: boolean
-}
+import type {
+  Resolved,
+  ResolvedPage,
+  ResolvedTarget,
+  ResolvedWidget,
+} from '../../shared/resolved.ts'
 
-export type ResolvedPage = {
-  readonly id: string
-  readonly title: string
-  readonly grid: Page['grid']
-  readonly layouts: Readonly<Record<string, readonly LayoutItem[]>>
-  readonly widgetIds: readonly string[]
-}
-
-export type ResolvedTarget = {
-  readonly id: string
-  readonly label: string
-  /** Origin only — never a full URL, and never anything a manifest supplied. */
-  readonly origin: string
-  readonly minIntervalMs: number
-}
-
-export type Resolved = {
-  readonly schemaVersion: number
-  readonly title: string
-  readonly defaultPage: string
-  readonly generatedAt: string
-  readonly pages: readonly ResolvedPage[]
-  readonly widgets: readonly ResolvedWidget[]
-  readonly targets: readonly ResolvedTarget[]
-  readonly theme: Theme
-  readonly diagnostics: readonly string[]
-}
+export type { Resolved, ResolvedPage, ResolvedTarget, ResolvedWidget }
 
 export type ResolveInput = {
   readonly tree: ConfigTree
