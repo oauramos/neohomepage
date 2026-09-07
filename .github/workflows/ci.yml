@@ -131,7 +131,9 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: A node: import in src/web must fail lint
+      # Quoted: an unquoted `node:` turns the value into a nested mapping and the whole workflow
+      # file stops parsing. It did, and nothing caught it until the repository was first pushed.
+      - name: 'A node: import in src/web must fail lint'
         run: |
           echo "import { readFileSync } from 'node:fs'" > packages/app/src/web/__boundary_probe.ts
           echo "export const probe = readFileSync" >> packages/app/src/web/__boundary_probe.ts
