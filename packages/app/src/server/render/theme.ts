@@ -83,20 +83,24 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 /* min() so a pill stays a pill on rounded themes and squares off on the zero-radius ones. */
 .nh-chip{font-size:0.6875rem;padding:2px 6px;border-radius:min(999px,max(var(--nh-radius),2px));
   background:var(--nh-muted);color:var(--nh-muted-foreground)}
-.nh-chip[data-neo-chip="error"]{background:color-mix(in oklch,var(--nh-bad) 18%,transparent);
-  color:var(--nh-bad)}
-.nh-chip[data-neo-chip="stale"]{background:color-mix(in oklch,var(--nh-warn) 18%,transparent);
-  color:var(--nh-warn)}
+/* The tone rides the RING, not the fill. A tinted fill put the bad colour on an 18% wash of
+   itself, which measured 3.82:1 and had never been seen by axe because the accessibility board
+   carried no widgets - while bad-on-muted is the exact pair theme-contrast.test.ts proves for
+   every preset. Keeping the fill at muted is what makes that proof cover this chip. */
+.nh-chip[data-neo-chip="error"]{background:var(--nh-muted);color:var(--nh-bad);
+  box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--nh-bad) 50%,transparent)}
+.nh-chip[data-neo-chip="stale"]{background:var(--nh-muted);color:var(--nh-warn);
+  box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--nh-warn) 50%,transparent)}
 .nh-placeholder{margin:0;color:var(--nh-muted-foreground);font-size:0.8125rem}
 /* A link tile IS a bookmark: the whole body is the target, not the few characters of its label.
    Unstyled, this anchor measured 83x18 — under WCAG 2.5.8's 24x24 and a poor thing to aim a thumb
    at, on the one widget whose entire job is being tapped. */
 .nh-link{display:flex;align-items:center;justify-content:center;min-height:44px;height:100%;
   padding:8px 12px;border-radius:var(--nh-radius-control);text-decoration:none;
-  color:var(--nh-accent);font-weight:var(--nh-link-weight);background:var(--nh-link-bg);
+  color:var(--nh-link-color);font-weight:var(--nh-link-weight);background:var(--nh-link-bg);
   border:var(--nh-link-border);box-shadow:var(--nh-link-shadow);
   transition:background 180ms ease,box-shadow 180ms ease,transform 180ms ease}
-.nh-link:hover{background:color-mix(in oklch,var(--nh-accent) 22%,transparent)}
+.nh-link:hover{background:var(--nh-link-bg-hover)}
 .nh-link:active{transform:translateY(1px)}
 .nh-link:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
 .nh-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}

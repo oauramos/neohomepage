@@ -36,6 +36,11 @@
 - The board had no maximum width, so a four-column tile on an ultrawide became a metre of button.
 - `pnpm dev` resolved the catalog against `packages/app`, where no catalog exists, so the editor
   reported that the catalog could not be read.
+- The error and stale chips painted their tone on an 18% wash of itself — 3.82:1, under AA. axe had
+  never seen one because the accessibility board carried no widgets. Both now sit on `muted`, the
+  pair the contrast test already proves, and carry the tone as a ring.
+- axe now scans all seven presets in both schemes on a board with a bookmark tile, which is what
+  caught the two presets whose solid accent fill was painting its label in the fill colour.
 
 ## 0.1.0 — first release
 

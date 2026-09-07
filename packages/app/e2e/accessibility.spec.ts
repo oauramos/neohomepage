@@ -18,6 +18,25 @@ test.beforeAll(async () => {
   const started = await startServer()
   harness = started.harness
   stop = started.stop
+
+  // A bookmark tile, so the board carries the one element whose text sits on an accent FILL.
+  // Scanning an empty board would pass every preset while proving nothing about the buttons.
+  const target = await fetch(`${harness.baseURL}/api/targets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      label: 'Link',
+      widgetType: 'service-link',
+      base: { scheme: 'http', host: '127.0.0.1', port: 9914 },
+      values: { label: 'Open', path: '/' },
+    }),
+  })
+  const { id } = (await target.json()) as { id: string }
+  await fetch(`${harness.baseURL}/api/widgets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'service-link', targetId: id, config: { label: 'Open' } }),
+  })
 })
 
 test.afterAll(async () => {
@@ -38,9 +57,25 @@ async function scan(page: Page) {
   return { blocking, other, results }
 }
 
-function describeViolations(violations: { id: string; help: string; nodes: unknown[] }[]): string {
+function describeViolations(
+  violations: {
+    id: string
+    help: string
+    nodes: { target?: unknown[]; failureSummary?: string }[]
+  }[],
+): string {
   return violations
-    .map((violation) => `${violation.id} (${violation.nodes.length}×): ${violation.help}`)
+    .map((violation) => {
+      // Naming the element and the measured ratio: "something on the page fails contrast" is not
+      // a lead, and a colour failure is usually one selector rather than a palette-wide problem.
+      const where = violation.nodes
+        .map(
+          (node) =>
+            `\n    ${JSON.stringify(node.target)} ${(node.failureSummary ?? '').replaceAll('\n', ' ')}`,
+        )
+        .join('')
+      return `${violation.id} (${violation.nodes.length}×): ${violation.help}${where}`
+    })
     .join('\n')
 }
 
@@ -98,3 +133,36 @@ test('every form control the generated form emits has a label', async ({ page })
   })
   expect(unlabelled).toEqual([])
 })
+
+/**
+ * Every preset, scanned by axe on a board that actually has widgets.
+ *
+ * The contrast unit test checks the token palette — every text token against every surface — and
+ * it passes for a preset whose bookmark button paints a SOLID accent fill while the stylesheet
+ * still colours the label with `accent`. That is red-on-red, and only a real render catches it,
+ * because the failing pair is a rule's choice of token rather than a value in the palette.
+ */
+for (const preset of ['default', 'nord', 'terminal', 'glass', 'brutalist', 'amber', 'synthwave']) {
+  for (const mode of ['light', 'dark'] as const) {
+    test(`the ${preset} preset reads in ${mode}`, async ({ page }) => {
+      await fetch(`${harness.baseURL}/api/theme`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ preset, mode }),
+      })
+      await fetch(`${harness.baseURL}/api/publish`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+
+      await page.goto(`${harness.baseURL}/`)
+      await page.waitForSelector('#neo-root')
+
+      const { blocking } = await scan(page)
+      const contrast = blocking.filter((violation) => violation.id.includes('contrast'))
+      expect(describeViolations(contrast), `${preset}/${mode} contrast`).toBe('')
+      expect(describeViolations(blocking), `${preset}/${mode}`).toBe('')
+    })
+  }
+}

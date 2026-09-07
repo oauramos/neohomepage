@@ -51,6 +51,8 @@ export const SHAPE_TOKENS = [
   'title-tracking',
   'title-size',
   'link-bg',
+  'link-color',
+  'link-bg-hover',
   'link-border',
   'link-shadow',
   'link-weight',
@@ -71,6 +73,10 @@ export const SHAPE_DEFAULTS: Record<ShapeToken, string> = {
   'title-tracking': '0.01em',
   'title-size': '0.8125rem',
   'link-bg': 'color-mix(in oklch,var(--nh-accent) 8%,transparent)',
+  // A translucent fill keeps the accent readable as text. A preset that paints a SOLID accent
+  // block must flip this to accent-foreground, or the label is the same colour as the button.
+  'link-color': 'var(--nh-accent)',
+  'link-bg-hover': 'color-mix(in oklch,var(--nh-accent) 22%,transparent)',
   'link-border': 'none',
   'link-shadow': 'none',
   'link-weight': '600',
@@ -299,6 +305,8 @@ const BRUTALIST_PRESET: ThemePreset = {
     'title-tracking': '-0.01em',
     'title-size': '0.9rem',
     'link-bg': 'var(--nh-accent)',
+    'link-color': 'var(--nh-accent-foreground)',
+    'link-bg-hover': 'color-mix(in oklch, var(--nh-accent) 82%, var(--nh-foreground))',
     'link-border': '3px solid var(--nh-border)',
     'link-shadow': '5px 5px 0 0 var(--nh-border)',
     'link-weight': '800',
@@ -406,6 +414,8 @@ const SYNTHWAVE_PRESET: ThemePreset = {
     'title-tracking': '0.16em',
     'title-size': '0.68rem',
     'link-bg': 'color-mix(in oklch, var(--nh-accent) 88%, transparent)',
+    'link-color': 'var(--nh-accent-foreground)',
+    'link-bg-hover': 'var(--nh-accent)',
     'link-border': '1px solid color-mix(in oklch, var(--nh-accent) 70%, transparent)',
     'link-shadow':
       '0 0 22px color-mix(in oklch, var(--nh-accent) 45%, transparent), 0 0 4px color-mix(in oklch, var(--nh-accent) 60%, transparent)',
