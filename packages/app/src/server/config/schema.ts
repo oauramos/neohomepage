@@ -30,13 +30,17 @@ export const dashboardSchema = z
     catalog: z
       .object({
         /**
-         * A path on the docs domain, not a `*.github.io/<repo>/` URL, and not yet a subdomain.
+         * Where the catalog is actually served from today.
          *
-         * One GitHub Pages site per repository, so the catalog ships alongside the docs. That is
-         * safe to bake in because the pointer carries `movedTo`: when the catalog moves to its own
-         * repository and host, this URL keeps answering and says where the payload went.
+         * One GitHub Pages site per repository, so the catalog ships inside the docs site rather
+         * than on a subdomain. A `*.github.io/<repo>/` URL is normally a thing to avoid baking in
+         * precisely because it cannot move — but the pointer file carries `movedTo`, so when this
+         * gets a custom domain or its own repository the old URL keeps answering and says where
+         * the payload went. That is what the two-file pointer design is for.
          */
-        url: z.url().default('https://neohomepage.dev/catalog/v1/latest.json'),
+        url: z
+          .url()
+          .default('https://oauramos.github.io/neohomepage/catalog/v1/latest.json'),
         pinnedRelease: z.string().max(64).nullable().default(null),
         autoUpdate: z.boolean().default(true),
       })
