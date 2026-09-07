@@ -132,15 +132,82 @@ jobs:
             exit 1
           fi
 
-  publish:
+  # One architecture per NATIVE runner, then a manifest list stitched from the digests.
+  #
+  # Emphatically not `--platform linux/amd64,linux/arm64` under QEMU on one runner, which is the
+  # obvious way to write this and does not work: pnpm 12 is a Rust binary on tokio, and tokio's
+  # I/O driver panics under qemu-user with `Bad file descriptor` before it installs anything. That
+  # was found by building this image on an arm64 laptop, where the amd64 leg failed exactly this
+  # way — in CI it would have been the arm64 leg, on the first tagged release.
+  #
+  # Native runners are also several times faster than emulation, so this costs nothing.
+  build:
     needs: smoke
     if: github.event_name == 'push' || inputs.push
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # By digest, with no tag: the tags belong to the manifest list the next job assembles,
+          # and tagging here would leave whichever architecture finished last holding `latest`.
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Record the digest
+        run: |
+          # Stripped in the shell, not in a GitHub expression — `${x#prefix}` is bash, and the
+          # expression language silently is not bash.
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -156,18 +223,19 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push, both architectures
-        # arm64 is not an afterthought: the target box is a NAS or a Pi-class Proxmox container,
-        # and an amd64-only image would miss the deployment this project exists for.
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: mode=max
-          sbom: true
+      - name: Assemble the manifest list
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${REGISTRY}/${IMAGE}@sha256:%s " *)
+
+      - name: Both architectures are present
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          docker buildx imagetools inspect "$version"
+          for want in linux/amd64 linux/arm64; do
+            docker buildx imagetools inspect "$version" --raw \
+              | jq -e --arg p "$want" '[.manifests[] | "\(.platform.os)/\(.platform.architecture)"] | index($p)' >/dev/null \
+              || { echo "::error::${want} is missing from the manifest list"; exit 1; }
+          done

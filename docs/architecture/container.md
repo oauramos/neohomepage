@@ -89,6 +89,27 @@ copies `@neohomepage/catalog-schema` into `node_modules` — and Node refuses to
 file whose real path is inside `node_modules`. `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`, on
 boot, in the container only, never in development.
 
+## One architecture per runner
+
+The obvious way to build a multi-architecture image is `--platform
+linux/amd64,linux/arm64` on one machine, with QEMU filling in the other. It does not work here:
+pnpm 12 is a Rust binary on tokio, and tokio's I/O driver panics under `qemu-user` with
+`Bad file descriptor` before it installs anything.
+
+```
+Error:   × Main thread panicked.
+  ├─▶ at tokio-1.53.1/src/runtime/io/driver.rs:196:23
+  ╰─▶ unexpected error when polling the I/O driver: Os { code: 9, ... "Bad file descriptor" }
+```
+
+Found by building the image on an arm64 laptop, where the amd64 leg failed exactly this way. In
+CI it would have been the arm64 leg, failing on the first tagged release and nowhere before it.
+
+So each architecture is built on a runner that is natively that architecture — `ubuntu-latest`
+and `ubuntu-24.04-arm` — pushed by digest with no tag, and a final job stitches the digests into
+one manifest list and asserts both platforms are in it. Tagging in the build jobs would leave
+whichever architecture finished last holding `latest`.
+
 ## What CI checks before publishing
 
 The image is built for the runner's own architecture first and actually run: it must serve a
