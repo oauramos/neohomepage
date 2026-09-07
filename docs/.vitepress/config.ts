@@ -31,7 +31,13 @@ export default defineConfig({
           { text: 'Configuring with an AI', link: '/mcp/' },
         ],
       },
-      { text: 'Architecture', items: [{ text: 'Memory', link: '/architecture/memory' }] },
+      {
+        text: 'Architecture',
+        items: [
+          { text: 'Memory', link: '/architecture/memory' },
+          { text: 'The container', link: '/architecture/container' },
+        ],
+      },
     ],
     socialLinks: [{ icon: 'github', link: 'https://github.com/oauramos/neohomepage' }],
     footer: { message: 'Released under the MIT License.' },

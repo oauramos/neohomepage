@@ -1,0 +1,21 @@
+# Everything the build does not read. The largest wins first: node_modules is reinstalled inside
+# the image from the lockfile, and dist/ is rebuilt — copying either in would ship a macOS build
+# into a linux/arm64 image.
+node_modules
+**/node_modules
+dist
+**/dist
+catalog-dist
+data
+.git
+.github
+docs
+.playwright-mcp
+**/test-results
+**/playwright-report
+**/*.test.ts
+**/*.spec.ts
+packages/app/e2e
+.vscode
+.idea
+*.log

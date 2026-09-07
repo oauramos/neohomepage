@@ -1,0 +1,80 @@
+# neohomepage
+#
+# The smallest thing that works, plus the two lines that stop it hurting: a memory limit, and a
+# credential supplied by the environment rather than committed alongside the config.
+#
+#   docker compose up -d
+#
+# Then open http://<this-host>:7575 and add a service from the editor. Nothing here needs editing
+# to add a widget — that is the point of the project.
+
+services:
+  neohomepage:
+    image: ghcr.io/oauramos/neohomepage:latest
+    container_name: neohomepage
+    restart: unless-stopped
+    ports:
+      - '7575:7575'
+
+    volumes:
+      # ONE directory, and it is the backup. `git init` it once and `git push` is your backup:
+      # config/ and assets/ are committed, secrets/ and state/ are excluded by a .gitignore the
+      # app writes on first boot. See docs/guide/backup.
+      - ./data:/data
+
+    environment:
+      # Reads are open; writes need this. Leave both unset and the dashboard is editable by anyone
+      # who can reach the port — reasonable on a trusted LAN, and a decision rather than an
+      # accident. Set both and the editor asks for them.
+      # NEOHOMEPAGE_USERNAME: neo
+      # NEOHOMEPAGE_PASSWORD: change-me-at-least-eight-characters
+
+      # The recommended place for service credentials.
+      #
+      # Config stores `{"$secret": "t3a91f.apiKey"}` — a reference, never a value — and this is
+      # where the value comes from. Keeping them here rather than in the data directory is what
+      # makes restore a `git clone` and this file: the repository never sees a key, so it can be
+      # public, and losing the machine loses nothing.
+      #
+      # The name is the secret's, uppercased with dots and dashes as underscores. `neo doctor`
+      # prints the exact variable for every credential it cannot find.
+      # NEOHOMEPAGE_SECRET_T3A91F_APIKEY: your-sonarr-api-key
+      #
+      # Or point at a file, for a Docker secret or a mounted credential:
+      # NEOHOMEPAGE_SECRET_T3A91F_APIKEY_FILE: /run/secrets/sonarr
+
+      TZ: Etc/UTC
+
+    # 320 MB against a measured steady state around 90 MB. The headroom is for a publish render
+    # and for the page cache; the image already caps V8's old space at 192 MB, so the container
+    # hits an OOM error it reports rather than a kernel kill that takes its neighbours with it.
+    mem_limit: 320m
+    memswap_limit: 320m
+    # Two vCPUs is the target box. This is a ceiling, not a reservation.
+    cpus: 2.0
+
+    # Nothing in this image needs to write outside /data, escalate, or keep a capability.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:7575/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

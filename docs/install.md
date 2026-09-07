@@ -1,9 +1,61 @@
 # Install
 
-::: warning
-Pre-release. The Docker image is deliberately the _last_ thing built — everything is validated
-running locally first. For now, install from source.
+::: warning Pre-release
+The container image is built by CI on a tagged release; there is no published tag yet. Until there
+is, use the source install below — it is the same code the image runs, because the image ships the
+sources rather than a compiled bundle.
 :::
+
+## Docker
+
+One directory, one port, one file:
+
+```sh
+mkdir neohomepage && cd neohomepage
+curl -O https://raw.githubusercontent.com/oauramos/neohomepage/main/compose.yaml
+docker compose up -d
+```
+
+Open `http://<this-host>:7575` and add a service from the button in the bottom-left corner.
+Nothing in `compose.yaml` needs editing to add a widget — that is the point of the project.
+
+The container runs unprivileged, read-only apart from `/data`, with no capabilities and a 320 MB
+memory limit. It is one process: no database, no Redis, no sidecar.
+
+### The two things worth setting
+
+**A password**, if the machine is reachable by anyone you would not hand the editor to. Reads stay
+open; writes need it.
+
+```yaml
+environment:
+  NEOHOMEPAGE_USERNAME: neo
+  NEOHOMEPAGE_PASSWORD: at-least-eight-characters
+```
+
+**Your service credentials**, as environment variables rather than in the data directory:
+
+```yaml
+environment:
+  NEOHOMEPAGE_SECRET_T3A91F_APIKEY: your-sonarr-api-key
+```
+
+You do not have to — entering a key in the editor stores it in `secrets/`, which is gitignored and
+`0600`. But keeping them here is what makes restoring a `git clone` and this file, with the
+repository never having seen a key. `neo doctor` prints the exact variable name for every
+credential it cannot find. See [Backup and restore](/guide/backup).
+
+### Running it directly
+
+```sh
+docker run -d --name neohomepage \
+  -p 7575:7575 -v "$PWD/data:/data" \
+  --memory 320m --restart unless-stopped \
+  ghcr.io/oauramos/neohomepage:latest
+```
+
+Images are published for `linux/amd64` and `linux/arm64`, because the box this is for is as often
+a Pi-class Proxmox container or a NAS as it is a server.
 
 ## From source
 
