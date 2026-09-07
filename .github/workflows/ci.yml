@@ -77,8 +77,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Cold start and publish latency, at 60 widgets
-        run: pnpm budgets --runs=3
+      - name: First boot, restart and publish latency, at 60 widgets
+        # Four runs, so the restart figure is a p95 over three samples rather than over one.
+        run: pnpm budgets --runs=4
 
   restore-drill:
     # The backup claim, executed rather than described: build a dashboard, commit /data, clone it
