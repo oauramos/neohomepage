@@ -211,3 +211,198 @@ body {
   padding: 48px 24px;
   color: var(--nh-muted-foreground);
 }
+
+/* Edit mode and the add-widget form. */
+.nh-editor {
+  padding: 8px 16px 96px;
+}
+.nh-editor-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 4px;
+  font-size: 0.75rem;
+  color: var(--nh-muted-foreground);
+}
+.nh-editor-measuring {
+  min-height: 200px;
+}
+.nh-editor-cell {
+  background: var(--nh-surface);
+  border: 1px dashed var(--nh-accent);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.nh-editor-cell-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--nh-border);
+  font-size: 0.75rem;
+}
+.nh-editor-cell-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nh-editor-cell-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+}
+/* 44px is the smallest target a finger reliably hits; anything less makes dragging on a phone a
+   game of chance. */
+.nh-drag-handle,
+.nh-editor-remove {
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--nh-muted-foreground);
+  cursor: grab;
+  border-radius: 6px;
+}
+.nh-editor-remove {
+  cursor: pointer;
+}
+.nh-drag-handle:focus-visible,
+.nh-editor-remove:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .nh-drag-handle,
+  .nh-editor-remove {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+.nh-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nh-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.nh-field-help {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+}
+.nh-field-saved {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nh-field-saved-note {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--nh-muted-foreground);
+}
+.nh-input {
+  border: 1px solid var(--nh-border);
+  background: var(--nh-background);
+  color: var(--nh-foreground);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 0.8125rem;
+  width: 100%;
+}
+.nh-input-color {
+  padding: 2px;
+  height: 32px;
+}
+.nh-input:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 1px;
+}
+.nh-fieldset {
+  border: 1px solid var(--nh-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+}
+.nh-fieldset legend {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--nh-muted-foreground);
+  padding: 0 4px;
+}
+.nh-button-quiet {
+  border: 1px solid var(--nh-border);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.nh-catalog,
+.nh-add,
+.nh-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nh-catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+.nh-catalog-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--nh-border);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nh-catalog-name {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+.nh-catalog-meta {
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+}
+.nh-add-head,
+.nh-add-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nh-add-actions {
+  justify-content: flex-end;
+}
+.nh-test-result {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--nh-bad);
+}
+.nh-test-result[data-neo-ok='true'] {
+  color: var(--nh-ok);
+}

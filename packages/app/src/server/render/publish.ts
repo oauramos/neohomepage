@@ -72,14 +72,16 @@ async function assetTags(webDistDir: string | undefined): Promise<string> {
     const manifestPath = join(webDistDir, '.vite', 'manifest.json')
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<
       string,
-      { file?: string; css?: string[] }
+      { file?: string; css?: string[]; isEntry?: boolean }
     >
-    const entry = Object.values(manifest).find((value) => typeof value.file === 'string')
-    if (entry === undefined) return ''
+    // `isEntry`, not "the first thing with a file". Once anything is code-split — and lazily
+    // loading react-grid-layout for edit mode splits it immediately — the first manifest entry is
+    // a chunk, and picking it ships the wrong script and no stylesheet at all. The page then
+    // renders completely unstyled, which is exactly what happened.
+    const entry = Object.values(manifest).find((value) => value.isEntry === true)
+    if (entry?.file === undefined) return ''
     const css = (entry.css ?? []).map((href) => `<link rel="stylesheet" href="/_app/${href}">`)
-    return [...css, `<script type="module" src="/_app/${entry.file as string}"></script>`].join(
-      '\n    ',
-    )
+    return [...css, `<script type="module" src="/_app/${entry.file}"></script>`].join('\n    ')
   } catch {
     return ''
   }

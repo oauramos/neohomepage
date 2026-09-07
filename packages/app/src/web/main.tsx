@@ -2,7 +2,11 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { dashboard } from '../shared/board.ts'
 import type { Resolved } from '../shared/resolved.ts'
+import { AddWidget } from './fab/AddWidget.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
+import { GridEditor } from './edit/GridEditor.tsx'
+import { widgetTile } from '../shared/board.ts'
+import type { LayoutItem } from '../shared/grid-geometry.ts'
 import { DashboardClient, readEmbeddedState, type DashboardState } from './state.ts'
 import { applyTheme } from './theme.ts'
 import './styles.css'
@@ -24,25 +28,58 @@ function EmptyState() {
   )
 }
 
-function TabPanel({ tab, state }: { tab: Tab; state: DashboardState }) {
+function TabPanel({
+  tab,
+  state,
+  editing,
+  onToggleEdit,
+  onChanged,
+  onRemove,
+}: {
+  tab: Tab
+  state: DashboardState
+  editing: boolean
+  onToggleEdit: () => void
+  onChanged: () => void
+  onRemove: (id: string) => void
+}) {
   switch (tab) {
     case 'edit':
       return (
-        <p className="nh-panel-note">
-          Drag-and-drop editing arrives with the grid editor. Widgets on this page:{' '}
-          {state.resolved.widgets.length}.
-        </p>
+        <div className="nh-panel-stack">
+          <p className="nh-panel-note">
+            {editing
+              ? 'Drag a tile by its handle to move it, or the corner to resize. Changes save when you let go.'
+              : 'Turn on edit mode to rearrange the board.'}
+          </p>
+          <button type="button" className="nh-button" onClick={onToggleEdit}>
+            {editing ? 'Done editing' : 'Edit layout'}
+          </button>
+        </div>
       )
     case 'widgets':
       return (
-        <ul className="nh-panel-list">
-          {state.resolved.widgets.map((widget) => (
-            <li key={widget.id}>
-              <strong>{widget.title}</strong> <code>{widget.type}</code>{' '}
-              <span className="nh-panel-dim">{state.data[widget.id]?.meta.state ?? 'pending'}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="nh-panel-stack">
+          <AddWidget onAdded={onChanged} />
+          <ul className="nh-panel-list">
+            {state.resolved.widgets.map((widget) => (
+              <li key={widget.id}>
+                <strong>{widget.title}</strong> <code>{widget.type}</code>{' '}
+                <span className="nh-panel-dim">
+                  {state.data[widget.id]?.meta.state ?? 'pending'}
+                </span>{' '}
+                <button
+                  type="button"
+                  className="nh-button-quiet"
+                  onClick={() => onRemove(widget.id)}
+                  aria-label={`Remove ${widget.title}`}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )
     case 'theme':
       return (
@@ -75,6 +112,7 @@ function TabPanel({ tab, state }: { tab: Tab; state: DashboardState }) {
 
 function App({ client }: { client: DashboardClient }) {
   const [state, setState] = useState(client.state)
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => client.subscribe(setState), [client])
   useEffect(() => {
@@ -85,14 +123,54 @@ function App({ client }: { client: DashboardClient }) {
     applyTheme(state.resolved.theme)
   }, [state.resolved.theme])
 
+  const page =
+    state.resolved.pages.find((candidate) => candidate.id === state.resolved.defaultPage) ??
+    state.resolved.pages[0]
+
+  const saveLayout = async (breakpoint: string, items: LayoutItem[]) => {
+    await fetch(`/api/pages/${page?.id ?? 'home'}/layout`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ breakpoint, items }),
+    })
+    await client.refresh()
+  }
+
+  const removeWidget = async (id: string) => {
+    await fetch(`/api/widgets/${id}`, { method: 'DELETE' })
+    await client.refresh()
+  }
+
   return (
     <>
-      {dashboard(state.resolved, state.data)}
+      {editing && page !== undefined ? (
+        <GridEditor
+          page={page}
+          widgets={state.resolved.widgets}
+          renderWidget={(widget) => widgetTile(widget, state.data[widget.id])}
+          onCommit={saveLayout}
+          onRemove={(id) => void removeWidget(id)}
+        />
+      ) : (
+        dashboard(state.resolved, state.data)
+      )}
       <Fab
         pending={state.pending}
         connected={state.connected}
         onPublish={() => client.publish()}
-        renderTab={(tab) => <TabPanel tab={tab} state={state} />}
+        renderTab={(tab, close) => (
+          <TabPanel
+            tab={tab}
+            state={state}
+            editing={editing}
+            onToggleEdit={() => {
+              setEditing((value) => !value)
+              close()
+            }}
+            onChanged={() => void client.refresh()}
+            onRemove={(id) => void removeWidget(id)}
+          />
+        )}
       />
     </>
   )
