@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "stats": [
+    {
+      "label": "Streams",
+      "value": 2
+    }
+  ],
+  "items": [
+    {
+      "title": "Some Show",
+      "subtitle": "The Episode",
+      "badge": "Living room",
+      "progress": 0.23703703703703705
+    },
+    {
+      "title": "A Film",
+      "subtitle": "A Film",
+      "badge": "iPad",
+      "progress": 0.041666666666666664
+    }
+  ]
+}

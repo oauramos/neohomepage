@@ -1,0 +1,165 @@
+{
+  "manifestVersion": 1,
+  "id": "qbittorrent-transfer",
+  "version": "1.0.0",
+  "displayName": "qBittorrent",
+  "category": "downloads",
+  "icon": "qbittorrent",
+  "docs": "https://neohomepage.dev/widgets/qbittorrent-transfer",
+  "target": {
+    "fields": [
+      {
+        "name": "username",
+        "kind": "string",
+        "label": "Username",
+        "required": true,
+        "help": "The Web UI user; qBittorrent → Options → Web UI"
+      },
+      {
+        "name": "password",
+        "kind": "secret",
+        "label": "Password",
+        "required": true
+      }
+    ],
+    "auth": {
+      "kind": "session-exchange",
+      "loginPath": "/api/v2/auth/login",
+      "body": {
+        "username": "{{config:username}}",
+        "password": "{{secret:password}}"
+      },
+      "sendAs": {
+        "kind": "cookie"
+      }
+    }
+  },
+  "config": [],
+  "operations": {
+    "transfer": {
+      "method": "GET",
+      "path": "/api/v2/transfer/info",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "mapValue",
+        "of": {
+          "op": "get",
+          "path": "$.connection_status"
+        },
+        "cases": {
+          "connected": "ok",
+          "firewalled": "degraded",
+          "disconnected": "down"
+        },
+        "fallback": {
+          "op": "const",
+          "value": "unknown"
+        }
+      },
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Down"
+              },
+              "value": {
+                "op": "format",
+                "as": "bitrate",
+                "of": {
+                  "op": "get",
+                  "path": "$.dl_info_speed"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Up"
+              },
+              "value": {
+                "op": "format",
+                "as": "bitrate",
+                "of": {
+                  "op": "get",
+                  "path": "$.up_info_speed"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Downloaded"
+              },
+              "value": {
+                "op": "format",
+                "as": "bytes",
+                "of": {
+                  "op": "get",
+                  "path": "$.dl_info_data"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Uploaded"
+              },
+              "value": {
+                "op": "format",
+                "as": "bytes",
+                "of": {
+                  "op": "get",
+                  "path": "$.up_info_data"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "format",
+      "get",
+      "mapValue",
+      "pick"
+    ],
+    "authKinds": [
+      "session-exchange"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

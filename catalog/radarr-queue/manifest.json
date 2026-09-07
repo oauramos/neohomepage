@@ -1,0 +1,185 @@
+{
+  "manifestVersion": 1,
+  "id": "radarr-queue",
+  "version": "1.0.0",
+  "displayName": "Radarr queue",
+  "category": "media-automation",
+  "icon": "radarr",
+  "docs": "https://neohomepage.dev/widgets/radarr-queue",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "required": true,
+        "help": "Radarr → Settings → General → API Key"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "X-Api-Key",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [
+    {
+      "name": "maxItems",
+      "kind": "integer",
+      "label": "Items to show",
+      "default": 5,
+      "min": 1,
+      "max": 20
+    }
+  ],
+  "operations": {
+    "queue": {
+      "method": "GET",
+      "path": "/api/v3/queue",
+      "decode": "json",
+      "query": {
+        "pageSize": "{{config:maxItems}}",
+        "includeMovie": "true"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Queue"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.records"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Remaining"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "sum",
+                  "of": {
+                    "op": "get",
+                    "path": "$.records"
+                  },
+                  "path": "sizeleft"
+                },
+                "as": "bytes"
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "map",
+        "as": "e",
+        "over": {
+          "op": "limit",
+          "n": 20,
+          "over": {
+            "op": "sort",
+            "over": {
+              "op": "get",
+              "path": "$.records"
+            },
+            "by": [
+              {
+                "path": "sizeleft",
+                "dir": "asc",
+                "type": "numeric"
+              }
+            ]
+          }
+        },
+        "body": {
+          "op": "pick",
+          "fields": {
+            "title": {
+              "op": "coalesce",
+              "of": [
+                {
+                  "op": "get",
+                  "path": "e.movie.title"
+                },
+                {
+                  "op": "get",
+                  "path": "e.title"
+                }
+              ]
+            },
+            "subtitle": {
+              "op": "mapValue",
+              "of": {
+                "op": "get",
+                "path": "e.trackedDownloadState"
+              },
+              "cases": {
+                "downloading": "downloading",
+                "importPending": "import pending"
+              },
+              "fallback": "queued"
+            },
+            "badge": {
+              "op": "format",
+              "of": {
+                "op": "get",
+                "path": "e.sizeleft"
+              },
+              "as": "bytes"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "coalesce",
+      "concat",
+      "const",
+      "count",
+      "format",
+      "get",
+      "limit",
+      "map",
+      "mapValue",
+      "pick",
+      "sort",
+      "sum"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

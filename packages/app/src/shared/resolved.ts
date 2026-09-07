@@ -16,6 +16,8 @@ export type ResolvedWidget = {
   readonly template: string
   readonly icon: string
   readonly targetId: string | null
+  /** Composite widgets: role name -> bound target ids. Empty for the single-target shape. */
+  readonly bindings: Readonly<Record<string, readonly string[]>>
   readonly config: Readonly<Record<string, unknown>>
   readonly operations: readonly string[]
   readonly pollIntervalMs: number

@@ -1,0 +1,23 @@
+[
+  {
+    "Names": [
+      "/sonarr"
+    ],
+    "State": "running",
+    "Status": "Up 3 days"
+  },
+  {
+    "Names": [
+      "/radarr"
+    ],
+    "State": "running",
+    "Status": "Up 3 days"
+  },
+  {
+    "Names": [
+      "/old-thing"
+    ],
+    "State": "exited",
+    "Status": "Exited (0) 2 weeks ago"
+  }
+]

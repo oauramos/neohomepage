@@ -1,0 +1,21 @@
+{
+  "status": "ok",
+  "stats": [
+    {
+      "label": "Down",
+      "value": "4.2 Mbps"
+    },
+    {
+      "label": "Up",
+      "value": "524.3 kbps"
+    },
+    {
+      "label": "Downloaded",
+      "value": "1 TiB"
+    },
+    {
+      "label": "Uploaded",
+      "value": "204.8 GiB"
+    }
+  ]
+}

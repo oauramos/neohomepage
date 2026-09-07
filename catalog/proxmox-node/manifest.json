@@ -1,0 +1,148 @@
+{
+  "manifestVersion": 1,
+  "id": "proxmox-node",
+  "version": "1.0.0",
+  "displayName": "Proxmox node",
+  "category": "virtualisation",
+  "icon": "proxmox",
+  "docs": "https://neohomepage.dev/widgets/proxmox-node",
+  "target": {
+    "fields": [
+      {
+        "name": "tokenId",
+        "kind": "string",
+        "label": "Token ID",
+        "required": true,
+        "help": "user@realm!tokenname"
+      },
+      {
+        "name": "token",
+        "kind": "secret",
+        "label": "Token secret",
+        "required": true,
+        "help": "Datacenter → Permissions → API Tokens"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "value": "PVEAPIToken={{config:tokenId}}={{secret:token}}"
+    }
+  },
+  "config": [
+    {
+      "name": "node",
+      "kind": "string",
+      "label": "Node name",
+      "required": true,
+      "help": "As shown in the Proxmox tree, e.g. pve1",
+      "ui": {
+        "placeholder": "pve1"
+      }
+    }
+  ],
+  "operations": {
+    "status": {
+      "method": "GET",
+      "path": "/api2/json/nodes/{{config:node}}/status",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "gauges": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Memory"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.data.memory.used"
+              },
+              "total": {
+                "op": "get",
+                "path": "$.data.memory.total"
+              },
+              "unit": {
+                "op": "const",
+                "value": "bytes"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Root FS"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.data.rootfs.used"
+              },
+              "total": {
+                "op": "get",
+                "path": "$.data.rootfs.total"
+              },
+              "unit": {
+                "op": "const",
+                "value": "bytes"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Swap"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.data.swap.used"
+              },
+              "total": {
+                "op": "get",
+                "path": "$.data.swap.total"
+              },
+              "unit": {
+                "op": "const",
+                "value": "bytes"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "gauge-set"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "gauge-set"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "title": "The Episode",
+    "airDateUtc": "2026-09-07T01:00:00Z",
+    "seasonNumber": 2,
+    "episodeNumber": 4,
+    "series": {
+      "title": "Some Show"
+    }
+  },
+  {
+    "title": "Another One",
+    "airDateUtc": "2026-09-11T01:00:00Z",
+    "seasonNumber": 2,
+    "episodeNumber": 5,
+    "series": {
+      "title": "Some Show"
+    }
+  },
+  {
+    "title": "Undated",
+    "airDateUtc": null,
+    "series": {
+      "title": "Some Show"
+    }
+  }
+]

@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as setNodeTimeout, clearTimeout as clearNodeTimeout } from 'node:timers'
-import type { Manifest } from '@neohomepage/catalog-schema'
+import type { Manifest, SingleManifest, SourceKind } from '@neohomepage/catalog-schema'
+import { isComposite } from '@neohomepage/catalog-schema'
 import { loadCatalogDirectory } from './catalog/load.ts'
 import { overridesSchema, EMPTY_OVERRIDES, type Overrides } from './config/overrides.ts'
 import { env } from './env.ts'
-import { executeOperation } from './fetcher/execute.ts'
+import { executeOperation, executeSource } from './fetcher/execute.ts'
+import { composeSources, type SourcePart } from '../shared/compose.ts'
 import { EventHub } from './http/events.ts'
 import {
   assetsFingerprint,
@@ -140,47 +142,52 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     const live = new Set<string>()
 
     for (const widget of current_resolved.widgets) {
-      if (widget.unsupported || widget.targetId === null) continue
-      const target = current.targets.get(widget.targetId)
+      if (widget.unsupported) continue
       const manifest = catalog.get(widget.type)
-      if (target === undefined || manifest === undefined) continue
+      if (manifest === undefined) continue
 
-      const origin = `${target.base.scheme}://${target.base.host}:${target.base.port}`
-      const targetRevision = `${origin}${target.base.basePath}`
-
-      for (const operation of widget.operations) {
-        const key = fetchKey({
-          targetId: target.id,
-          targetRevision,
-          operation,
-          params: widget.config,
-        })
-        live.add(key)
+      for (const source of widgetSources(widget, manifest, current)) {
+        live.add(source.key)
         releases.push(
           scheduler.register(
             {
-              key,
+              key: source.key,
               intervalMs: widget.pollIntervalMs,
               execute: async () => {
                 const secrets: Record<string, string> = {}
-                for (const [field, ref] of Object.entries(target.secrets)) {
+                for (const [field, ref] of Object.entries(source.target.secrets)) {
                   const value = vault.get(ref.$secret)
                   if (value !== undefined) secrets[field] = value
                 }
-                const result = await executeOperation({
-                  manifest,
-                  operation,
-                  target: {
-                    origin,
-                    basePath: target.base.basePath,
-                    allowLoopback:
-                      target.base.host === '127.0.0.1' || target.base.host === 'localhost',
-                    insecureSkipVerify: target.tls.insecureSkipVerify,
-                  },
-                  config: widget.config,
-                  auth: { secrets, config: target.fields },
-                  now: new Date().toISOString(),
-                })
+                const binding = {
+                  origin: source.origin,
+                  basePath: source.target.base.basePath,
+                  allowLoopback:
+                    source.target.base.host === '127.0.0.1' ||
+                    source.target.base.host === 'localhost',
+                  insecureSkipVerify: source.target.tls.insecureSkipVerify,
+                }
+                const auth = { secrets, config: source.target.fields }
+                const now = new Date().toISOString()
+
+                const result =
+                  'kind' in source
+                    ? await executeSource({
+                        source: source.kind,
+                        target: binding,
+                        config: widget.config,
+                        auth,
+                        now,
+                      })
+                    : await executeOperation({
+                        manifest: source.manifest,
+                        operation: source.operation,
+                        target: binding,
+                        config: widget.config,
+                        auth,
+                        now,
+                      })
+
                 return result.ok
                   ? { ok: true, projection: result.projection }
                   : { ok: false, code: result.code }
@@ -198,19 +205,94 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     }
   }
 
-  function widgetKeyFor(widget: Resolved['widgets'][number]): string | null {
-    if (tree === null || widget.targetId === null) return null
-    const target = tree.targets.get(widget.targetId)
-    if (target === undefined) return null
-    const origin = `${target.base.scheme}://${target.base.host}:${target.base.port}`
-    const operation = widget.operations[0]
-    if (operation === undefined) return null
-    return fetchKey({
-      targetId: target.id,
-      targetRevision: `${origin}${target.base.basePath}`,
-      operation,
-      params: widget.config,
-    })
+  /**
+   * Every upstream fetch one widget needs, with the target and code path for each.
+   *
+   * Single-source widgets produce one entry per declared operation; a composite produces one per
+   * bound target per role. Both go through the same registration below, which is what keeps the
+   * "two widgets on the same Sonarr share one fetch" property true for composites too: the key is
+   * derived from what is requested, never from who asked.
+   */
+  type BoundTarget = NonNullable<ReturnType<ConfigTree['targets']['get']>>
+
+  type WidgetSource = {
+    readonly key: string
+    readonly target: BoundTarget
+    readonly origin: string
+  } & (
+    | { readonly kind: SourceKind }
+    | { readonly manifest: SingleManifest; readonly operation: string }
+  )
+
+  function widgetSources(
+    widget: Resolved['widgets'][number],
+    manifest: Manifest,
+    current: ConfigTree,
+  ): WidgetSource[] {
+    const sources: WidgetSource[] = []
+
+    const bind = (target: BoundTarget) => {
+      const origin = `${target.base.scheme}://${target.base.host}:${target.base.port}`
+      return { origin, revision: `${origin}${target.base.basePath}` }
+    }
+
+    if (isComposite(manifest)) {
+      for (const [roleName, role] of Object.entries(manifest.roles)) {
+        for (const targetId of widget.bindings[roleName] ?? []) {
+          const target = current.targets.get(targetId)
+          if (target === undefined) continue
+          // The target's own shape decides which source kind applies. A Sonarr bound into a
+          // calendar role is fetched as a Sonarr; there is no place for the user to get this
+          // wrong, and no place for a manifest to name a path for a service it was not given.
+          const kind = role.kinds[target.widgetType]
+          if (kind === undefined) continue
+          const { origin, revision } = bind(target)
+          sources.push({
+            key: fetchKey({
+              targetId: target.id,
+              targetRevision: revision,
+              // The manifest id is part of the operation identity because two composites over the
+              // same upstream project different items from it, so their cached values differ.
+              operation: `${manifest.id}:${roleName}:${target.widgetType}`,
+              params: widget.config,
+            }),
+            target,
+            origin,
+            kind,
+          })
+        }
+      }
+      return sources
+    }
+
+    if (widget.targetId === null) return sources
+    const target = current.targets.get(widget.targetId)
+    if (target === undefined) return sources
+    const { origin, revision } = bind(target)
+
+    for (const operation of widget.operations) {
+      sources.push({
+        key: fetchKey({
+          targetId: target.id,
+          targetRevision: revision,
+          operation,
+          params: widget.config,
+        }),
+        target,
+        origin,
+        manifest,
+        operation,
+      })
+    }
+    return sources
+  }
+
+  /** The cache keys a widget reads, in binding order. Empty when it is not fetchable yet. */
+  function widgetKeys(widget: Resolved['widgets'][number]): string[] {
+    if (tree === null) return []
+    const manifest = catalog.get(widget.type)
+    if (manifest === undefined) return []
+    return widgetSources(widget, manifest, tree).map((source) => source.key)
   }
 
   const context: AppContext = {
@@ -245,9 +327,11 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       if (resolved === null) await rebuild()
       const widget = (resolved as Resolved).widgets.find((candidate) => candidate.id === widgetId)
       if (widget === undefined) return false
-      const key = widgetKeyFor(widget)
-      if (key === null) return false
-      await scheduler.refreshNow(key)
+      const keys = widgetKeys(widget)
+      if (keys.length === 0) return false
+      // A composite refreshes all of its bindings, in parallel: asking for "the calendar" and
+      // getting only the first of five calendars refreshed would be a puzzling button.
+      await Promise.all(keys.map((key) => scheduler.refreshNow(key)))
       return true
     },
 
@@ -306,18 +390,35 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       const data: Record<string, unknown> = {}
       if (resolved === null) return data
       for (const widget of resolved.widgets) {
-        const key = widgetKeyFor(widget)
-        if (key === null) continue
-        const view = scheduler.view(key)
-        if (view === undefined) continue
+        const manifest = catalog.get(widget.type)
+        if (manifest === undefined) continue
+        const keys = widgetKeys(widget)
+        if (keys.length === 0) continue
+
+        if (!isComposite(manifest)) {
+          const view = scheduler.view(keys[0] as string)
+          if (view === undefined) continue
+          data[widget.id] = {
+            projection: view.projection,
+            meta: {
+              fetchedAt: view.fetchedAt,
+              ageMs: view.ageMs,
+              state: view.state,
+              ...(view.errorCode === null ? {} : { errorCode: view.errorCode }),
+            },
+          }
+          continue
+        }
+
+        const parts = keys.map((key) => partFor(key))
+        // Nothing has answered yet on any binding: leave the widget out entirely so the client
+        // shows its loading state, exactly as a single-source widget does before its first fetch.
+        if (parts.every((part) => part.pending)) continue
+        const composed = composeSources(manifest.compose, parts)
         data[widget.id] = {
-          projection: view.projection,
-          meta: {
-            fetchedAt: view.fetchedAt,
-            ageMs: view.ageMs,
-            state: view.state,
-            ...(view.errorCode === null ? {} : { errorCode: view.errorCode }),
-          },
+          projection: composed.projection,
+          meta: composed.meta,
+          sources: composed.sources,
         }
       }
       return data
@@ -401,19 +502,62 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     },
   }
 
+  /**
+   * One cache key can feed several widgets, and a composite is fed by several keys.
+   *
+   * So an update fans out to every widget that reads the key, and each is re-composed before it
+   * is broadcast — the browser receives finished widget state, never a fragment it would have to
+   * know how to merge.
+   */
   scheduler.onUpdate((key, entry) => {
     if (resolved === null) return
-    const widget = resolved.widgets.find((candidate) => widgetKeyFor(candidate) === key)
-    if (widget === undefined) return
-    hub.broadcast({
-      type: 'widget',
-      data: {
-        id: widget.id,
-        projection: entry.projection,
-        meta: { state: entry.state, ageMs: entry.ageMs, errorCode: entry.errorCode },
-      },
-    })
+    for (const widget of resolved.widgets) {
+      const keys = widgetKeys(widget)
+      if (!keys.includes(key)) continue
+      const manifest = catalog.get(widget.type)
+      if (manifest === undefined) continue
+
+      const payload = isComposite(manifest)
+        ? (() => {
+            const composed = composeSources(manifest.compose, keys.map(partFor))
+            return { projection: composed.projection, meta: composed.meta }
+          })()
+        : {
+            projection: entry.projection,
+            meta: { state: entry.state, ageMs: entry.ageMs, errorCode: entry.errorCode },
+          }
+
+      hub.broadcast({ type: 'widget', data: { id: widget.id, ...payload } })
+    }
   })
+
+  /** One cache key as a compose input. An unfetched key is pending, not failed. */
+  function partFor(key: string): SourcePart {
+    const view = scheduler.view(key)
+    if (view === undefined) {
+      return {
+        key,
+        pending: true,
+        ok: false,
+        items: [],
+        fetchedAt: null,
+        ageMs: 0,
+        state: 'error',
+        errorCode: null,
+      }
+    }
+    const projection = view.projection as { items?: SourcePart['items'] } | null
+    return {
+      key,
+      pending: false,
+      ok: view.state !== 'error' && projection !== null,
+      items: projection?.items ?? [],
+      fetchedAt: view.fetchedAt,
+      ageMs: view.ageMs,
+      state: view.state,
+      errorCode: view.errorCode,
+    }
+  }
 
   return context
 }

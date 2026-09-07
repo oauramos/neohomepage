@@ -1,0 +1,548 @@
+{
+  "manifestVersion": 1,
+  "id": "unified-calendar",
+  "version": "1.0.0",
+  "displayName": "Calendar",
+  "category": "information",
+  "icon": "calendar",
+  "docs": "https://neohomepage.dev/widgets/unified-calendar",
+  "config": [],
+  "roles": {
+    "calendars": {
+      "label": "Calendars",
+      "help": "Bind any mix of Sonarr, Radarr, Lidarr and iCalendar feeds; they merge into one agenda.",
+      "min": 1,
+      "max": 8,
+      "kinds": {
+        "sonarr-queue": {
+          "label": "Sonarr",
+          "fields": [
+            {
+              "name": "apiKey",
+              "kind": "secret",
+              "label": "API key",
+              "required": true,
+              "help": "Sonarr → Settings → General → API Key"
+            }
+          ],
+          "auth": {
+            "kind": "header",
+            "header": "X-Api-Key",
+            "value": "{{secret:apiKey}}"
+          },
+          "operation": {
+            "method": "GET",
+            "path": "/api/v3/calendar",
+            "decode": "json",
+            "query": {
+              "unmonitored": "false",
+              "includeSeries": "true"
+            }
+          },
+          "emits": [
+            {
+              "id": "airing",
+              "label": "Episodes airing",
+              "projection": {
+                "op": "map",
+                "as": "e",
+                "over": {
+                  "op": "filter",
+                  "as": "e",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "not",
+                    "of": {
+                      "op": "compare",
+                      "cmp": "eq",
+                      "left": {
+                        "op": "get",
+                        "path": "e.airDateUtc"
+                      },
+                      "right": {
+                        "op": "const",
+                        "value": null
+                      }
+                    }
+                  }
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "e.series.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": "Episode"
+                        }
+                      ]
+                    },
+                    "subtitle": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "e.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "e.airDateUtc"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "sonarr"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "radarr-queue": {
+          "label": "Radarr",
+          "fields": [
+            {
+              "name": "apiKey",
+              "kind": "secret",
+              "label": "API key",
+              "required": true,
+              "help": "Radarr → Settings → General → API Key"
+            }
+          ],
+          "auth": {
+            "kind": "header",
+            "header": "X-Api-Key",
+            "value": "{{secret:apiKey}}"
+          },
+          "operation": {
+            "method": "GET",
+            "path": "/api/v3/calendar",
+            "decode": "json",
+            "query": {
+              "unmonitored": "false"
+            }
+          },
+          "emits": [
+            {
+              "id": "cinema",
+              "label": "In cinemas",
+              "projection": {
+                "op": "map",
+                "as": "f",
+                "over": {
+                  "op": "filter",
+                  "as": "f",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "not",
+                    "of": {
+                      "op": "compare",
+                      "cmp": "eq",
+                      "left": {
+                        "op": "get",
+                        "path": "f.inCinemas"
+                      },
+                      "right": {
+                        "op": "const",
+                        "value": null
+                      }
+                    }
+                  }
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "f.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": "Film"
+                        }
+                      ]
+                    },
+                    "subtitle": {
+                      "op": "const",
+                      "value": "In cinemas"
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "f.inCinemas"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "radarr"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "physical",
+              "label": "Physical release",
+              "projection": {
+                "op": "map",
+                "as": "f",
+                "over": {
+                  "op": "filter",
+                  "as": "f",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "not",
+                    "of": {
+                      "op": "compare",
+                      "cmp": "eq",
+                      "left": {
+                        "op": "get",
+                        "path": "f.physicalRelease"
+                      },
+                      "right": {
+                        "op": "const",
+                        "value": null
+                      }
+                    }
+                  }
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "f.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": "Film"
+                        }
+                      ]
+                    },
+                    "subtitle": {
+                      "op": "const",
+                      "value": "Physical release"
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "f.physicalRelease"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "radarr"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "digital",
+              "label": "Digital release",
+              "projection": {
+                "op": "map",
+                "as": "f",
+                "over": {
+                  "op": "filter",
+                  "as": "f",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "not",
+                    "of": {
+                      "op": "compare",
+                      "cmp": "eq",
+                      "left": {
+                        "op": "get",
+                        "path": "f.digitalRelease"
+                      },
+                      "right": {
+                        "op": "const",
+                        "value": null
+                      }
+                    }
+                  }
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "f.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": "Film"
+                        }
+                      ]
+                    },
+                    "subtitle": {
+                      "op": "const",
+                      "value": "Digital release"
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "f.digitalRelease"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "radarr"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "lidarr-albums": {
+          "label": "Lidarr",
+          "fields": [
+            {
+              "name": "apiKey",
+              "kind": "secret",
+              "label": "API key",
+              "required": true,
+              "help": "Lidarr → Settings → General → API Key"
+            }
+          ],
+          "auth": {
+            "kind": "header",
+            "header": "X-Api-Key",
+            "value": "{{secret:apiKey}}"
+          },
+          "operation": {
+            "method": "GET",
+            "path": "/api/v1/calendar",
+            "decode": "json",
+            "query": {
+              "unmonitored": "false",
+              "includeArtist": "true"
+            }
+          },
+          "emits": [
+            {
+              "id": "releases",
+              "label": "Album releases",
+              "projection": {
+                "op": "map",
+                "as": "a",
+                "over": {
+                  "op": "filter",
+                  "as": "a",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "not",
+                    "of": {
+                      "op": "compare",
+                      "cmp": "eq",
+                      "left": {
+                        "op": "get",
+                        "path": "a.releaseDate"
+                      },
+                      "right": {
+                        "op": "const",
+                        "value": null
+                      }
+                    }
+                  }
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "a.artist.artistName"
+                        },
+                        {
+                          "op": "const",
+                          "value": "Album"
+                        }
+                      ]
+                    },
+                    "subtitle": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "a.title"
+                        },
+                        {
+                          "op": "const",
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "a.releaseDate"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "lidarr"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ics-feed": {
+          "label": "iCalendar feed",
+          "fields": [],
+          "auth": {
+            "kind": "none"
+          },
+          "operation": {
+            "method": "GET",
+            "path": "/",
+            "decode": "ics"
+          },
+          "emits": [
+            {
+              "id": "events",
+              "label": "Events",
+              "projection": {
+                "op": "map",
+                "as": "v",
+                "over": {
+                  "op": "get",
+                  "path": "$.events"
+                },
+                "body": {
+                  "op": "pick",
+                  "fields": {
+                    "title": {
+                      "op": "get",
+                      "path": "v.summary"
+                    },
+                    "subtitle": {
+                      "op": "coalesce",
+                      "of": [
+                        {
+                          "op": "get",
+                          "path": "v.location"
+                        },
+                        {
+                          "op": "const",
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "badge": {
+                      "op": "format",
+                      "as": "relativeTime",
+                      "of": {
+                        "op": "get",
+                        "path": "v.start"
+                      }
+                    },
+                    "icon": {
+                      "op": "const",
+                      "value": "calendar"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "compose": {
+    "sortBy": [
+      {
+        "path": "badge.iso",
+        "direction": "asc"
+      }
+    ],
+    "distinctBy": "title",
+    "limit": 20,
+    "partial": true
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 900000,
+    "minIntervalMs": 300000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "coalesce",
+      "compare",
+      "const",
+      "filter",
+      "format",
+      "get",
+      "map",
+      "not",
+      "pick"
+    ],
+    "authKinds": [
+      "header",
+      "none"
+    ],
+    "fetchKinds": [
+      "ics",
+      "json"
+    ]
+  }
+}

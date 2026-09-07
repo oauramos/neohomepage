@@ -1,0 +1,15 @@
+{
+  "stats": [
+    {
+      "label": "Streaming",
+      "value": 1
+    }
+  ],
+  "items": [
+    {
+      "title": "Arrival",
+      "subtitle": "otavio",
+      "badge": "Jellyfin Web"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "status": "ok",
+  "stats": [
+    {
+      "label": "Download",
+      "value": "943 Mbps"
+    },
+    {
+      "label": "Upload",
+      "value": "512 Mbps"
+    },
+    {
+      "label": "Ping",
+      "value": "8s",
+      "tone": "ok"
+    },
+    {
+      "label": "Tested",
+      "value": {
+        "v": "20 minutes ago",
+        "iso": "2026-09-06T11:40:00.000Z",
+        "rel": true
+      }
+    }
+  ]
+}

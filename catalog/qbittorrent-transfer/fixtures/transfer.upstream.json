@@ -1,0 +1,8 @@
+{
+  "connection_status": "connected",
+  "dl_info_speed": 4194304,
+  "dl_info_data": 1099511627776,
+  "up_info_speed": 524288,
+  "up_info_data": 219902325555,
+  "dht_nodes": 342
+}

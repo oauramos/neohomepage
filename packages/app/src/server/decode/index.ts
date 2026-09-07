@@ -1,5 +1,6 @@
 import type { Decoder } from '@neohomepage/catalog-schema'
 import type { Json } from '@neohomepage/catalog-schema'
+import { decodeIcs, DEFAULT_ICS_WINDOW, IcsParseError } from './ics.ts'
 
 /**
  * Decoders run server-side, before the projection DSL ever sees data.
@@ -34,16 +35,23 @@ function decodeText(body: string): Json {
   return body
 }
 
-export function decode(kind: Decoder, body: string): Json {
+/**
+ * What a decoder needs beyond the bytes.
+ *
+ * `now` is threaded from the request rather than read here so decoding stays a pure function of
+ * its inputs: recurrence expansion needs a window, and a window anchored on a wall-clock read
+ * would make the same calendar decode differently in a test than in production.
+ */
+export type DecodeContext = { readonly now: string }
+
+export function decode(kind: Decoder, body: string, context: DecodeContext): Json {
   switch (kind) {
     case 'json':
       return decodeJson(body)
     case 'text':
       return decodeText(body)
     case 'ics':
-      // Deliberately explicit rather than silently returning the raw text, which would produce a
-      // widget that renders an unparsed VCALENDAR blob and no error. Lands with the calendar.
-      throw new DecodeError('unsupported-decoder', 'the ics decoder is not available in this build')
+      return decodeIcalendar(body, context)
     default: {
       const exhaustive: never = kind
       throw new DecodeError('unknown-decoder', `unknown decoder ${String(exhaustive)}`)
@@ -51,5 +59,18 @@ export function decode(kind: Decoder, body: string): Json {
   }
 }
 
+function decodeIcalendar(body: string, context: DecodeContext): Json {
+  try {
+    return decodeIcs(body, { now: context.now, ...DEFAULT_ICS_WINDOW }) as unknown as Json
+  } catch (error) {
+    if (error instanceof IcsParseError) {
+      throw new DecodeError('bad-ics', 'the target did not return valid iCalendar data', {
+        cause: error,
+      })
+    }
+    throw error
+  }
+}
+
 /** Decoders this build supports, for the catalog's capability check. */
-export const SUPPORTED_DECODERS: readonly Decoder[] = ['json', 'text']
+export const SUPPORTED_DECODERS: readonly Decoder[] = ['ics', 'json', 'text']

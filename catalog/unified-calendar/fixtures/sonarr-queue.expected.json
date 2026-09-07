@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "title": "Some Show",
+      "subtitle": "The Episode",
+      "badge": {
+        "v": "in 13 hours",
+        "iso": "2026-09-07T01:00:00.000Z",
+        "rel": true
+      },
+      "icon": "sonarr"
+    },
+    {
+      "title": "Some Show",
+      "subtitle": "Another One",
+      "badge": {
+        "v": "in 5 days",
+        "iso": "2026-09-11T01:00:00.000Z",
+        "rel": true
+      },
+      "icon": "sonarr"
+    }
+  ]
+}

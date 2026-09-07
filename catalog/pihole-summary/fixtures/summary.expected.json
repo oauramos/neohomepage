@@ -1,0 +1,16 @@
+{
+  "stats": [
+    {
+      "label": "Blocked",
+      "value": "9,042"
+    },
+    {
+      "label": "Queries",
+      "value": "48,213"
+    },
+    {
+      "label": "Blocked %",
+      "value": "18.8%"
+    }
+  ]
+}

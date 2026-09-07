@@ -1,0 +1,25 @@
+{
+  "heartbeatList": {
+    "1": [
+      {
+        "status": 1,
+        "time": "2026-09-06 12:00:00",
+        "ping": 22
+      }
+    ]
+  },
+  "uptimeList": {
+    "1_24": 0.9993
+  },
+  "uptimeDown": 0,
+  "monitors": [
+    {
+      "id": 1,
+      "name": "NAS"
+    },
+    {
+      "id": 2,
+      "name": "Router"
+    }
+  ]
+}

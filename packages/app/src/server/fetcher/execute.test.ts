@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
-import { manifestSchema, type Manifest, type Operation } from '@neohomepage/catalog-schema'
+import {
+  singleManifestSchema,
+  type Operation,
+  type SingleManifest,
+} from '@neohomepage/catalog-schema'
 import { buildOperationUrl, executeOperation, OperationError } from './execute.ts'
 
 const servers: Server[] = []
@@ -24,7 +28,7 @@ afterEach(async () => {
   }
 })
 
-const MANIFEST: Manifest = manifestSchema.parse({
+const MANIFEST: SingleManifest = singleManifestSchema.parse({
   manifestVersion: 1,
   id: 'demo',
   version: '1.0.0',
@@ -72,6 +76,20 @@ describe('the central invariant: the caller never names a URL', () => {
   it('builds the URL from the manifest template and the bound target', () => {
     const url = buildOperationUrl(operation, target('http://10.0.0.20:8989'), { maxItems: 8 })
     expect(url.toString()).toBe('http://10.0.0.20:8989/api/v3/queue?pageSize=8')
+  })
+
+  it('treats a bare "/" as the target base path exactly', () => {
+    // What lets an iCalendar feed keep its whole path in the target. Through a config hole the
+    // value would be percent-encoded and /dav/cal.ics would become /dav%2Fcal.ics.
+    const feed = { ...operation, path: '/', decode: 'ics' as const }
+    expect(
+      buildOperationUrl(
+        feed,
+        { ...target('http://nas.invalid:5232'), basePath: '/dav/cal.ics' },
+        {},
+      ).toString(),
+    ).toBe('http://nas.invalid:5232/dav/cal.ics?pageSize=')
+    expect(buildOperationUrl(feed, target('http://nas.invalid:5232'), {}).pathname).toBe('/')
   })
 
   it('applies the target base path', () => {

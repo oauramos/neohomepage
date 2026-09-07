@@ -1,0 +1,10 @@
+{
+  "status": "ok",
+  "items": [
+    {
+      "title": "sample-label",
+      "subtitle": "sample-label",
+      "href": "http://service.invalid:8989/"
+    }
+  ]
+}

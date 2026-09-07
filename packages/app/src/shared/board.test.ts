@@ -10,6 +10,7 @@ const widget = (overrides: Partial<ResolvedWidget> = {}): ResolvedWidget => ({
   type: 'sonarr-queue',
   title: 'Sonarr queue',
   template: 'list',
+  bindings: {},
   icon: 'sonarr',
   targetId: 'tSonarr',
   config: {},

@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "title": "A Film",
+      "subtitle": "In cinemas",
+      "badge": {
+        "v": "in 2 days",
+        "iso": "2026-09-08T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "radarr"
+    },
+    {
+      "title": "A Film",
+      "subtitle": "Physical release",
+      "badge": {
+        "v": "in 2 months",
+        "iso": "2026-11-20T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "radarr"
+    },
+    {
+      "title": "A Film",
+      "subtitle": "Digital release",
+      "badge": {
+        "v": "in 2 months",
+        "iso": "2026-10-30T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "radarr"
+    },
+    {
+      "title": "Straight To Streaming",
+      "subtitle": "Digital release",
+      "badge": {
+        "v": "in 3 days",
+        "iso": "2026-09-09T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "radarr"
+    }
+  ]
+}

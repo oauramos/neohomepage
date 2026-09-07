@@ -1,0 +1,180 @@
+{
+  "manifestVersion": 1,
+  "id": "speedtest-tracker",
+  "version": "1.0.0",
+  "displayName": "Speedtest Tracker",
+  "category": "network",
+  "icon": "speedtest-tracker",
+  "docs": "https://neohomepage.dev/widgets/speedtest-tracker",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API token",
+        "required": true,
+        "help": "Speedtest Tracker → Settings → API tokens"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "value": "Bearer {{secret:apiKey}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "latest": {
+      "method": "GET",
+      "path": "/api/v1/results/latest",
+      "decode": "json",
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "mapValue",
+        "of": {
+          "op": "get",
+          "path": "$.data.status"
+        },
+        "cases": {
+          "completed": "ok",
+          "failed": "down"
+        },
+        "fallback": {
+          "op": "const",
+          "value": "unknown"
+        }
+      },
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Download"
+              },
+              "value": {
+                "op": "format",
+                "as": "bitrate",
+                "of": {
+                  "op": "get",
+                  "path": "$.data.download"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Upload"
+              },
+              "value": {
+                "op": "format",
+                "as": "bitrate",
+                "of": {
+                  "op": "get",
+                  "path": "$.data.upload"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Ping"
+              },
+              "value": {
+                "op": "format",
+                "as": "duration",
+                "of": {
+                  "op": "get",
+                  "path": "$.data.ping"
+                }
+              },
+              "tone": {
+                "op": "if",
+                "cond": {
+                  "op": "compare",
+                  "cmp": "gt",
+                  "left": {
+                    "op": "get",
+                    "path": "$.data.ping"
+                  },
+                  "right": {
+                    "op": "const",
+                    "value": 60
+                  }
+                },
+                "then": {
+                  "op": "const",
+                  "value": "warn"
+                },
+                "else": {
+                  "op": "const",
+                  "value": "ok"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Tested"
+              },
+              "value": {
+                "op": "format",
+                "as": "relativeTime",
+                "of": {
+                  "op": "get",
+                  "path": "$.data.created_at"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 900000,
+    "minIntervalMs": 300000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "compare",
+      "concat",
+      "const",
+      "format",
+      "get",
+      "if",
+      "mapValue",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

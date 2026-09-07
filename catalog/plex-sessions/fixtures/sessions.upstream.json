@@ -1,0 +1,26 @@
+{
+  "MediaContainer": {
+    "size": 2,
+    "Metadata": [
+      {
+        "grandparentTitle": "Some Show",
+        "title": "The Episode",
+        "viewOffset": 640000,
+        "duration": 2700000,
+        "Player": {
+          "title": "Living room",
+          "state": "playing"
+        }
+      },
+      {
+        "title": "A Film",
+        "viewOffset": 300000,
+        "duration": 7200000,
+        "Player": {
+          "title": "iPad",
+          "state": "paused"
+        }
+      }
+    ]
+  }
+}

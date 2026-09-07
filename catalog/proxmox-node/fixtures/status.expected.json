@@ -1,0 +1,22 @@
+{
+  "gauges": [
+    {
+      "label": "Memory",
+      "used": 12884901888,
+      "total": 33285996544,
+      "unit": "bytes"
+    },
+    {
+      "label": "Root FS",
+      "used": 21474836480,
+      "total": 100000000000,
+      "unit": "bytes"
+    },
+    {
+      "label": "Swap",
+      "used": 0,
+      "total": 8589934592,
+      "unit": "bytes"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "name": "tank",
+    "size": 21990232555520,
+    "healthy": true,
+    "topology": {
+      "data": [
+        {
+          "stats": {
+            "allocated": 8796093022208
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "name": "fast",
+    "size": 1099511627776,
+    "healthy": true,
+    "topology": {
+      "data": [
+        {
+          "stats": {
+            "allocated": 274877906944
+          }
+        }
+      ]
+    }
+  }
+]

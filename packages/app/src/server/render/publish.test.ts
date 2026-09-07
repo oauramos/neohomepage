@@ -39,6 +39,7 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         template: 'list',
         icon: 'sonarr',
         targetId: 'tSonarr',
+        bindings: {},
         config: {},
         operations: ['queue'],
         pollIntervalMs: 60_000,

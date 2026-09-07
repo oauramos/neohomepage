@@ -1,0 +1,11 @@
+{
+  "data": {
+    "id": 4211,
+    "status": "completed",
+    "download": 943000000,
+    "upload": 512000000,
+    "ping": 8.4,
+    "created_at": "2026-09-06T11:40:00.000000Z",
+    "service": "Ookla"
+  }
+}

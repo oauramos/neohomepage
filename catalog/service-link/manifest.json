@@ -1,0 +1,95 @@
+{
+  "manifestVersion": 1,
+  "id": "service-link",
+  "version": "1.0.0",
+  "displayName": "Service link",
+  "category": "misc",
+  "icon": "link",
+  "docs": "https://neohomepage.dev/widgets/service-link",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [
+    {
+      "name": "label",
+      "kind": "string",
+      "label": "Label",
+      "required": true
+    },
+    {
+      "name": "path",
+      "kind": "string",
+      "label": "Path",
+      "default": "/"
+    }
+  ],
+  "operations": {
+    "root": {
+      "method": "GET",
+      "path": "/",
+      "decode": "text"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "const",
+        "value": "ok"
+      },
+      "items": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "title": {
+                "op": "get",
+                "path": "opt.label"
+              },
+              "subtitle": {
+                "op": "get",
+                "path": "opt.label"
+              },
+              "href": {
+                "op": "targetUrl",
+                "path": {
+                  "op": "get",
+                  "path": "opt.path"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "link-tile"
+  },
+  "poll": {
+    "defaultIntervalMs": 300000,
+    "minIntervalMs": 60000
+  },
+  "requires": {
+    "templates": [
+      "link-tile"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "get",
+      "pick",
+      "targetUrl"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "text"
+    ]
+  }
+}

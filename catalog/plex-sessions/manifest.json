@@ -1,0 +1,190 @@
+{
+  "manifestVersion": 1,
+  "id": "plex-sessions",
+  "version": "1.0.0",
+  "displayName": "Plex",
+  "category": "media",
+  "icon": "plex",
+  "docs": "https://neohomepage.dev/widgets/plex-sessions",
+  "target": {
+    "fields": [
+      {
+        "name": "token",
+        "kind": "secret",
+        "label": "X-Plex-Token",
+        "required": true,
+        "help": "From any Plex web URL, or Settings → Network → Show Advanced"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "X-Plex-Token",
+      "value": "{{secret:token}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "sessions": {
+      "method": "GET",
+      "path": "/status/sessions",
+      "decode": "json",
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "if",
+        "cond": {
+          "op": "compare",
+          "cmp": "gt",
+          "left": {
+            "op": "count",
+            "of": {
+              "op": "get",
+              "path": "$.MediaContainer.Metadata"
+            }
+          },
+          "right": {
+            "op": "const",
+            "value": 0
+          }
+        },
+        "then": {
+          "op": "const",
+          "value": "ok"
+        },
+        "else": {
+          "op": "const",
+          "value": "unknown"
+        }
+      },
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Streams"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.MediaContainer.Metadata"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "map",
+        "as": "s",
+        "over": {
+          "op": "limit",
+          "n": 12,
+          "over": {
+            "op": "get",
+            "path": "$.MediaContainer.Metadata"
+          }
+        },
+        "body": {
+          "op": "pick",
+          "fields": {
+            "title": {
+              "op": "coalesce",
+              "of": [
+                {
+                  "op": "get",
+                  "path": "s.grandparentTitle"
+                },
+                {
+                  "op": "get",
+                  "path": "s.title"
+                },
+                {
+                  "op": "const",
+                  "value": "Playing"
+                }
+              ]
+            },
+            "subtitle": {
+              "op": "get",
+              "path": "s.title"
+            },
+            "badge": {
+              "op": "coalesce",
+              "of": [
+                {
+                  "op": "get",
+                  "path": "s.Player.title"
+                },
+                {
+                  "op": "const",
+                  "value": "player"
+                }
+              ]
+            },
+            "progress": {
+              "op": "clamp",
+              "min": 0,
+              "max": 1,
+              "of": {
+                "op": "arith",
+                "fn": "div",
+                "of": [
+                  {
+                    "op": "get",
+                    "path": "s.viewOffset"
+                  },
+                  {
+                    "op": "get",
+                    "path": "s.duration"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "arith",
+      "clamp",
+      "coalesce",
+      "compare",
+      "concat",
+      "const",
+      "count",
+      "get",
+      "if",
+      "limit",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

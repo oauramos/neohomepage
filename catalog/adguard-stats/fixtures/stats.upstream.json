@@ -1,0 +1,6 @@
+{
+  "num_dns_queries": 91230,
+  "num_blocked_filtering": 14882,
+  "num_replaced_safebrowsing": 2,
+  "avg_processing_time": 0.0231
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "title": "A Film",
+    "inCinemas": "2026-09-08T00:00:00Z",
+    "physicalRelease": "2026-11-20T00:00:00Z",
+    "digitalRelease": "2026-10-30T00:00:00Z"
+  },
+  {
+    "title": "Straight To Streaming",
+    "inCinemas": null,
+    "physicalRelease": null,
+    "digitalRelease": "2026-09-09T00:00:00Z"
+  }
+]

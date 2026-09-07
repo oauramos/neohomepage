@@ -1,0 +1,210 @@
+{
+  "manifestVersion": 1,
+  "id": "portainer-containers",
+  "version": "1.0.0",
+  "displayName": "Portainer",
+  "category": "virtualisation",
+  "icon": "portainer",
+  "docs": "https://neohomepage.dev/widgets/portainer-containers",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "Access token",
+        "required": true,
+        "help": "Portainer → My account → Access tokens"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "X-API-Key",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [
+    {
+      "name": "endpointId",
+      "kind": "integer",
+      "label": "Environment ID",
+      "default": 1,
+      "min": 1,
+      "max": 9999,
+      "help": "Portainer's numeric environment id; 1 on a single-host install"
+    }
+  ],
+  "operations": {
+    "containers": {
+      "method": "GET",
+      "path": "/api/endpoints/{{config:endpointId}}/docker/containers/json",
+      "decode": "json",
+      "query": {
+        "all": "true"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "if",
+        "cond": {
+          "op": "compare",
+          "cmp": "gt",
+          "left": {
+            "op": "count",
+            "of": {
+              "op": "filter",
+              "as": "c",
+              "over": {
+                "op": "get",
+                "path": "$"
+              },
+              "where": {
+                "op": "compare",
+                "cmp": "ne",
+                "left": {
+                  "op": "get",
+                  "path": "c.State"
+                },
+                "right": {
+                  "op": "const",
+                  "value": "running"
+                }
+              }
+            }
+          },
+          "right": {
+            "op": "const",
+            "value": 0
+          }
+        },
+        "then": {
+          "op": "const",
+          "value": "degraded"
+        },
+        "else": {
+          "op": "const",
+          "value": "ok"
+        }
+      },
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Running"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "filter",
+                  "as": "c",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "compare",
+                    "cmp": "eq",
+                    "left": {
+                      "op": "get",
+                      "path": "c.State"
+                    },
+                    "right": {
+                      "op": "const",
+                      "value": "running"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Stopped"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "filter",
+                  "as": "c",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "where": {
+                    "op": "compare",
+                    "cmp": "eq",
+                    "left": {
+                      "op": "get",
+                      "path": "c.State"
+                    },
+                    "right": {
+                      "op": "const",
+                      "value": "exited"
+                    }
+                  }
+                }
+              },
+              "tone": {
+                "op": "const",
+                "value": "warn"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Total"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "compare",
+      "concat",
+      "const",
+      "count",
+      "filter",
+      "get",
+      "if",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

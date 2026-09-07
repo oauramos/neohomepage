@@ -6,7 +6,8 @@ import { layoutFileSchema, targetSchema, widgetSchema } from '../config/schema.t
 import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts'
 import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
-import { executeOperation } from '../fetcher/execute.ts'
+import { manifestView } from '../../shared/manifest-view.ts'
+import { probe } from '../fetcher/probe.ts'
 import { loadSecrets } from '../secrets/vault.ts'
 import { env } from '../env.ts'
 
@@ -56,16 +57,20 @@ export function createApiRoutes(options: ApiOptions): Hono {
   }
 
   api.get('/catalog', (c) => {
-    const manifests = [...options.catalog().values()].map((manifest) => ({
-      id: manifest.id,
-      displayName: manifest.displayName,
-      category: manifest.category,
-      icon: manifest.icon,
-      version: manifest.version,
-      template: manifest.presentation.template,
-      operations: Object.keys(manifest.operations),
-      needsCredential: manifest.target.fields.some((field) => field.kind === 'secret'),
-    }))
+    const manifests = [...options.catalog().values()].map((manifest) => {
+      const view = manifestView(manifest)
+      return {
+        id: view.id,
+        displayName: view.displayName,
+        category: view.category,
+        icon: view.icon,
+        version: view.version,
+        template: view.template,
+        shape: view.shape,
+        operations: view.operations,
+        needsCredential: view.needsCredential,
+      }
+    })
     return c.json({ manifests })
   })
 
@@ -79,15 +84,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
   api.get('/catalog/:id/schema', (c) => {
     const manifest = options.catalog().get(c.req.param('id'))
     if (manifest === undefined) return c.json({ error: 'unknown widget type' }, 404)
-    return c.json({
-      id: manifest.id,
-      displayName: manifest.displayName,
-      template: manifest.presentation.template,
-      target: { fields: manifest.target.fields, authKind: manifest.target.auth.kind },
-      config: manifest.config,
-      operations: Object.keys(manifest.operations),
-      poll: manifest.poll,
-    })
+    return c.json(manifestView(manifest))
   })
 
   /**
@@ -404,6 +401,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
       type?: string
       base?: { scheme?: string; host?: string; port?: number; basePath?: string }
       operation?: string
+      /** Composite widgets: which source kind this target is being bound as. */
+      kind?: string
       config?: Record<string, unknown>
       fields?: Record<string, string | number | boolean>
       secrets?: Record<string, string>
@@ -414,13 +413,11 @@ export function createApiRoutes(options: ApiOptions): Hono {
       return c.json({ error: 'base.host and base.port are required' }, 400)
     }
 
-    const operation = body.operation ?? Object.keys(manifest.operations)[0]
-    if (operation === undefined) return c.json({ error: 'this widget has no operations' }, 400)
-
     const startedAt = performance.now()
-    const outcome = await executeOperation({
+    const outcome = await probe({
       manifest,
-      operation,
+      operation: body.operation,
+      kind: body.kind,
       target: {
         origin: `${body.base.scheme ?? 'http'}://${body.base.host}:${body.base.port}`,
         basePath: body.base.basePath ?? '',

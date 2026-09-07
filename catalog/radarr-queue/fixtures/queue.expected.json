@@ -1,0 +1,24 @@
+{
+  "stats": [
+    {
+      "label": "Queue",
+      "value": 2
+    },
+    {
+      "label": "Remaining",
+      "value": "2 GiB"
+    }
+  ],
+  "items": [
+    {
+      "title": "Arrival",
+      "subtitle": "import pending",
+      "badge": "0 B"
+    },
+    {
+      "title": "Dune: Part Three",
+      "subtitle": "downloading",
+      "badge": "2 GiB"
+    }
+  ]
+}

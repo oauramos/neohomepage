@@ -248,7 +248,8 @@ async function runFetch(argv: readonly string[]): Promise<number> {
 
   const { ConfigStore } = await import('../server/store/configstore.ts')
   const { loadCatalogDirectory } = await import('../server/catalog/load.ts')
-  const { executeOperation } = await import('../server/fetcher/execute.ts')
+  const { probe } = await import('../server/fetcher/probe.ts')
+  const { isComposite } = await import('@neohomepage/catalog-schema')
   const { loadSecrets } = await import('../server/secrets/vault.ts')
   const { resolve: resolvePath } = await import('node:path')
 
@@ -270,45 +271,93 @@ async function runFetch(argv: readonly string[]): Promise<number> {
     return 2
   }
 
-  const target = widget.targetId === null ? undefined : tree.targets.get(widget.targetId)
-  if (target === undefined) {
-    console.error(`widget "${widgetId}" has no bound target`)
-    return 2
-  }
-
   const vault = await loadSecrets(env.secretsDir)
-  const secrets: Record<string, string> = {}
-  for (const [field, ref] of Object.entries(target.secrets)) {
-    const value = vault.get(ref.$secret)
-    if (value !== undefined) secrets[field] = value
-  }
-
   const requested = argv.find((a) => a.startsWith('--operation='))?.split('=')[1]
-  const operations = requested !== undefined ? [requested] : Object.keys(manifest.operations)
+
+  /**
+   * Every (target, probe) pair this widget would fetch.
+   *
+   * A composite has one per bound target rather than one per operation, and `neo fetch` prints a
+   * line for each. That is the point of the command against real hardware: a calendar that says
+   * "✓" while three of its five sources are silently unbound has told you nothing.
+   */
+  const probes: {
+    label: string
+    target: NonNullable<ReturnType<typeof tree.targets.get>>
+    kind?: string
+    operation?: string
+  }[] = []
+
+  if (isComposite(manifest)) {
+    for (const [roleName, role] of Object.entries(manifest.roles)) {
+      for (const targetId of widget.bindings[roleName] ?? []) {
+        const bound = tree.targets.get(targetId)
+        if (bound === undefined) {
+          console.error(`✗ ${widgetId}/${roleName}  missing target "${targetId}"`)
+          continue
+        }
+        if (role.kinds[bound.widgetType] === undefined) {
+          console.error(
+            `✗ ${widgetId}/${roleName}  target "${targetId}" is a ${bound.widgetType}, ` +
+              `which role "${roleName}" does not accept`,
+          )
+          continue
+        }
+        probes.push({
+          label: `${roleName}:${bound.widgetType}:${bound.id}`,
+          target: bound,
+          kind: bound.widgetType,
+        })
+      }
+    }
+    if (probes.length === 0) {
+      console.error(`widget "${widgetId}" has no usable bindings`)
+      return 2
+    }
+  } else {
+    const target = widget.targetId === null ? undefined : tree.targets.get(widget.targetId)
+    if (target === undefined) {
+      console.error(`widget "${widgetId}" has no bound target`)
+      return 2
+    }
+    for (const operation of requested !== undefined
+      ? [requested]
+      : Object.keys(manifest.operations)) {
+      probes.push({ label: operation, target, operation })
+    }
+  }
 
   let failures = 0
-  for (const operation of operations) {
+  for (const entry of probes) {
+    const secrets: Record<string, string> = {}
+    for (const [field, ref] of Object.entries(entry.target.secrets)) {
+      const value = vault.get(ref.$secret)
+      if (value !== undefined) secrets[field] = value
+    }
+
     const startedAt = performance.now()
-    const result = await executeOperation({
+    const result = await probe({
       manifest,
-      operation,
+      ...(entry.kind === undefined ? {} : { kind: entry.kind }),
+      ...(entry.operation === undefined ? {} : { operation: entry.operation }),
       target: {
-        origin: `${target.base.scheme}://${target.base.host}:${target.base.port}`,
-        basePath: target.base.basePath,
-        allowLoopback: target.base.host === '127.0.0.1' || target.base.host === 'localhost',
-        insecureSkipVerify: target.tls.insecureSkipVerify,
+        origin: `${entry.target.base.scheme}://${entry.target.base.host}:${entry.target.base.port}`,
+        basePath: entry.target.base.basePath,
+        allowLoopback:
+          entry.target.base.host === '127.0.0.1' || entry.target.base.host === 'localhost',
+        insecureSkipVerify: entry.target.tls.insecureSkipVerify,
       },
       config: widget.config,
-      auth: { secrets, config: target.fields },
+      auth: { secrets, config: entry.target.fields },
       now: new Date().toISOString(),
     })
     const ms = Math.round(performance.now() - startedAt)
 
     if (result.ok) {
-      console.log(`✓ ${widgetId}/${operation}  ${manifest.presentation.template}  ${ms}ms`)
+      console.log(`✓ ${widgetId}/${entry.label}  ${manifest.presentation.template}  ${ms}ms`)
       console.log(JSON.stringify(result.projection, null, 2))
     } else {
-      console.error(`✗ ${widgetId}/${operation}  ${result.code}: ${result.message}  ${ms}ms`)
+      console.error(`✗ ${widgetId}/${entry.label}  ${result.code}: ${result.message}  ${ms}ms`)
       failures++
     }
   }

@@ -1,0 +1,91 @@
+{
+  "manifestVersion": 1,
+  "id": "truenas-pools",
+  "version": "1.0.0",
+  "displayName": "TrueNAS pools",
+  "category": "nas",
+  "icon": "truenas",
+  "docs": "https://neohomepage.dev/widgets/truenas-pools",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "required": true,
+        "help": "TrueNAS → Credentials → API Keys"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "value": "Bearer {{secret:apiKey}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "pools": {
+      "method": "GET",
+      "path": "/api/v2.0/pool",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "gauges": {
+        "op": "map",
+        "over": {
+          "op": "get",
+          "path": "$"
+        },
+        "as": "p",
+        "body": {
+          "op": "pick",
+          "fields": {
+            "label": {
+              "op": "get",
+              "path": "p.name"
+            },
+            "used": {
+              "op": "get",
+              "path": "p.topology.data.0.stats.allocated"
+            },
+            "total": {
+              "op": "get",
+              "path": "p.size"
+            },
+            "unit": {
+              "op": "const",
+              "value": "bytes"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "gauge-set"
+  },
+  "poll": {
+    "defaultIntervalMs": 300000,
+    "minIntervalMs": 60000
+  },
+  "requires": {
+    "templates": [
+      "gauge-set"
+    ],
+    "opcodes": [
+      "const",
+      "get",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

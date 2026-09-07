@@ -12,7 +12,7 @@
         "name": "apiKey",
         "kind": "secret",
         "label": "API key",
-        "help": "Sonarr \u2192 Settings \u2192 General \u2192 API Key",
+        "help": "Sonarr → Settings → General → API Key",
         "required": true
       }
     ],

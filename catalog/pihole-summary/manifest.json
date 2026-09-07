@@ -1,0 +1,133 @@
+{
+  "manifestVersion": 1,
+  "id": "pihole-summary",
+  "version": "1.0.0",
+  "displayName": "Pi-hole",
+  "category": "network-dns",
+  "icon": "pi-hole",
+  "docs": "https://neohomepage.dev/widgets/pihole-summary",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API token",
+        "required": true,
+        "help": "Pi-hole → Settings → API → Show API token"
+      }
+    ],
+    "auth": {
+      "kind": "query",
+      "param": "auth",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "summary": {
+      "method": "GET",
+      "path": "/admin/api.php",
+      "decode": "json",
+      "query": {
+        "summaryRaw": ""
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Blocked"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.ads_blocked_today"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Queries"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.dns_queries_today"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Blocked %"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "arith",
+                  "fn": "div",
+                  "of": [
+                    {
+                      "op": "get",
+                      "path": "$.ads_percentage_today"
+                    },
+                    {
+                      "op": "const",
+                      "value": 100
+                    }
+                  ]
+                },
+                "as": "percent"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "arith",
+      "concat",
+      "const",
+      "format",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "query"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

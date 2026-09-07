@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "title": "A Band",
+      "subtitle": "The Record",
+      "badge": {
+        "v": "in 6 days",
+        "iso": "2026-09-12T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "lidarr"
+    }
+  ]
+}

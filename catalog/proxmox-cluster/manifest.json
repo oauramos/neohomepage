@@ -1,0 +1,150 @@
+{
+  "manifestVersion": 1,
+  "id": "proxmox-cluster",
+  "version": "1.0.0",
+  "displayName": "Proxmox cluster",
+  "category": "virtualization",
+  "icon": "proxmox",
+  "docs": "https://neohomepage.dev/widgets/proxmox-cluster",
+  "target": {
+    "fields": [
+      {
+        "name": "tokenId",
+        "kind": "string",
+        "label": "Token id",
+        "required": true,
+        "help": "For example root@pam!neohomepage"
+      },
+      {
+        "name": "tokenSecret",
+        "kind": "secret",
+        "label": "Token secret",
+        "required": true
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "Authorization",
+      "value": "PVEAPIToken={{config:tokenId}}={{secret:tokenSecret}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "resources": {
+      "method": "GET",
+      "path": "/api2/json/cluster/resources",
+      "decode": "json",
+      "query": {
+        "type": "vm"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Running"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "filter",
+                  "over": {
+                    "op": "get",
+                    "path": "$.data"
+                  },
+                  "as": "v",
+                  "where": {
+                    "op": "compare",
+                    "cmp": "eq",
+                    "left": {
+                      "op": "get",
+                      "path": "v.status"
+                    },
+                    "right": {
+                      "op": "const",
+                      "value": "running"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Total"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.data"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Memory"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "sum",
+                  "of": {
+                    "op": "get",
+                    "path": "$.data"
+                  },
+                  "path": "mem"
+                },
+                "as": "bytes"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "compare",
+      "concat",
+      "const",
+      "count",
+      "filter",
+      "format",
+      "get",
+      "pick",
+      "sum"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

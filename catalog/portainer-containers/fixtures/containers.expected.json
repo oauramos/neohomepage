@@ -1,0 +1,18 @@
+{
+  "status": "degraded",
+  "stats": [
+    {
+      "label": "Running",
+      "value": 2
+    },
+    {
+      "label": "Stopped",
+      "value": 1,
+      "tone": "warn"
+    },
+    {
+      "label": "Total",
+      "value": 3
+    }
+  ]
+}

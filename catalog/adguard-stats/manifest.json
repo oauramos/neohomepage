@@ -1,0 +1,135 @@
+{
+  "manifestVersion": 1,
+  "id": "adguard-stats",
+  "version": "1.0.0",
+  "displayName": "AdGuard Home",
+  "category": "network-dns",
+  "icon": "adguard-home",
+  "docs": "https://neohomepage.dev/widgets/adguard-stats",
+  "target": {
+    "fields": [
+      {
+        "name": "username",
+        "kind": "string",
+        "label": "Username",
+        "required": true
+      },
+      {
+        "name": "password",
+        "kind": "secret",
+        "label": "Password",
+        "required": true
+      }
+    ],
+    "auth": {
+      "kind": "basic",
+      "username": "{{config:username}}",
+      "password": "{{secret:password}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "stats": {
+      "method": "GET",
+      "path": "/control/stats",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Queries"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.num_dns_queries"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Blocked"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.num_blocked_filtering"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Avg time"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "arith",
+                  "fn": "mul",
+                  "of": [
+                    {
+                      "op": "get",
+                      "path": "$.avg_processing_time"
+                    },
+                    {
+                      "op": "const",
+                      "value": 1000
+                    }
+                  ]
+                },
+                "as": "number"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "arith",
+      "concat",
+      "const",
+      "format",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "basic"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

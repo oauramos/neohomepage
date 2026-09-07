@@ -1,0 +1,84 @@
+{
+  "items": [
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "in 4 days",
+        "iso": "2026-09-10T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Dentist",
+      "subtitle": "",
+      "badge": {
+        "v": "next week",
+        "iso": "2026-09-15T13:30:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "in 2 weeks",
+        "iso": "2026-09-17T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Flight to Porto",
+      "subtitle": "",
+      "badge": {
+        "v": "in 2 weeks",
+        "iso": "2026-09-20T00:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "in 3 weeks",
+        "iso": "2026-09-24T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "in 4 weeks",
+        "iso": "2026-10-01T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "next month",
+        "iso": "2026-10-08T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    },
+    {
+      "title": "Bin collection",
+      "subtitle": "Kerbside",
+      "badge": {
+        "v": "next month",
+        "iso": "2026-10-15T06:00:00.000Z",
+        "rel": true
+      },
+      "icon": "calendar"
+    }
+  ]
+}

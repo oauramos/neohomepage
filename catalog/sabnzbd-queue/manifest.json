@@ -1,0 +1,163 @@
+{
+  "manifestVersion": 1,
+  "id": "sabnzbd-queue",
+  "version": "1.0.0",
+  "displayName": "SABnzbd",
+  "category": "downloads",
+  "icon": "sabnzbd",
+  "docs": "https://neohomepage.dev/widgets/sabnzbd-queue",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "required": true,
+        "help": "SABnzbd → Config → General → API Key"
+      }
+    ],
+    "auth": {
+      "kind": "query",
+      "param": "apikey",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [
+    {
+      "name": "maxItems",
+      "kind": "integer",
+      "label": "Rows",
+      "default": 5,
+      "min": 1,
+      "max": 20
+    }
+  ],
+  "operations": {
+    "queue": {
+      "method": "GET",
+      "path": "/api",
+      "decode": "json",
+      "query": {
+        "mode": "queue",
+        "output": "json"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Speed"
+              },
+              "value": {
+                "op": "format",
+                "as": "bitrate",
+                "of": {
+                  "op": "get",
+                  "path": "$.queue.kbpersec"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Left"
+              },
+              "value": {
+                "op": "get",
+                "path": "$.queue.timeleft"
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "map",
+        "as": "s",
+        "over": {
+          "op": "limit",
+          "n": 20,
+          "over": {
+            "op": "get",
+            "path": "$.queue.slots"
+          }
+        },
+        "body": {
+          "op": "pick",
+          "fields": {
+            "title": {
+              "op": "get",
+              "path": "s.filename"
+            },
+            "subtitle": {
+              "op": "get",
+              "path": "s.cat"
+            },
+            "badge": {
+              "op": "get",
+              "path": "s.timeleft"
+            },
+            "progress": {
+              "op": "clamp",
+              "min": 0,
+              "max": 1,
+              "of": {
+                "op": "arith",
+                "fn": "div",
+                "of": [
+                  {
+                    "op": "get",
+                    "path": "s.mbleft"
+                  },
+                  {
+                    "op": "get",
+                    "path": "s.mb"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "arith",
+      "clamp",
+      "concat",
+      "const",
+      "format",
+      "get",
+      "limit",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "query"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

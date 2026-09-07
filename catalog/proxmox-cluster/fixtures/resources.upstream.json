@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "id": "qemu/100",
+      "name": "nas",
+      "status": "running",
+      "mem": 4294967296,
+      "maxmem": 8589934592
+    },
+    {
+      "id": "qemu/101",
+      "name": "media",
+      "status": "running",
+      "mem": 2147483648,
+      "maxmem": 4294967296
+    },
+    {
+      "id": "lxc/200",
+      "name": "backup",
+      "status": "stopped",
+      "mem": 0,
+      "maxmem": 1073741824
+    }
+  ]
+}

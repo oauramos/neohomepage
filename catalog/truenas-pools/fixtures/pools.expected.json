@@ -1,0 +1,16 @@
+{
+  "gauges": [
+    {
+      "label": "tank",
+      "used": 8796093022208,
+      "total": 21990232555520,
+      "unit": "bytes"
+    },
+    {
+      "label": "fast",
+      "used": 274877906944,
+      "total": 1099511627776,
+      "unit": "bytes"
+    }
+  ]
+}

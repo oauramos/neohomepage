@@ -1,0 +1,17 @@
+[
+  {
+    "Id": "a1",
+    "UserName": "otavio",
+    "Client": "Jellyfin Web",
+    "NowPlayingItem": {
+      "Name": "Arrival",
+      "Type": "Movie",
+      "RunTimeTicks": 71000000000
+    }
+  },
+  {
+    "Id": "b2",
+    "UserName": "guest",
+    "Client": "Android TV"
+  }
+]

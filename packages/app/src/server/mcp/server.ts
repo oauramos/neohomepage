@@ -4,7 +4,8 @@ import type { AppContext } from '../context.ts'
 import { layoutFileSchema, targetSchema, widgetSchema } from '../config/schema.ts'
 import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
-import { executeOperation } from '../fetcher/execute.ts'
+import { probe } from '../fetcher/probe.ts'
+import { manifestView } from '../../shared/manifest-view.ts'
 
 /**
  * The MCP surface.
@@ -112,7 +113,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           type: manifest.id,
           displayName: manifest.displayName,
           category: manifest.category,
-          needsCredential: manifest.target.fields.some((field) => field.kind === 'secret'),
+          needsCredential: manifestView(manifest).needsCredential,
         }))
       return ok({ matches, total: matches.length })
     },
@@ -132,14 +133,19 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     ({ type }) => {
       const manifest = context.catalog().get(type)
       if (manifest === undefined) return fail(`no widget type "${type}" — try search_catalog`)
+      const view = manifestView(manifest)
       return ok({
-        type: manifest.id,
-        displayName: manifest.displayName,
-        template: manifest.presentation.template,
-        targetFields: manifest.target.fields,
-        configFields: manifest.config,
-        operations: Object.keys(manifest.operations),
-        pollDefaultMs: manifest.poll.defaultIntervalMs,
+        type: view.id,
+        displayName: view.displayName,
+        template: view.template,
+        shape: view.shape,
+        targetFields: view.target?.fields ?? [],
+        configFields: view.config,
+        operations: view.operations,
+        // A composite is bound role by role, so an agent that only learned about `targetId` would
+        // create a widget that fetches nothing. Saying so in the schema is what stops that.
+        roles: view.roles,
+        pollDefaultMs: view.poll.defaultIntervalMs,
       })
     },
   )
@@ -508,18 +514,17 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         port: z.number().int().min(1).max(65535),
         scheme: z.enum(['http', 'https']).optional(),
         secrets: z.record(z.string().max(32), z.string().max(4096)).optional(),
+        kind: z.string().max(64).optional(),
       },
     },
     async (input) => {
       const manifest = context.catalog().get(input.type)
       if (manifest === undefined) return fail(`no widget type "${input.type}"`)
-      const operation = Object.keys(manifest.operations)[0]
-      if (operation === undefined) return fail('this widget type has no operations to test')
 
       const startedAt = performance.now()
-      const outcome = await executeOperation({
+      const outcome = await probe({
         manifest,
-        operation,
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
         target: {
           origin: `${input.scheme ?? 'http'}://${input.host}:${input.port}`,
           basePath: '',

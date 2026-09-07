@@ -1,0 +1,28 @@
+{
+  "records": [
+    {
+      "id": 1,
+      "size": 8589934592,
+      "sizeleft": 2147483648,
+      "title": "Dune.Part.Three.2026",
+      "trackedDownloadState": "downloading",
+      "movie": {
+        "id": 4,
+        "title": "Dune: Part Three",
+        "year": 2026
+      }
+    },
+    {
+      "id": 2,
+      "size": 4294967296,
+      "sizeleft": 0,
+      "title": "Arrival.2016",
+      "trackedDownloadState": "importPending",
+      "movie": {
+        "id": 9,
+        "title": "Arrival",
+        "year": 2016
+      }
+    }
+  ]
+}

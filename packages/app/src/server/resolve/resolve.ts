@@ -1,5 +1,6 @@
 import { cloneLayout, correctBounds, getCompactor } from 'react-grid-layout/core'
 import type { Manifest } from '@neohomepage/catalog-schema'
+import { isComposite } from '@neohomepage/catalog-schema'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import type { Target, Widget } from '../config/schema.ts'
 import type { Overrides } from '../config/overrides.ts'
@@ -77,9 +78,22 @@ function resolveWidget(
     template: manifest?.presentation.template ?? 'link-tile',
     icon: manifest?.icon ?? 'question-mark',
     targetId: widget.targetId,
+    // A composite's bindings are only meaningful for the roles its manifest declares; a role that
+    // was removed by a catalog update leaves its targets in config (nothing is deleted behind the
+    // user's back) but stops being fetched.
+    bindings:
+      manifest !== undefined && isComposite(manifest)
+        ? Object.fromEntries(
+            Object.keys(manifest.roles).map((role) => [role, widget.bindings[role] ?? []]),
+          )
+        : {},
     config,
     operations:
-      widget.operations.length > 0 ? widget.operations : Object.keys(manifest?.operations ?? {}),
+      manifest !== undefined && isComposite(manifest)
+        ? []
+        : widget.operations.length > 0
+          ? widget.operations
+          : Object.keys(manifest?.operations ?? {}),
     // A user's explicit interval wins, but never below what the manifest says the service tolerates.
     pollIntervalMs: Math.max(
       manifest?.poll.minIntervalMs ?? 15_000,
@@ -182,6 +196,15 @@ export function resolve(input: ResolveInput): Resolved {
   for (const widget of widgets) {
     if (widget.targetId !== null && !targets.some((t) => t.id === widget.targetId)) {
       diagnostics.push(`widget "${widget.id}" points at missing target "${widget.targetId}"`)
+    }
+    for (const [role, bound] of Object.entries(widget.bindings)) {
+      for (const targetId of bound) {
+        if (!targets.some((t) => t.id === targetId)) {
+          diagnostics.push(
+            `widget "${widget.id}" binds missing target "${targetId}" to role "${role}"`,
+          )
+        }
+      }
     }
   }
 

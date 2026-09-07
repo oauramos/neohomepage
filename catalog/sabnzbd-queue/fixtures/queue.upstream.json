@@ -1,0 +1,25 @@
+{
+  "queue": {
+    "status": "Downloading",
+    "kbpersec": "3120.4",
+    "timeleft": "0:04:12",
+    "mbleft": "812.4",
+    "mb": "4096.0",
+    "slots": [
+      {
+        "filename": "ubuntu-26.04-desktop-amd64",
+        "cat": "software",
+        "timeleft": "0:02:10",
+        "mbleft": "410.0",
+        "mb": "3200.0"
+      },
+      {
+        "filename": "some.show.s02e04.1080p",
+        "cat": "tv",
+        "timeleft": "0:02:02",
+        "mbleft": "402.4",
+        "mb": "896.0"
+      }
+    ]
+  }
+}

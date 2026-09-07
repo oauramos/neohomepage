@@ -134,7 +134,23 @@ export const targetSchema = z
         scheme: z.enum(['http', 'https']).default('http'),
         host: z.string().min(1).max(253),
         port: z.int().min(1).max(65535),
-        basePath: z.string().max(120).default(''),
+        /**
+         * A prefix on every request to this target, and for an iCalendar feed the whole path.
+         *
+         * Shape-checked here rather than only at request time: the executor's origin-and-pathname
+         * assertion already refuses a traversal (the URL parser normalises `/a/../b` and the
+         * comparison then fails), but failing at write time with a message beats a widget that
+         * silently never loads.
+         */
+        basePath: z
+          .string()
+          .max(120)
+          .default('')
+          .refine(
+            (value) => value === '' || /^\/[A-Za-z0-9._~\-/]*$/.test(value),
+            'must be an absolute path containing only unreserved URL characters',
+          )
+          .refine((value) => !value.split('/').includes('..'), 'must not contain ".."'),
       })
       .catchall(z.unknown()),
     /** Field name to secret reference. Values live in secrets/, never here. */
@@ -164,6 +180,14 @@ export const widgetSchema = z
       .default(null),
     title: z.string().max(64).nullable().default(null),
     targetId: idSchema.nullable().default(null),
+    /**
+     * Composite widgets only: role name -> the targets bound to it, in the order the user chose.
+     *
+     * Separate from `targetId` rather than a generalisation of it. Almost every widget binds one
+     * target, and forcing those through a role map would make the common config file harder to
+     * read and every existing file a migration, to express something only the calendar needs.
+     */
+    bindings: z.record(z.string().max(32), z.array(idSchema).max(16)).prefault({}),
     operations: z.array(z.string().max(32)).default([]),
     config: z.record(z.string().max(32), z.unknown()).default({}),
     poll: z

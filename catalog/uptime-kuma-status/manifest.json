@@ -1,0 +1,107 @@
+{
+  "manifestVersion": 1,
+  "id": "uptime-kuma-status",
+  "version": "1.0.0",
+  "displayName": "Uptime Kuma",
+  "category": "monitoring",
+  "icon": "uptime-kuma",
+  "docs": "https://neohomepage.dev/widgets/uptime-kuma-status",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [
+    {
+      "name": "slug",
+      "kind": "string",
+      "label": "Status page slug",
+      "required": true,
+      "help": "The part after /status/ in your status page URL"
+    }
+  ],
+  "operations": {
+    "heartbeat": {
+      "method": "GET",
+      "path": "/api/status-page/heartbeat/{{config:slug}}",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "status": {
+        "op": "if",
+        "cond": {
+          "op": "compare",
+          "cmp": "eq",
+          "left": {
+            "op": "get",
+            "path": "$.uptimeDown"
+          },
+          "right": {
+            "op": "const",
+            "value": 0
+          }
+        },
+        "then": {
+          "op": "const",
+          "value": "ok"
+        },
+        "else": {
+          "op": "const",
+          "value": "degraded"
+        }
+      },
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Monitors"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.monitors"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "status-badge"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "status-badge"
+    ],
+    "opcodes": [
+      "compare",
+      "concat",
+      "const",
+      "count",
+      "get",
+      "if",
+      "pick"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

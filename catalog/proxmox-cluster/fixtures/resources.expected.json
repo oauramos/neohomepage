@@ -1,0 +1,16 @@
+{
+  "stats": [
+    {
+      "label": "Running",
+      "value": 2
+    },
+    {
+      "label": "Total",
+      "value": 3
+    },
+    {
+      "label": "Memory",
+      "value": "6 GiB"
+    }
+  ]
+}

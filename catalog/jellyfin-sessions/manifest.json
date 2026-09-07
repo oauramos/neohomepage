@@ -1,0 +1,130 @@
+{
+  "manifestVersion": 1,
+  "id": "jellyfin-sessions",
+  "version": "1.0.0",
+  "displayName": "Jellyfin sessions",
+  "category": "media-server",
+  "icon": "jellyfin",
+  "docs": "https://neohomepage.dev/widgets/jellyfin-sessions",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "required": true,
+        "help": "Jellyfin → Dashboard → API Keys"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "X-Emby-Token",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "sessions": {
+      "method": "GET",
+      "path": "/Sessions",
+      "decode": "json",
+      "query": {
+        "activeWithinSeconds": "300"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Streaming"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "filter",
+                  "over": {
+                    "op": "get",
+                    "path": "$"
+                  },
+                  "as": "s",
+                  "where": {
+                    "op": "get",
+                    "path": "s.NowPlayingItem"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "map",
+        "as": "s",
+        "over": {
+          "op": "filter",
+          "over": {
+            "op": "get",
+            "path": "$"
+          },
+          "as": "s",
+          "where": {
+            "op": "get",
+            "path": "s.NowPlayingItem"
+          }
+        },
+        "body": {
+          "op": "pick",
+          "fields": {
+            "title": {
+              "op": "get",
+              "path": "s.NowPlayingItem.Name"
+            },
+            "subtitle": {
+              "op": "get",
+              "path": "s.UserName"
+            },
+            "badge": {
+              "op": "get",
+              "path": "s.Client"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "count",
+      "filter",
+      "get",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "stats": [
+    {
+      "label": "Speed",
+      "value": "3.1 kbps"
+    },
+    {
+      "label": "Left",
+      "value": "0:04:12"
+    }
+  ],
+  "items": [
+    {
+      "title": "ubuntu-26.04-desktop-amd64",
+      "subtitle": "software",
+      "badge": "0:02:10",
+      "progress": 0.128125
+    },
+    {
+      "title": "some.show.s02e04.1080p",
+      "subtitle": "tv",
+      "badge": "0:02:02",
+      "progress": 0.4491071428571428
+    }
+  ]
+}
