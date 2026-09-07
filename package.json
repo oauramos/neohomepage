@@ -20,7 +20,8 @@
     "catalog:validate": "pnpm --filter @neohomepage/app catalog validate",
     "catalog:test": "pnpm --filter @neohomepage/app catalog test",
     "catalog:build": "pnpm --filter @neohomepage/app catalog:build",
-    "catalog:docs": "pnpm --filter @neohomepage/app catalog:docs"
+    "catalog:docs": "pnpm --filter @neohomepage/app catalog:docs",
+    "e2e": "pnpm --filter @neohomepage/app e2e"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

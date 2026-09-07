@@ -19,7 +19,9 @@
     "neo": "node src/cli/neo.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "catalog:docs": "node scripts/catalog-docs.ts"
+    "catalog:docs": "node scripts/catalog-docs.ts",
+    "e2e": "pnpm build && playwright test",
+    "e2e:only": "playwright test"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
@@ -37,7 +39,9 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@modelcontextprotocol/client": "2.0.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/proper-lockfile": "^4.1.4",

@@ -307,6 +307,9 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
         <input
           className="nh-input"
           type="search"
+          // A placeholder is not a label: it disappears the moment you type, and a screen reader
+          // announcing "edit text" with no name leaves the one control on this panel unnamed.
+          aria-label="Search widgets"
           placeholder="Search widgets"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

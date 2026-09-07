@@ -137,6 +137,17 @@ body {
   font-size: 18px;
   cursor: pointer;
   line-height: 1;
+  /* WCAG 2.5.8 wants 24x24 CSS pixels. A glyph-sized button measured 11x18 — the smallest thing
+     on the page, on a phone, and the one that gets you out of the modal. */
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+.nh-modal-close:hover {
+  background: var(--nh-muted);
 }
 .nh-modal-body {
   display: flex;
@@ -313,7 +324,7 @@ body {
   color: var(--nh-muted-foreground);
 }
 .nh-input {
-  border: 1px solid var(--nh-border);
+  border: 1px solid var(--nh-control-border);
   background: var(--nh-background);
   color: var(--nh-foreground);
   border-radius: 8px;
@@ -373,7 +384,7 @@ body {
   flex-wrap: wrap;
 }
 .nh-button-quiet {
-  border: 1px solid var(--nh-border);
+  border: 1px solid var(--nh-control-border);
   background: transparent;
   color: inherit;
   border-radius: 8px;

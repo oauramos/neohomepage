@@ -39,16 +39,59 @@ export function Fab({
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const titleId = useId()
 
-  // Escape closes, and focus returns to the button that opened it — otherwise a keyboard user is
-  // dropped at the top of the document with no idea where they were.
+  /**
+   * Escape closes, Tab stays inside.
+   *
+   * Escape returns focus to the button that opened the dialog — otherwise a keyboard user is
+   * dropped at the top of the document with no idea where they were.
+   *
+   * The trap is not optional decoration. `aria-modal="true"` tells a screen reader the rest of the
+   * page is inert; it does nothing whatsoever about Tab. Without this, focus walks out of the
+   * dialog and onto a board the user has just been told is not there, and the only way back is
+   * shift-tabbing past everything they passed on the way out.
+   */
   useEffect(() => {
     if (!open) return
+
+    const focusable = (): HTMLElement[] => {
+      const dialog = dialogRef.current
+      if (dialog === null) return []
+      return [
+        ...dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+            'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+        // Hidden elements are still matched by the selector; a disabled-looking control that is
+        // merely `display: none` would otherwise become a stop where nothing appears to happen.
+      ].filter((element) => element.offsetParent !== null || element === document.activeElement)
+    }
+
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpen(false)
         buttonRef.current?.focus()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const stops = focusable()
+      if (stops.length === 0) return
+      const first = stops[0] as HTMLElement
+      const last = stops[stops.length - 1] as HTMLElement
+      const active = document.activeElement
+
+      // Both directions. A trap that only wraps forwards sends the user out of the back of the
+      // dialog the first time they shift-tab, which is the more common way to go looking for a
+      // control you have just passed.
+      if (event.shiftKey && (active === first || active === dialogRef.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
+
     document.addEventListener('keydown', onKey)
     dialogRef.current?.focus()
     return () => document.removeEventListener('keydown', onKey)

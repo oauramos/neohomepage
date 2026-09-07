@@ -148,3 +148,5 @@ docs/.vitepress/cache/
 docs/.vitepress/dist/
 .playwright-mcp/
 catalog-dist/
+packages/app/test-results/
+packages/app/playwright-report/

@@ -90,6 +90,14 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-chip[data-neo-chip="error"]{background:color-mix(in oklch,var(--nh-bad) 18%,transparent);
   color:var(--nh-bad)}
 .nh-placeholder{margin:0;color:var(--nh-muted-foreground);font-size:0.8125rem}
+/* A link tile IS a bookmark: the whole body is the target, not the few characters of its label.
+   Unstyled, this anchor measured 83x18 — under WCAG 2.5.8's 24x24 and a poor thing to aim a thumb
+   at, on the one widget whose entire job is being tapped. */
+.nh-link{display:flex;align-items:center;justify-content:center;min-height:44px;height:100%;
+  padding:8px 12px;border-radius:8px;text-decoration:none;color:var(--nh-accent);font-weight:600;
+  background:color-mix(in oklch,var(--nh-accent) 8%,transparent)}
+.nh-link:hover{background:color-mix(in oklch,var(--nh-accent) 16%,transparent)}
+.nh-link:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
 .nh-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}
 .nh-stat dt{font-size:0.6875rem;color:var(--nh-muted-foreground)}
 .nh-stat dd{margin:0;font-size:1.125rem;font-weight:600;font-variant-numeric:tabular-nums}

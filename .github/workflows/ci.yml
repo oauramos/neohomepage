@@ -63,6 +63,29 @@ jobs:
             exit 1
           fi
 
+  browser:
+    # The checks that need a real layout engine: axe, the keyboard-only edit session, the board
+    # with JavaScript disabled, and tap targets at phone width. Everything else is in vitest,
+    # where it runs in milliseconds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @neohomepage/app exec playwright install --with-deps chromium
+      - run: pnpm build
+      - run: pnpm --filter @neohomepage/app exec playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: packages/app/test-results/
+          retention-days: 7
+
   boundary:
     # The client/server boundary is load-bearing: src/web is bundled for the browser. Prove the
     # lint rule actually fails rather than trusting that it is configured.
