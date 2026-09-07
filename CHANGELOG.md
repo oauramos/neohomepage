@@ -13,7 +13,8 @@
 - **Config**, a new tab for optional behaviour. The first is auto-hiding the floating buttons after
   a delay you set, with the pointer nearing either bottom corner — or any keyboard interaction, or
   focus landing inside them — bringing them back. It only ever changes opacity, so nothing becomes
-  untabbable.
+  untabbable. Leaving takes 1.8s on an even S-curve and adds a little blur and shrink so the button
+  reads as receding; coming back takes 120ms, because that one is a response to intent.
 - **About** now carries the widget count, uptime, any resolver diagnostics, and links to the
   project, the wiki, the author and the issue form.
 - **Regenerate is a refresh icon in the header**, next to the close button and beside the state it

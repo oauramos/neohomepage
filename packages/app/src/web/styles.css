@@ -904,23 +904,49 @@ body {
   outline-offset: 2px;
 }
 
-/* Auto-hide only ever changes opacity, and only when the feature is on. A control that cannot be
-   focused is gone rather than hidden, so focus-within always brings the pair back — and the
-   transition is the one thing reduced-motion turns off. */
-[data-neo-controls='hidden'] .nh-fab {
-  opacity: 0.06;
-}
+/* Auto-hide only ever changes opacity, so a control that cannot be seen can still be focused and
+   pressed. Which is also why focus and hover always win over it.
+
+   The two directions are deliberately not symmetrical. Leaving is passive — nobody asked for it,
+   so it takes 1.8s and is meant to be barely noticed. Coming back is a response to intent: you
+   moved toward the corner, so it is there in 120ms. One duration for both was the first thing that
+   made this feel hard.
+
+   The second was the curve. An ease-in held the button at full opacity for 800ms and then dropped
+   it from 0.58 to 0.05 in the last 200ms — measured — which is a snap with a delay in front of it,
+   not a fade. The S-curve below spreads the change evenly with soft ends: it starts moving
+   immediately, so you see it leaving rather than vanishing, and settles rather than arriving.
+   The blur and the slight shrink make it read as receding instead of as a light being switched
+   off. */
 [data-neo-controls] .nh-fab {
-  transition: opacity 420ms ease;
+  transition:
+    opacity 120ms ease-out,
+    filter 120ms ease-out,
+    transform 120ms ease-out;
+}
+[data-neo-controls='hidden'] .nh-fab {
+  opacity: 0.05;
+  filter: blur(1.5px);
+  transform: scale(0.94);
+  transition:
+    opacity 1800ms cubic-bezier(0.4, 0, 0.6, 1),
+    filter 1800ms cubic-bezier(0.4, 0, 0.6, 1),
+    transform 1800ms cubic-bezier(0.4, 0, 0.6, 1);
 }
 [data-neo-controls] .nh-fab:hover,
 [data-neo-controls] .nh-fab:focus-visible,
 [data-neo-controls='hidden'] .nh-fab:focus-within {
   opacity: 1;
+  filter: none;
+  transform: none;
 }
+/* Reduced motion drops the movement, not the fade: a cross-fade is not the thing that causes
+   trouble, and snapping straight to invisible is exactly the hardness this is meant to avoid. */
 @media (prefers-reduced-motion: reduce) {
-  [data-neo-controls] .nh-fab {
-    transition: none;
+  [data-neo-controls='hidden'] .nh-fab {
+    filter: none;
+    transform: none;
+    transition: opacity 600ms linear;
   }
 }
 
