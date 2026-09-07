@@ -56,6 +56,7 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
       },
     ],
     theme: themeSchema.parse({}),
+    features: { autoHideControls: false, autoHideDelayMs: 5000 },
     diagnostics: [],
     ...overrides,
   }

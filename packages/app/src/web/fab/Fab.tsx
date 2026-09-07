@@ -11,13 +11,13 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
  * discoverable rather than hunted for.
  */
 
-export type Tab = 'edit' | 'widgets' | 'theme' | 'background' | 'about'
+export type Tab = 'edit' | 'widgets' | 'theme' | 'config' | 'about'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'edit', label: 'Edit layout' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'theme', label: 'Theme' },
-  { id: 'background', label: 'Background' },
+  { id: 'config', label: 'Config' },
   { id: 'about', label: 'About' },
 ]
 
@@ -145,6 +145,36 @@ export function Fab({
               <span className="nh-modal-status" data-neo-connected={connected}>
                 {connected ? 'live' : 'reconnecting'}
               </span>
+              {/* Publishing belongs next to the state it acts on — the "live" pill and the
+                  unpublished-changes dot — rather than in a footer the panel has to be scrolled to
+                  reach. It keeps its accessible name; only the label became a glyph. */}
+              <button
+                type="button"
+                className="nh-modal-action"
+                disabled={publishing}
+                onClick={() => void publish()}
+                title={publishing ? 'Publishing…' : 'Regenerate the published page'}
+                data-neo-pending={pending}
+              >
+                <span className="nh-sr-only">
+                  {publishing ? 'Publishing' : 'Regenerate the published page'}
+                </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={publishing ? 'nh-spin' : undefined}
+                >
+                  <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+                  <path d="M21 3v6h-6" />
+                </svg>
+              </button>
               <button type="button" className="nh-modal-close" onClick={() => setOpen(false)}>
                 <span className="nh-sr-only">Close</span>
                 <span aria-hidden="true">×</span>
@@ -172,14 +202,6 @@ export function Fab({
               <span className="nh-modal-note">
                 {pending ? 'Unpublished changes' : 'Everything published'}
               </span>
-              <button
-                type="button"
-                className="nh-button"
-                disabled={publishing}
-                onClick={() => void publish()}
-              >
-                {publishing ? 'Publishing…' : 'Regenerate'}
-              </button>
             </footer>
           </div>
         </div>

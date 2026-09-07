@@ -13,6 +13,8 @@ type CatalogEntry = {
   id: string
   displayName: string
   category: string
+  /** widget | bookmark | tool. Absent on a catalog older than the field, hence the fallback. */
+  kind?: string
   icon: string
   template: string
   shape: 'single' | 'composite'
@@ -69,7 +71,7 @@ let nextDraftUid = 0
 
 type TestResult = { ok: boolean; durationMs: number; code?: string; message?: string }
 
-export function AddWidget({ onAdded }: { onAdded: () => void }) {
+export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: string }) {
   const [entries, setEntries] = useState<CatalogEntry[] | null>(null)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<WidgetSchema | null>(null)
@@ -299,8 +301,13 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
   if (entries === null) return <p className="nh-panel-note">Loading the catalog…</p>
 
   if (selected === null) {
-    const visible = entries.filter((entry) =>
-      `${entry.displayName} ${entry.category}`.toLowerCase().includes(query.toLowerCase()),
+    // The kind narrows the catalog to what the open tab is for; the search then narrows that.
+    // A manifest with no kind counts as a widget, so an older catalog still offers everything
+    // somewhere rather than disappearing.
+    const visible = entries.filter(
+      (entry) =>
+        (kind === undefined || (entry.kind ?? 'widget') === kind) &&
+        `${entry.displayName} ${entry.category}`.toLowerCase().includes(query.toLowerCase()),
     )
     return (
       <div className="nh-catalog">
@@ -318,7 +325,11 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
           <p className="nh-panel-note">
             {entries.length === 0
               ? 'No widgets available. The catalog could not be read.'
-              : 'Nothing matches that search.'}
+              : // "Nothing matches that search" is wrong when the search is empty and the KIND is
+                // what excluded everything — it blames the reader for a filter they did not set.
+                query.trim() === '' && kind !== undefined
+                ? `The catalog has no ${kind}s yet.`
+                : 'Nothing matches that search.'}
           </p>
         ) : (
           <ul className="nh-catalog-list">

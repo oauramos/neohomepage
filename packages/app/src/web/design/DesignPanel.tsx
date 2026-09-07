@@ -298,6 +298,9 @@ export function DesignPanel({
    * are wholesale changes the panel SHOULD follow; everything else is the user's own typing and
    * must survive the round trip that a save triggers.
    */
+  const [uploads, setUploads] = useState<{ id: string; url: string; bytes: number }[]>([])
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [query, setQuery] = useState('')
   const [finish, setFinish] = useState<string>('all')
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -360,6 +363,22 @@ export function DesignPanel({
     }
     return { ...theme, cssVars, surface }
   }, [theme, draft, scheme, surface])
+
+  const loadUploads = useCallback(async () => {
+    try {
+      const response = await fetch('/api/assets/backgrounds')
+      const body = (await response.json()) as {
+        assets: { id: string; url: string; bytes: number }[]
+      }
+      setUploads(body.assets)
+    } catch {
+      setUploads([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (section === 'background') void loadUploads()
+  }, [section, loadUploads])
 
   const pending = useRef<ThemePatch>({})
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -849,6 +868,100 @@ export function DesignPanel({
               </li>
             ))}
           </ul>
+          <div className="nh-uploads">
+            <div className="nh-row">
+              <strong className="nh-field-label">Your images</strong>
+              <label className="nh-button-quiet nh-upload">
+                {busy ? 'Uploading…' : 'Add image'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
+                  className="nh-upload-input"
+                  disabled={busy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ''
+                    if (file === undefined) return
+                    setUploadError(null)
+                    setBusy(true)
+                    // Raw bytes, not multipart: the server names the file from its content, and a
+                    // filename from a browser is the one field here that would be attacker text
+                    // heading for a path.
+                    void fetch('/api/assets/backgrounds', {
+                      method: 'POST',
+                      headers: { 'content-type': file.type },
+                      body: file,
+                    })
+                      .then(async (response) => {
+                        const body = (await response.json()) as { error?: string; url?: string }
+                        if (!response.ok) {
+                          setUploadError(body.error ?? 'The server refused it')
+                          return
+                        }
+                        await loadUploads()
+                        if (body.url !== undefined) setSurface({ background: body.url })
+                      })
+                      .catch(() => setUploadError('Upload failed'))
+                      .finally(() => setBusy(false))
+                  }}
+                />
+              </label>
+            </div>
+            {uploadError !== null ? (
+              <p className="nh-status-note" data-neo-tone="bad">
+                {uploadError}
+              </p>
+            ) : null}
+            {uploads.length === 0 ? (
+              <p className="nh-panel-dim">
+                Nothing uploaded yet. Images land in <code>data/assets/backgrounds/</code>, which is
+                a folder you can commit.
+              </p>
+            ) : (
+              <ul className="nh-bg-grid">
+                {/* The delete control is a SIBLING of the picker, not nested inside it: a button
+                    within a button is invalid HTML, and the browser's own repair moves the inner
+                    one out — to where its click handler is no longer the thing you aimed at. */}
+                {uploads.map((asset) => (
+                  <li key={asset.id} className="nh-upload-item">
+                    <button
+                      type="button"
+                      className="nh-bg"
+                      aria-current={surface.background === asset.url}
+                      onClick={() => setSurface({ background: asset.url })}
+                      title={`${String(Math.round(asset.bytes / 1024))} KB`}
+                    >
+                      <span
+                        className="nh-bg-swatch"
+                        style={{
+                          backgroundImage: `url("${asset.url}")`,
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                        }}
+                      />
+                      <span>{asset.id.slice(0, 6)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="nh-upload-delete"
+                      title="Delete this image"
+                      onClick={() => {
+                        void fetch(`/api/assets/backgrounds/${asset.id}`, { method: 'DELETE' })
+                          .then(loadUploads)
+                          .then(() => {
+                            if (surface.background === asset.url) setSurface({ background: null })
+                          })
+                      }}
+                    >
+                      <span className="nh-sr-only">Delete this image</span>
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <label className="nh-field">
             <span>Blur</span>
             <input

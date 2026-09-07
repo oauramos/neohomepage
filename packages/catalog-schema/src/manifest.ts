@@ -262,6 +262,15 @@ const commonManifest = {
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   displayName: z.string().min(1).max(48),
   category: z.enum(CATEGORIES),
+  /**
+   * What KIND of thing this is, as distinct from what domain it belongs to.
+   *
+   * `category` answers "media or network"; this answers "does it show a reading, open a link, or
+   * do something". The editor groups by it, and they are genuinely different jobs: a bookmark is
+   * added in bulk and never configured again, a widget is configured once and watched, and a tool
+   * is acted on. Defaulted rather than required so no existing manifest has to change.
+   */
+  kind: z.enum(['widget', 'bookmark', 'tool']).default('widget'),
   /** A slug into the bundled icon pack. Never a URL: that would be a tracking pixel. */
   icon: z.string().regex(/^[a-z0-9][a-z0-9-]{0,48}$/),
   docs: z.url().optional(),

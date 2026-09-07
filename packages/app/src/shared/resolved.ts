@@ -58,5 +58,7 @@ export type Resolved = {
   readonly widgets: readonly ResolvedWidget[]
   readonly targets: readonly ResolvedTarget[]
   readonly theme: Theme
+  /** Optional behaviour the browser acts on; see `dashboardSchema.features`. */
+  readonly features: { readonly autoHideControls: boolean; readonly autoHideDelayMs: number }
   readonly diagnostics: readonly string[]
 }

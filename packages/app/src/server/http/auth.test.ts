@@ -4,6 +4,7 @@ import {
   checkPassword,
   checkWrite,
   isTrusted,
+  UPLOADABLE_TYPES,
   issueSession,
   readCookie,
   sessionCookie,
@@ -234,5 +235,39 @@ describe('the cookie', () => {
     expect(readCookie('a=1; neo_session=abc.def; b=2', 'neo_session')).toBe('abc.def')
     expect(readCookie('a=1', 'neo_session')).toBeUndefined()
     expect(readCookie(undefined, 'neo_session')).toBeUndefined()
+  })
+})
+
+describe('the upload content-type allowance', () => {
+  it('never admits a type a cross-site form could send', () => {
+    // This is the whole reason the JSON requirement works. If one of these ever appeared in the
+    // list, any page on the internet could write to a homelab dashboard with a plain <form>.
+    const formEncodable = ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain']
+    for (const type of formEncodable) {
+      expect(UPLOADABLE_TYPES, `${type} must never be uploadable`).not.toContain(type)
+    }
+  })
+
+  it('admits an image, and still refuses a form encoding', () => {
+    const base = {
+      method: 'POST',
+      secFetchSite: 'same-origin',
+      host: 'nas.home',
+      origin: 'http://nas.home',
+      cookie: undefined,
+      forwardedUser: undefined,
+      remoteAddress: undefined,
+    }
+    expect(
+      checkWrite({ mode: 'none' } as AuthConfig, { ...base, contentType: 'image/png' }, Date.now())
+        .allowed,
+    ).toBe(true)
+    expect(
+      checkWrite(
+        { mode: 'none' } as AuthConfig,
+        { ...base, contentType: 'multipart/form-data; boundary=x' },
+        Date.now(),
+      ).allowed,
+    ).toBe(false)
   })
 })

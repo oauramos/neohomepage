@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### The editor
+
+- **Widgets have a kind** — widget, bookmark or tool — declared on the manifest and defaulted, so no
+  existing manifest changes. The Widgets tab is tabbed by it, with counts, and adding is scoped to
+  the tab you are in: the bookmark tab offers bookmarks.
+- **Theme import and export.** The box holds `config/theme.json` exactly as it is on disk, so
+  pasting one here and pulling the folder from git are the same operation done two ways. An import
+  replaces rather than merges, because "make it look like this" should not leave a colour behind.
+- **Config**, a new tab for optional behaviour. The first is auto-hiding the floating buttons after
+  a delay you set, with the pointer nearing either bottom corner — or any keyboard interaction, or
+  focus landing inside them — bringing them back. It only ever changes opacity, so nothing becomes
+  untabbable.
+- **About** now carries the widget count, uptime, any resolver diagnostics, and links to the
+  project, the wiki, the author and the issue form.
+- **Regenerate is a refresh icon in the header**, next to the close button and beside the state it
+  acts on, rather than a footer you had to scroll to. It carries a dot when there is something
+  unpublished.
+- **Backgrounds moved to the design panel** and gained an upload. This finally serves
+  `data/assets/`, which had been created, backed up and walked by doctor since v1 with no route
+  behind it — setting a background by hand produced a 404. Images are stored content-addressed
+  under a name the SERVER derives from the bytes, and the type is sniffed from magic numbers rather
+  than believed from a header, so an upload cannot name a path or be served back as something
+  executable. The write gate now also admits image content types, which costs nothing: the property
+  it relies on is not "JSON" but "a type a cross-site form cannot produce", and a test asserts the
+  three that a form CAN produce never appear in that list.
+
 ### Themes and the design panel
 
 - **Seven theme presets** — Default, Nord, Terminal, Glass, Brutalist, Amber and Synthwave. A

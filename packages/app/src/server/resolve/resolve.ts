@@ -220,6 +220,7 @@ export function resolve(input: ResolveInput): Resolved {
     widgets,
     targets,
     theme: tree.theme,
+    features: tree.dashboard.features,
     diagnostics,
   }
 }

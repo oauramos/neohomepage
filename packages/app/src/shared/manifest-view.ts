@@ -33,6 +33,7 @@ export type ManifestView = {
   readonly id: string
   readonly displayName: string
   readonly category: string
+  readonly kind: string
   readonly icon: string
   readonly version: string
   readonly template: string
@@ -63,6 +64,7 @@ export function manifestView(manifest: Manifest): ManifestView {
     id: manifest.id,
     displayName: manifest.displayName,
     category: manifest.category,
+    kind: manifest.kind,
     icon: manifest.icon,
     version: manifest.version,
     template: manifest.presentation.template,

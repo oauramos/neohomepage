@@ -43,6 +43,21 @@ export const dashboardSchema = z
         autoUpdate: z.boolean().default(true),
       })
       .prefault({}),
+    /**
+     * Optional behaviour, off by default.
+     *
+     * A dashboard is a thing people leave open on a wall, and the two floating buttons are the only
+     * chrome on it. `autoHideControls` fades them once you stop interacting and brings them back
+     * when the pointer nears their corner — useful on a wall display, wrong on a laptop, so it is a
+     * choice rather than a default. Keyboard focus always overrides it: a control that cannot be
+     * tabbed to is not hidden, it is gone.
+     */
+    features: z
+      .object({
+        autoHideControls: z.boolean().default(false),
+        autoHideDelayMs: z.int().min(1000).max(60000).default(5000),
+      })
+      .prefault({}),
   })
   .catchall(z.unknown())
 

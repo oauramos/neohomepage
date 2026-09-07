@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Manifest } from '@neohomepage/catalog-schema'
 import type { AppContext } from '../context.ts'
-import { layoutFileSchema, targetSchema, themeSchema, widgetSchema } from '../config/schema.ts'
+import {
+  dashboardSchema,
+  layoutFileSchema,
+  targetSchema,
+  themeSchema,
+  widgetSchema,
+} from '../config/schema.ts'
 import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts'
 import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
@@ -64,6 +70,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
         id: view.id,
         displayName: view.displayName,
         category: view.category,
+        kind: view.kind,
         icon: view.icon,
         version: view.version,
         template: view.template,
@@ -211,6 +218,38 @@ export function createApiRoutes(options: ApiOptions): Hono {
                 : { config: { ...widget.config, ...body.config } }),
             }),
           )
+        },
+        ifMatch(c.req.header('if-match')),
+      ),
+    )
+
+    if (!result.ok) return c.json({ error: result.message }, result.status)
+    await context.reload()
+    void context.requestPublish('ui')
+    return c.json({ revision: result.value.revision })
+  })
+
+  /**
+   * Dashboard-level settings: the title, and the optional behaviour under `features`.
+   *
+   * `features` merges rather than replaces, so a panel that flips one toggle does not have to know
+   * or resend the others — the same rule the theme route follows, and for the same reason.
+   */
+  api.patch('/dashboard', async (c) => {
+    const body = (await c.req.json()) as {
+      title?: string
+      features?: { autoHideControls?: boolean; autoHideDelayMs?: number }
+    }
+
+    const result = await handle(() =>
+      context.store.transaction(
+        'ui',
+        (draft) => {
+          draft.dashboard = dashboardSchema.parse({
+            ...draft.dashboard,
+            ...(body.title === undefined ? {} : { title: body.title }),
+            features: { ...draft.dashboard.features, ...body.features },
+          })
         },
         ifMatch(c.req.header('if-match')),
       ),

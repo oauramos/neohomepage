@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "displayName": "Service link",
   "category": "misc",
+  "kind": "bookmark",
   "icon": "link",
   "docs": "https://oauramos.github.io/neohomepage/widgets/service-link",
   "target": {

@@ -2,7 +2,7 @@ import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { dashboard } from '../shared/board.ts'
 import type { Resolved } from '../shared/resolved.ts'
-import { AddWidget } from './fab/AddWidget.tsx'
+import { AboutPanel, ConfigPanel, ThemePanel, WidgetsPanel } from './fab/panels.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
 import { DesignFab } from './design/DesignFab.tsx'
@@ -11,6 +11,7 @@ import { widgetTile } from '../shared/board.ts'
 import type { LayoutItem } from '../shared/grid-geometry.ts'
 import { DashboardClient, readEmbeddedState, type DashboardState } from './state.ts'
 import { applyTheme } from './theme.ts'
+import { useAutoHide } from './useAutoHide.ts'
 import './styles.css'
 
 /**
@@ -37,6 +38,7 @@ function TabPanel({
   onToggleEdit,
   onChanged,
   onRemove,
+  onFeatures,
 }: {
   tab: Tab
   state: DashboardState
@@ -44,6 +46,7 @@ function TabPanel({
   onToggleEdit: () => void
   onChanged: () => void
   onRemove: (id: string) => void
+  onFeatures: (patch: Partial<DashboardState['resolved']['features']>) => void
 }) {
   switch (tab) {
     case 'edit':
@@ -60,51 +63,13 @@ function TabPanel({
         </div>
       )
     case 'widgets':
-      return (
-        <div className="nh-panel-stack">
-          <AddWidget onAdded={onChanged} />
-          <ul className="nh-panel-list">
-            {state.resolved.widgets.map((widget) => (
-              <li key={widget.id}>
-                <strong>{widget.title}</strong> <code>{widget.type}</code>{' '}
-                <span className="nh-panel-dim">
-                  {state.data[widget.id]?.meta.state ?? 'pending'}
-                </span>{' '}
-                <button
-                  type="button"
-                  className="nh-button-quiet"
-                  onClick={() => onRemove(widget.id)}
-                  aria-label={`Remove ${widget.title}`}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
+      return <WidgetsPanel state={state} onChanged={onChanged} onRemove={onRemove} />
     case 'theme':
-    case 'background':
-      return (
-        <p className="nh-panel-note">
-          Themes, colour, shape, type and backgrounds all live in the design panel — the button in
-          the bottom-right corner. Current theme: <code>{state.resolved.theme.preset}</code>, mode{' '}
-          <code>{state.resolved.theme.mode}</code>.
-        </p>
-      )
+      return <ThemePanel state={state} onImported={onChanged} />
+    case 'config':
+      return <ConfigPanel features={state.resolved.features} onChange={onFeatures} />
     case 'about':
-      return (
-        <dl className="nh-panel-facts">
-          <dt>Revision</dt>
-          <dd>
-            <code>{state.revision}</code>
-          </dd>
-          <dt>Generation</dt>
-          <dd>{state.generation ?? 'none'}</dd>
-          <dt>Live feed</dt>
-          <dd>{state.connected ? 'connected' : 'reconnecting'}</dd>
-        </dl>
-      )
+      return <AboutPanel state={state} />
     default: {
       const exhaustive: never = tab
       throw new Error(`unhandled tab ${String(exhaustive)}`)
@@ -115,6 +80,10 @@ function TabPanel({
 function App({ client }: { client: DashboardClient }) {
   const [state, setState] = useState(client.state)
   const [editing, setEditing] = useState(false)
+  const hideControls = useAutoHide(
+    state.resolved.features.autoHideControls && !editing,
+    state.resolved.features.autoHideDelayMs,
+  )
 
   useEffect(() => client.subscribe(setState), [client])
   useEffect(() => {
@@ -164,13 +133,22 @@ function App({ client }: { client: DashboardClient }) {
     [client],
   )
 
+  const saveFeatures = async (patch: Partial<DashboardState['resolved']['features']>) => {
+    await fetch('/api/dashboard', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ features: patch }),
+    })
+    await client.refresh()
+  }
+
   const removeWidget = async (id: string) => {
     await fetch(`/api/widgets/${id}`, { method: 'DELETE' })
     await client.refresh()
   }
 
   return (
-    <>
+    <div data-neo-controls={hideControls ? 'hidden' : 'shown'}>
       {editing && page !== undefined ? (
         <GridEditor
           page={page}
@@ -197,6 +175,7 @@ function App({ client }: { client: DashboardClient }) {
             }}
             onChanged={() => void client.refresh()}
             onRemove={(id) => void removeWidget(id)}
+            onFeatures={(patch) => void saveFeatures(patch)}
           />
         )}
       />
@@ -205,7 +184,7 @@ function App({ client }: { client: DashboardClient }) {
           <DesignPanel theme={state.resolved.theme} onPreview={previewTheme} onCommit={saveTheme} />
         )}
       </DesignFab>
-    </>
+    </div>
   )
 }
 
@@ -226,6 +205,7 @@ async function boot(container: HTMLElement, root: Root): Promise<void> {
         cssVars: { theme: {}, light: {}, dark: {} },
         surface: { background: null, blur: 0, overlayOpacity: 0 },
       },
+      features: { autoHideControls: false, autoHideDelayMs: 5000 },
       diagnostics: [],
     }) as Resolved,
     data: {},

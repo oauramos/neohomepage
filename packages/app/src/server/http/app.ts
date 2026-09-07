@@ -7,6 +7,16 @@ import type { AppContext } from '../context.ts'
 import { env } from '../env.ts'
 import { createApiRoutes } from './api.ts'
 import {
+  AssetError,
+  assetMime,
+  BACKGROUNDS_SUBDIR,
+  deleteBackground,
+  isAssetId,
+  listBackgrounds,
+  MAX_ASSET_BYTES,
+  saveBackground,
+} from '../assets/store.ts'
+import {
   assertAuthUsable,
   checkPassword,
   checkWrite,
@@ -206,6 +216,67 @@ export function createApp(options: AppOptions): Hono {
       bytes: result.bytes,
       durationMs: result.durationMs,
     })
+  })
+
+  /**
+   * Serve an uploaded background.
+   *
+   * `data/assets/` has been created, backed up and walked by doctor since v1 with nothing serving
+   * it, which is why setting a background by hand produced a 404 and a still-white page. This is
+   * that route — and it is deliberately narrow: only the backgrounds subdirectory, and only ids in
+   * the shape the store emits. There is no path to traverse because there is no path from the
+   * client, only an id that must match a 32-hex-plus-known-extension pattern.
+   */
+  app.get('/assets/backgrounds/:id', async (c) => {
+    const id = c.req.param('id')
+    if (!isAssetId(id)) return c.notFound()
+    const path = join(env.assetsDir, BACKGROUNDS_SUBDIR, id)
+    try {
+      const info = await stat(path)
+      if (!info.isFile()) return c.notFound()
+    } catch {
+      return c.notFound()
+    }
+    // Content addressed, so the bytes behind an id can never change: cache them forever.
+    c.header('Cache-Control', 'public, max-age=31536000, immutable')
+    c.header('Content-Type', assetMime(id))
+    // An image served from the dashboard's own origin is still a file a stranger uploaded. This
+    // stops a browser from second-guessing the type and running it as something else.
+    c.header('X-Content-Type-Options', 'nosniff')
+    return stream(c, async (writable) => {
+      const readable = createReadStream(path)
+      for await (const chunk of readable) await writable.write(chunk as Uint8Array)
+    })
+  })
+
+  app.get('/api/assets/backgrounds', async (c) =>
+    c.json({ assets: await listBackgrounds(env.assetsDir) }),
+  )
+
+  /**
+   * Upload one image as raw bytes.
+   *
+   * Raw rather than multipart: multipart carries a filename, and a filename is the one field here
+   * that would be attacker-controlled text on its way to a path. Not accepting it is simpler than
+   * sanitising it.
+   */
+  app.post('/api/assets/backgrounds', async (c) => {
+    const declared = Number(c.req.header('content-length') ?? '0')
+    if (declared > MAX_ASSET_BYTES) {
+      return c.json({ error: `larger than ${String(MAX_ASSET_BYTES / 1024 / 1024)} MB` }, 413)
+    }
+    const body = new Uint8Array(await c.req.arrayBuffer())
+    try {
+      return c.json(await saveBackground(env.assetsDir, body), 201)
+    } catch (error) {
+      if (error instanceof AssetError) return c.json({ error: error.message }, error.status)
+      throw error
+    }
+  })
+
+  app.delete('/api/assets/backgrounds/:id', async (c) => {
+    const removed = await deleteBackground(env.assetsDir, c.req.param('id'))
+    return removed ? c.json({ ok: true }) : c.json({ error: 'unknown asset' }, 404)
   })
 
   /**

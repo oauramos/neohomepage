@@ -14,6 +14,15 @@ import process from 'node:process'
  * upgrade), and changing the password invalidates every existing session for free.
  */
 
+/**
+ * Content types a write may carry, besides JSON.
+ *
+ * The set exists so the CSRF property is checkable rather than argued: a cross-site <form> can only
+ * produce application/x-www-form-urlencoded, multipart/form-data or text/plain, and a test asserts
+ * none of those can ever appear here.
+ */
+export const UPLOADABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']
+
 export type AuthMode = 'password' | 'forward' | 'none'
 
 export type AuthConfig = {
@@ -168,8 +177,17 @@ export function checkWrite(config: AuthConfig, request: RequestFacts, now: numbe
 
   // A form POST cannot set an arbitrary content type, so requiring JSON blocks the simplest
   // cross-site write there is.
+  //
+  // Image types are allowed alongside it for one route — uploading a background — and that costs
+  // nothing here, because the property being relied on is not "JSON" but "a type a cross-site
+  // <form> cannot produce". A form can send exactly three: application/x-www-form-urlencoded,
+  // multipart/form-data and text/plain. None of them is in this list, and none can be, which is
+  // what UPLOADABLE_TYPES is asserted on in the tests.
   const contentType = request.contentType ?? ''
-  if (!contentType.startsWith('application/json')) {
+  const allowed =
+    contentType.startsWith('application/json') ||
+    UPLOADABLE_TYPES.some((type) => contentType.startsWith(type))
+  if (!allowed) {
     return { allowed: false, status: 403, reason: 'writes must be application/json' }
   }
 

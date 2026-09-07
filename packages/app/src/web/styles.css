@@ -903,3 +903,209 @@ body {
   outline: 2px solid var(--nh-accent);
   outline-offset: 2px;
 }
+
+/* Auto-hide only ever changes opacity, and only when the feature is on. A control that cannot be
+   focused is gone rather than hidden, so focus-within always brings the pair back — and the
+   transition is the one thing reduced-motion turns off. */
+[data-neo-controls='hidden'] .nh-fab {
+  opacity: 0.06;
+}
+[data-neo-controls] .nh-fab {
+  transition: opacity 420ms ease;
+}
+[data-neo-controls] .nh-fab:hover,
+[data-neo-controls] .nh-fab:focus-visible,
+[data-neo-controls='hidden'] .nh-fab:focus-within {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-neo-controls] .nh-fab {
+    transition: none;
+  }
+}
+
+/* Publish, promoted from the footer to the header. The dot is the unpublished-changes signal that
+   used to be a sentence you had to scroll to. */
+.nh-modal-action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--nh-muted-foreground);
+  cursor: pointer;
+}
+.nh-modal-action:hover {
+  color: var(--nh-foreground);
+  border-color: var(--nh-border);
+}
+.nh-modal-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.nh-modal-action:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
+.nh-modal-action[data-neo-pending='true']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--nh-accent);
+}
+.nh-spin {
+  animation: nh-rotate 900ms linear infinite;
+}
+@keyframes nh-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-spin {
+    animation: none;
+  }
+}
+
+.nh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.nh-count {
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.nh-code {
+  width: 100%;
+  border: 1px solid var(--nh-control-border);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--nh-muted) 60%, transparent);
+  color: inherit;
+  font-family: var(--nh-font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  padding: 8px;
+  resize: vertical;
+}
+.nh-code:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
+.nh-status-note {
+  font-size: 0.75rem;
+  color: var(--nh-ok);
+}
+.nh-status-note[data-neo-tone='bad'] {
+  color: var(--nh-bad);
+}
+
+.nh-toggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.nh-toggle input {
+  margin-top: 3px;
+  accent-color: var(--nh-accent);
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.nh-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8125rem;
+}
+.nh-toggle .nh-panel-dim {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+.nh-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nh-links a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: var(--nh-accent);
+  text-decoration: none;
+  font-size: 0.8125rem;
+}
+.nh-links a:hover {
+  background: color-mix(in oklch, var(--nh-accent) 12%, transparent);
+}
+.nh-links a:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
+
+.nh-uploads {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The input covers its own label at full size rather than being visually hidden. Hiding it made a
+   1x1 control the tap-target sweep correctly refused: the label was the target and the input was a
+   pinhole next to it. Transparent and stretched, the thing you aim at IS the thing you press. */
+.nh-upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+}
+.nh-upload-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.nh-upload-item {
+  position: relative;
+}
+.nh-upload-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--nh-background) 75%, transparent);
+  color: var(--nh-foreground);
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.nh-upload-delete:hover {
+  background: var(--nh-bad);
+  color: var(--nh-accent-foreground);
+}
+.nh-upload-delete:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
