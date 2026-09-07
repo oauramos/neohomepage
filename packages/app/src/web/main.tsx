@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { dashboard } from '../shared/board.ts'
 import type { Resolved } from '../shared/resolved.ts'
@@ -145,18 +145,24 @@ function App({ client }: { client: DashboardClient }) {
    * sixty times a second. `saveTheme` is what the panel debounces, so one drag is one request and
    * one publish rather than a queue of them racing to be last.
    */
-  const previewTheme = (draft: Parameters<typeof applyTheme>[0]) => {
+  // Stable identity: the panel paints from an effect keyed on this, so a new function every render
+  // would repaint on every render rather than on every change.
+  const previewTheme = useCallback((draft: Parameters<typeof applyTheme>[0]) => {
     applyTheme(draft)
-  }
+  }, [])
 
-  const saveTheme = async (patch: ThemePatch) => {
-    await fetch('/api/theme', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    })
-    await client.refresh()
-  }
+  // Stable too: the gallery memoises sixty-four cards on the identity of the handler they call.
+  const saveTheme = useCallback(
+    async (patch: ThemePatch) => {
+      await fetch('/api/theme', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      await client.refresh()
+    },
+    [client],
+  )
 
   const removeWidget = async (id: string) => {
     await fetch(`/api/widgets/${id}`, { method: 'DELETE' })
@@ -196,11 +202,7 @@ function App({ client }: { client: DashboardClient }) {
       />
       <DesignFab>
         {() => (
-          <DesignPanel
-            theme={state.resolved.theme}
-            onPreview={previewTheme}
-            onCommit={(patch) => void saveTheme(patch)}
-          />
+          <DesignPanel theme={state.resolved.theme} onPreview={previewTheme} onCommit={saveTheme} />
         )}
       </DesignFab>
     </>

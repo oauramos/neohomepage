@@ -177,14 +177,26 @@ test('a design control follows the pointer instead of the last round trip', asyn
     await slider.fill(value)
     seen.push({
       sent: value,
+      // The control must never lag: its value is local state, settled before the event returns.
       shows: await slider.inputValue(),
-      painted: await page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--nh-radius').trim(),
+      // The PAGE is allowed exactly one frame. Painting is coalesced to an animation frame on
+      // purpose — a drag emits events faster than a board of tiles can repaint, and painting every
+      // one builds a backlog that reads as lag. One frame behind is not lag; a queue is.
+      painted: await page.evaluate(
+        () =>
+          new Promise<string>((resolve) => {
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                resolve(
+                  getComputedStyle(document.documentElement).getPropertyValue('--nh-radius').trim(),
+                ),
+              ),
+            )
+          }),
       ),
     })
   }
 
-  // Every frame: the input shows what was sent, and the page is already painted with it.
   expect(seen).toEqual(
     ['4', '10', '16', '22', '28'].map((value) => ({
       sent: value,

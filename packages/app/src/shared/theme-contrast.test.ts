@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AA_NON_TEXT, AA_NORMAL_TEXT, contrastRatio, hexToOklch, toHex } from './contrast.ts'
 import { DARK_DEFAULTS, LIGHT_DEFAULTS, resolveTokens, THEME_TOKENS } from './theme-tokens.ts'
-import { SHAPE_TOKENS, THEME_PRESETS } from './theme-presets.ts'
+import { ALL_PRESETS, SHAPE_TOKENS } from './theme-presets.ts'
 import type { Theme } from '../server/config/schema.ts'
 
 /**
@@ -86,7 +86,7 @@ describe.each([
  * `resolveTokens` rather than read from the table directly, so a preset that omits a token is
  * checked as the value it will actually paint — the default it falls through to.
  */
-describe.each(THEME_PRESETS.map((preset) => [preset.id, preset] as const))(
+describe.each(ALL_PRESETS.map((preset) => [preset.id, preset] as const))(
   'preset %s',
   (id, preset) => {
     const theme = (): Theme =>

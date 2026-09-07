@@ -21,6 +21,8 @@
  * That is what keeps a pretty palette from shipping unreadable: see the preset matrix in that test.
  */
 
+import { GALLERY_PRESETS } from './theme-gallery.ts'
+
 export type PresetTokens = Readonly<Record<string, string>>
 
 export type ThemePreset = {
@@ -677,6 +679,18 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
   ERA_64BIT_PRESET,
 ]
 
+/**
+ * Every preset a theme can name: the curated eleven plus the generated gallery.
+ *
+ * `resolveTokens` looks a preset up by id and must find gallery entries too, but the two lists stay
+ * separate above so the design panel can present them as what they are — a short, opinionated set
+ * with its own shape language, and a wide field to go shopping in.
+ *
+ * Imported lazily-shaped: `theme-gallery.ts` imports the TYPES from this module, so the value
+ * import has to point the other way and only here, at the bottom, after ThemePreset exists.
+ */
 export function presetById(id: string): ThemePreset | undefined {
-  return THEME_PRESETS.find((preset) => preset.id === id)
+  return ALL_PRESETS.find((preset) => preset.id === id)
 }
+
+export const ALL_PRESETS: readonly ThemePreset[] = [...THEME_PRESETS, ...GALLERY_PRESETS]

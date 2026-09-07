@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Theme } from '../../server/config/schema.ts'
 import {
   AA_NON_TEXT,
@@ -9,6 +9,7 @@ import {
 } from '../../shared/contrast.ts'
 import { BACKGROUNDS, GRADIENT_PREFIX } from '../../shared/theme-backgrounds.ts'
 import { SHAPE_TOKENS, THEME_PRESETS } from '../../shared/theme-presets.ts'
+import { GALLERY_FINISHES, GALLERY_PRESETS, finishOf } from '../../shared/theme-gallery.ts'
 import { resolveTokens } from '../../shared/theme-tokens.ts'
 import { currentScheme } from '../theme.ts'
 
@@ -117,6 +118,53 @@ function firstFamily(stack: string | undefined): string {
     .toLowerCase() as string
 }
 
+/**
+ * One gallery swatch.
+ *
+ * Memoised and fed plain strings rather than the preset object: sixty-four cards re-rendering on
+ * every keystroke of the filter — or on every frame of a slider drag in another section — is the
+ * cost that would undo the paint work. Its colours come from the preset ALONE, not from
+ * `resolveTokens` with the user's overrides on top, because a gallery card should show what the
+ * theme is rather than what it would look like underneath your edits.
+ */
+const GalleryCard = memo(function GalleryCard({
+  id,
+  label,
+  swatch,
+  active,
+  onPick,
+}: {
+  id: string
+  label: string
+  swatch: { background: string; surface: string; accent: string; ok: string; bad: string }
+  active: boolean
+  onPick: (id: string) => void
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className="nh-swatch"
+        aria-current={active}
+        onClick={() => onPick(id)}
+        title={label}
+      >
+        <span
+          className="nh-swatch-bars"
+          aria-hidden="true"
+          style={{ background: swatch.background }}
+        >
+          <i style={{ background: swatch.surface }} />
+          <i style={{ background: swatch.accent }} />
+          <i style={{ background: swatch.ok }} />
+          <i style={{ background: swatch.bad }} />
+        </span>
+        <span className="nh-swatch-name">{label}</span>
+      </button>
+    </li>
+  )
+})
+
 function Ratio({ value, floor, label }: { value: number | null; floor: number; label: string }) {
   const ok = value !== null && value >= floor
   return (
@@ -204,21 +252,56 @@ export function DesignPanel({
   onCommit: (patch: ThemePatch) => void
 }) {
   const scheme = currentScheme(theme)
-  const [section, setSection] = useState<'theme' | 'colour' | 'shape' | 'type' | 'background'>(
-    'theme',
-  )
+  const [section, setSection] = useState<
+    'theme' | 'presets' | 'colour' | 'shape' | 'type' | 'background'
+  >('theme')
 
   /**
    * The draft. Seeded empty and cleared whenever the preset or the scheme changes, because those
    * are wholesale changes the panel SHOULD follow; everything else is the user's own typing and
    * must survive the round trip that a save triggers.
    */
+  const [query, setQuery] = useState('')
+  const [finish, setFinish] = useState<string>('all')
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [draftSurface, setDraftSurface] = useState<Partial<Theme['surface']>>({})
   useEffect(() => {
     setDraft({})
     setDraftSurface({})
   }, [theme.preset, theme.mode])
+
+  /**
+   * Swatch colours for all sixty-four, computed once per scheme rather than per render. Reading
+   * straight from the preset skips resolveTokens entirely — the gallery does not need the merge.
+   */
+  const swatches = useMemo(
+    () =>
+      new Map(
+        GALLERY_PRESETS.map((preset) => {
+          const tokens = preset[scheme]
+          return [
+            preset.id,
+            {
+              background: tokens.background ?? '',
+              surface: tokens.surface ?? '',
+              accent: tokens.accent ?? '',
+              ok: tokens.ok ?? '',
+              bad: tokens.bad ?? '',
+            },
+          ] as const
+        }),
+      ),
+    [scheme],
+  )
+
+  const gallery = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return GALLERY_PRESETS.filter(
+      (preset) =>
+        (finish === 'all' || finishOf(preset.id) === finish) &&
+        (needle === '' || preset.label.toLowerCase().includes(needle)),
+    )
+  }, [query, finish])
 
   const saved = useMemo(() => resolveTokens(theme, scheme), [theme, scheme])
   const tokens = useMemo(() => ({ ...saved, ...draft }), [saved, draft])
@@ -284,14 +367,32 @@ export function DesignPanel({
    * out with rounded corners it does not have. Measured: radius 6px leaked into a preset whose own
    * radius is 0.
    */
-  const commitNow = (patch: ThemePatch) => {
-    if (timer.current !== null) clearTimeout(timer.current)
-    timer.current = null
-    pending.current = {}
-    setDraft({})
-    setDraftSurface({})
-    onCommit(patch)
-  }
+  const commitNow = useCallback(
+    (patch: ThemePatch) => {
+      if (timer.current !== null) clearTimeout(timer.current)
+      timer.current = null
+      pending.current = {}
+      setDraft({})
+      setDraftSurface({})
+      onCommit(patch)
+    },
+    [onCommit],
+  )
+
+  const pickPreset = useCallback(
+    (id: string) => {
+      const preset = [...THEME_PRESETS, ...GALLERY_PRESETS].find((entry) => entry.id === id)
+      commitNow({
+        preset: id,
+        // A preset may nominate a background. Applied only when it asks for one, so choosing a
+        // plain theme does not silently strip the one you picked.
+        ...(preset?.background === undefined
+          ? {}
+          : { surface: { background: `${GRADIENT_PREFIX}${preset.background}` } }),
+      })
+    },
+    [commitNow],
+  )
 
   const setColour = (token: string, value: string | null) => {
     setDraft((current) => {
@@ -318,9 +419,25 @@ export function DesignPanel({
     queue({ surface: patch })
   }
 
-  // Paint whatever the draft currently says, every render it changes.
+  /**
+   * Paint at most once per frame.
+   *
+   * A drag emits input events faster than the browser can repaint a board, so painting on every
+   * one builds a backlog: the queue grows, the thumb runs ahead of the colours, and it reads as
+   * lag. Coalescing to an animation frame throws away the intermediate states nobody could have
+   * seen anyway and keeps at most one repaint in flight.
+   */
+  const frame = useRef<number | null>(null)
   useEffect(() => {
-    onPreview(draftTheme)
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null
+      onPreview(draftTheme)
+    })
+    return () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current)
+      frame.current = null
+    }
   }, [draftTheme, onPreview])
 
   /**
@@ -371,7 +488,7 @@ export function DesignPanel({
         </div>
       ) : null}
       <nav className="nh-design-nav" aria-label="Design sections">
-        {(['theme', 'colour', 'shape', 'type', 'background'] as const).map((id) => (
+        {(['theme', 'presets', 'colour', 'shape', 'type', 'background'] as const).map((id) => (
           <button
             key={id}
             type="button"
@@ -408,16 +525,7 @@ export function DesignPanel({
                     type="button"
                     className="nh-preset"
                     aria-current={theme.preset === preset.id}
-                    onClick={() =>
-                      commitNow({
-                        preset: preset.id,
-                        // A preset may nominate a background. Applied only when it asks for one, so
-                        // choosing a plain theme does not silently strip the one you picked.
-                        ...(preset.background === undefined
-                          ? {}
-                          : { surface: { background: `${GRADIENT_PREFIX}${preset.background}` } }),
-                      })
-                    }
+                    onClick={() => pickPreset(preset.id)}
                   >
                     <span
                       className="nh-preset-swatch"
@@ -446,6 +554,57 @@ export function DesignPanel({
                 </li>
               )
             })}
+          </ul>
+        </div>
+      ) : null}
+
+      {section === 'presets' ? (
+        <div className="nh-design-section">
+          <p className="nh-panel-note">
+            Sixty-four ready-made palettes — sixteen hues in four finishes. Pick one and it becomes
+            the base; everything in the other tabs still edits on top of it.
+          </p>
+          <input
+            type="search"
+            className="nh-input"
+            placeholder="Search palettes"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search palettes"
+          />
+          <div className="nh-seg" role="group" aria-label="Finish">
+            {['all', ...GALLERY_FINISHES].map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="nh-seg-item"
+                aria-pressed={finish === id}
+                onClick={() => setFinish(id)}
+              >
+                {id === 'all' ? 'All' : id[0]?.toUpperCase() + id.slice(1)}
+              </button>
+            ))}
+          </div>
+          <p className="nh-panel-dim">{gallery.length} palettes</p>
+          <ul className="nh-swatch-grid">
+            {gallery.map((preset) => (
+              <GalleryCard
+                key={preset.id}
+                id={preset.id}
+                label={preset.label}
+                swatch={
+                  swatches.get(preset.id) ?? {
+                    background: '',
+                    surface: '',
+                    accent: '',
+                    ok: '',
+                    bad: '',
+                  }
+                }
+                active={theme.preset === preset.id}
+                onPick={pickPreset}
+              />
+            ))}
           </ul>
         </div>
       ) : null}

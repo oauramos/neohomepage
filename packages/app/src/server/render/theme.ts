@@ -65,9 +65,17 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-header,main{max-width:var(--nh-max-width);margin-inline:auto}
 .nh-header{padding:24px 16px 8px}
 .nh-title{margin:0;font-size:1.25rem;font-weight:600;letter-spacing:-0.01em}
+/* A theme change is a custom property on :root, which invalidates style for the whole document —
+   and a board is thirty-odd tiles. Measured while dragging the radius slider: 13ms median and 63ms
+   at the 95th percentile with 32 tiles, against 1.8ms and 3.3ms with four. The work is per-tile
+   paint, so the fix is per-tile too. Containment promises a tile's layout and paint stay inside
+   it; content-visibility lets the browser skip the ones scrolled out of view entirely. The board is
+   absolutely positioned from the emitted grid CSS, so every tile already has its height and
+   skipping one cannot move anything. */
 .nh-tile{background:var(--nh-surface);color:var(--nh-surface-foreground);
   border:var(--nh-border-width) solid var(--nh-border);border-radius:var(--nh-radius);
   box-shadow:var(--nh-shadow);padding:12px 14px;overflow:hidden;
+  contain:layout paint;content-visibility:auto;
   display:flex;flex-direction:column;gap:8px}
 /* State is carried on the tile and was, until now, painted by nothing: a dead service and a
    healthy one were the same rectangle apart from an 11px chip. A left rule reads across a room. */
