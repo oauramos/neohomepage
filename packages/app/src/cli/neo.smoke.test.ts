@@ -87,7 +87,9 @@ describe('the CLI runs under plain node', () => {
 
     const target = await scratch()
     await neo(['restore', archive], target)
-    expect(await readFile(join(target, 'config', 'dashboard.json'), 'utf8')).toContain('schemaVersion')
+    expect(await readFile(join(target, 'config', 'dashboard.json'), 'utf8')).toContain(
+      'schemaVersion',
+    )
     // The archive carries no secrets, so a restored install has none either.
     await expect(readdir(join(target, 'secrets'))).rejects.toThrow()
   })

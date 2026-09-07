@@ -101,3 +101,45 @@ describe('schema introspection', () => {
     expect(out).toEqual({ id: 'home' })
   })
 })
+
+describe('recursive schema ordering', () => {
+  const layoutItem = z.object({ i: z.string(), x: z.number(), y: z.number(), w: z.number(), h: z.number() })
+  const file = z.object({
+    page: z.string(),
+    layouts: z.record(z.string(), z.array(layoutItem)),
+    meta: z.record(z.string(), z.object({ origin: z.string(), cols: z.number() })),
+  })
+
+  it('orders nested array items by their own schema, not alphabetically', () => {
+    // Alphabetical would give `h, i, w, x, y`, which is deterministic but unreadable in a diff.
+    const out = serialize(
+      { page: 'home', layouts: { lg: [{ h: 3, i: 'w1', w: 4, x: 0, y: 0 }] }, meta: {} },
+      { schema: file },
+    )
+    const item = out.slice(out.indexOf('['), out.indexOf(']'))
+    expect(item.indexOf('"i"')).toBeLessThan(item.indexOf('"x"'))
+    expect(item.indexOf('"x"')).toBeLessThan(item.indexOf('"y"'))
+    expect(item.indexOf('"y"')).toBeLessThan(item.indexOf('"w"'))
+    expect(item.indexOf('"w"')).toBeLessThan(item.indexOf('"h"'))
+  })
+
+  it('orders values inside a record by the record value schema', () => {
+    const out = serialize({ page: 'home', layouts: {}, meta: { lg: { cols: 12, origin: 'authored' } } }, { schema: file })
+    const meta = out.slice(out.indexOf('"meta"'))
+    expect(meta.indexOf('"origin"')).toBeLessThan(meta.indexOf('"cols"'))
+  })
+
+  it('orders nested objects reached through optional and default wrappers', () => {
+    const schema = z.object({
+      grid: z.object({ rowHeight: z.number(), margin: z.array(z.number()) }).prefault({ rowHeight: 56, margin: [] }),
+    })
+    const out = serialize({ grid: { margin: [1, 2], rowHeight: 40 } }, { schema })
+    expect(out.indexOf('"rowHeight"')).toBeLessThan(out.indexOf('"margin"'))
+  })
+
+  it('still sorts keys the schema does not name, so unknown fields stay deterministic', () => {
+    const schema = z.object({ id: z.string() }).catchall(z.unknown())
+    const out = JSON.parse(serialize({ zeta: 1, id: 'a', alpha: 2 }, { schema }))
+    expect(Object.keys(out)).toEqual(['id', 'alpha', 'zeta'])
+  })
+})

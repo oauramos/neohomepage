@@ -1,25 +1,27 @@
-import type { z } from 'zod'
+import { z } from 'zod'
 
 /**
  * Deterministic JSON serialisation.
  *
- * The config directory is meant to live in git, so the diff of a one-field change must be one
- * line. Three rules get us there, and all three are enforced by tests rather than by habit:
- * keys come out in the schema's declaration order (then alphabetically for anything the schema
- * does not know about), every value equal to its schema default is dropped, and the file always
- * ends with a single LF.
+ * The config directory is meant to live in git, so a one-field change must be a one-line diff.
+ * Three rules get there, and all three are tested: keys come out in the schema's declaration
+ * order — recursively, so a layout item reads `i, x, y, w, h` rather than the alphabetical
+ * `h, i, w, x, y` — every value equal to its schema default is dropped, and the file ends with
+ * exactly one LF.
  */
 
 export type SerializeOptions = {
-  /** Key order to prefer, normally the schema's declaration order. */
+  /** Order and defaults are both read from here when present. */
+  readonly schema?: z.ZodType
+  /** Fallback ordering for a value with no schema. */
   readonly keyOrder?: readonly string[]
-  /** Values matching these are omitted, keeping files sparse and diffs meaningful. */
+  /** Top-level values matching these are omitted, keeping files sparse. */
   readonly defaults?: Readonly<Record<string, unknown>>
 }
 
 /**
- * JavaScript pins integer-like object keys to the front, in ascending numeric order, even after
- * an explicit sort. A "deterministic" serialiser that ignores this silently is not one, so a
+ * JavaScript pins integer-like object keys to the front, in ascending numeric order, even after an
+ * explicit sort. A "deterministic" serialiser that ignores this silently is not one, so a
  * numeric-like key anywhere in the tree is refused rather than quietly reordered. Config uses
  * arrays of `{id, ...}` or prefixed ids instead.
  */
@@ -36,6 +38,39 @@ export class NumericKeyError extends Error {
 
 const NUMERIC_LIKE = /^(0|[1-9]\d*)$/
 
+/** Peel optional/nullable/default/prefault/catch wrappers to reach the schema that has a shape. */
+function unwrap(schema: z.ZodType | undefined): z.ZodType | undefined {
+  let current = schema
+  for (let depth = 0; depth < 10 && current !== undefined; depth++) {
+    const kind = (current as { def?: { type?: string } }).def?.type
+    if (
+      kind === 'optional' ||
+      kind === 'nullable' ||
+      kind === 'default' ||
+      kind === 'prefault' ||
+      kind === 'catch'
+    ) {
+      current = (current as unknown as { unwrap(): z.ZodType }).unwrap()
+      continue
+    }
+    return current
+  }
+  return current
+}
+
+function fieldSchemas(schema: z.ZodType | undefined): Record<string, z.ZodType> | undefined {
+  const inner = unwrap(schema)
+  if (inner instanceof z.ZodObject) return inner.shape as Record<string, z.ZodType>
+  return undefined
+}
+
+function elementSchema(schema: z.ZodType | undefined): z.ZodType | undefined {
+  const inner = unwrap(schema)
+  if (inner instanceof z.ZodArray) return inner.element as z.ZodType
+  if (inner instanceof z.ZodRecord) return inner.valueType as z.ZodType
+  return undefined
+}
+
 function orderKeys(keys: readonly string[], preferred: readonly string[]): string[] {
   const rank = new Map(preferred.map((key, index) => [key, index]))
   return [...keys].sort((a, b) => {
@@ -48,23 +83,40 @@ function orderKeys(keys: readonly string[], preferred: readonly string[]): strin
   })
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(normalise(a, '', [])) === JSON.stringify(normalise(b, '', []))
-}
-
-function normalise(value: unknown, path: string, preferred: readonly string[]): unknown {
-  if (Array.isArray(value)) return value.map((entry, i) => normalise(entry, `${path}[${i}]`, []))
+function normalise(
+  value: unknown,
+  path: string,
+  schema: z.ZodType | undefined,
+  preferred: readonly string[],
+): unknown {
+  if (Array.isArray(value)) {
+    const element = elementSchema(schema)
+    return value.map((entry, i) => normalise(entry, `${path}[${i}]`, element, []))
+  }
   if (value === null || typeof value !== 'object') return value
 
   const record = value as Record<string, unknown>
+  const shape = fieldSchemas(schema)
+  const order = shape !== undefined ? Object.keys(shape) : preferred
   const out: Record<string, unknown> = {}
-  for (const key of orderKeys(Object.keys(record), preferred)) {
+
+  for (const key of orderKeys(Object.keys(record), order)) {
     if (NUMERIC_LIKE.test(key)) throw new NumericKeyError(path === '' ? '(root)' : path, key)
     const child = record[key]
     if (child === undefined) continue
-    out[key] = normalise(child, path === '' ? key : `${path}.${key}`, [])
+    // A key the schema does not name (a record entry, or a field from a newer release) still
+    // recurses through the record's value schema so its own contents stay ordered.
+    const childSchema = shape?.[key] ?? elementSchema(schema)
+    out[key] = normalise(child, path === '' ? key : `${path}.${key}`, childSchema, [])
   }
   return out
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  return (
+    JSON.stringify(normalise(a, '', undefined, [])) ===
+    JSON.stringify(normalise(b, '', undefined, []))
+  )
 }
 
 function dropDefaults(
@@ -80,16 +132,22 @@ function dropDefaults(
 }
 
 export function serialize(value: unknown, options: SerializeOptions = {}): string {
+  const schema = options.schema
+  const objectSchema = unwrap(schema)
+  const defaults =
+    options.defaults ??
+    (objectSchema instanceof z.ZodObject ? schemaDefaults(objectSchema) : undefined)
+
   let subject = value
   if (
-    options.defaults !== undefined &&
+    defaults !== undefined &&
     subject !== null &&
     typeof subject === 'object' &&
     !Array.isArray(subject)
   ) {
-    subject = dropDefaults(subject as Record<string, unknown>, options.defaults)
+    subject = dropDefaults(subject as Record<string, unknown>, defaults)
   }
-  const ordered = normalise(subject, '', options.keyOrder ?? [])
+  const ordered = normalise(subject, '', schema, options.keyOrder ?? [])
   return `${JSON.stringify(ordered, null, 2)}\n`
 }
 

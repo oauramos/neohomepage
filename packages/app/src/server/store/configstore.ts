@@ -83,10 +83,25 @@ const SINGLETON_SCHEMAS = {
 } as const
 
 function render(schema: z.ZodObject, value: unknown): string {
-  return serialize(value, { keyOrder: schemaKeyOrder(schema), defaults: schemaDefaults(schema) })
+  // Passing the schema itself (not just its top-level key order) is what makes nested objects
+  // and array items come out in declaration order too — a layout item reads `i, x, y, w, h`
+  // rather than alphabetically, which is the difference between a readable diff and a puzzle.
+  return serialize(value, { schema, defaults: schemaDefaults(schema) })
 }
 
-async function readJson(path: string): Promise<unknown | undefined> {
+type RawFile = { readonly text: string; readonly value: unknown }
+
+/**
+ * Read a file, keeping the raw bytes alongside the parsed value.
+ *
+ * The change detector compares the renderer's output against what is ACTUALLY on disk, not
+ * against a re-render of the parsed value. Comparing render-to-render would make formatting
+ * invisible: a file left alphabetical by an older release, or hand-edited with four-space indent,
+ * would never be normalised, and a serialiser improvement would silently never reach existing
+ * installs. Comparing to the bytes means the next transaction that touches the tree tidies it,
+ * once, and then stays stable.
+ */
+async function readJson(path: string): Promise<RawFile | undefined> {
   let text: string
   try {
     text = await readFile(path, 'utf8')
@@ -95,7 +110,7 @@ async function readJson(path: string): Promise<unknown | undefined> {
     throw error
   }
   try {
-    return JSON.parse(text)
+    return { text, value: JSON.parse(text) }
   } catch (error) {
     // A hand-edit or a bad git merge must produce a legible message naming the file, not a bare
     // SyntaxError from somewhere in the boot sequence.
@@ -173,9 +188,11 @@ export class ConfigStore {
     }
     for (const name of names) {
       const path = join(this.paths[collection], name)
-      const parsed = parseOrThrow(schema, await readJson(path), path)
+      const raw = await readJson(path)
+      const parsed = parseOrThrow(schema, raw?.value, path)
       out.set(name.slice(0, -'.json'.length), parsed)
-      snapshot.set(path, render(objectSchema, parsed))
+      if (raw !== undefined) snapshot.set(path, raw.text)
+      void objectSchema
     }
     return out
   }
@@ -191,20 +208,18 @@ export class ConfigStore {
     const dashboardRaw = await readJson(this.paths.dashboard)
     const dashboard = parseOrThrow(
       dashboardSchema,
-      dashboardRaw ?? { schemaVersion: CURRENT_SCHEMA_VERSION },
+      dashboardRaw?.value ?? { schemaVersion: CURRENT_SCHEMA_VERSION },
       this.paths.dashboard,
     )
-    if (dashboardRaw !== undefined) {
-      snapshot.set(this.paths.dashboard, render(dashboardSchema, dashboard))
-    }
+    if (dashboardRaw !== undefined) snapshot.set(this.paths.dashboard, dashboardRaw.text)
 
     const themeRaw = await readJson(this.paths.theme)
-    const theme = parseOrThrow(themeSchema, themeRaw ?? {}, this.paths.theme)
-    if (themeRaw !== undefined) snapshot.set(this.paths.theme, render(themeSchema, theme))
+    const theme = parseOrThrow(themeSchema, themeRaw?.value ?? {}, this.paths.theme)
+    if (themeRaw !== undefined) snapshot.set(this.paths.theme, themeRaw.text)
 
     const networkRaw = await readJson(this.paths.network)
-    const network = parseOrThrow(networkSchema, networkRaw ?? {}, this.paths.network)
-    if (networkRaw !== undefined) snapshot.set(this.paths.network, render(networkSchema, network))
+    const network = parseOrThrow(networkSchema, networkRaw?.value ?? {}, this.paths.network)
+    if (networkRaw !== undefined) snapshot.set(this.paths.network, networkRaw.text)
 
     const pages = await this.loadCollection('pages', pageSchema, pageSchema, snapshot)
     const layouts = await this.loadCollection(

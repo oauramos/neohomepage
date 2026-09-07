@@ -219,3 +219,32 @@ describe('a fresh directory', () => {
     expect(warnings).toEqual([])
   })
 })
+
+describe('formatting self-heals', () => {
+  it('normalises a badly formatted file on the next transaction that touches the tree', async () => {
+    // The change detector compares against the BYTES on disk, not against a re-render of the
+    // parsed value. Comparing render-to-render would make formatting invisible forever: a file
+    // left alphabetical by an older release would never be tidied, and a serialiser improvement
+    // would silently never reach an existing install.
+    const s = await store()
+    await writeFile(
+      join(s.paths.widgets, 'w1.json'),
+      '{"type":"clock","page":"home","id":"w1","catalogRev":null}',
+    )
+    const result = await s.transaction('test', (draft) => {
+      draft.widgets.set('w2', widget('w2'))
+    })
+    expect(result.changed).toContain(join(s.paths.widgets, 'w1.json'))
+
+    const text = await readFile(join(s.paths.widgets, 'w1.json'), 'utf8')
+    // Schema order, defaults dropped, trailing newline.
+    expect(text).toBe('{\n  "id": "w1",\n  "page": "home",\n  "type": "clock"\n}\n')
+  })
+
+  it('leaves an already-canonical file alone', async () => {
+    const s = await store()
+    await s.transaction('test', (draft) => draft.widgets.set('w1', widget('w1')))
+    const result = await s.transaction('test', (draft) => draft.widgets.set('w2', widget('w2')))
+    expect(result.changed).toEqual([join(s.paths.widgets, 'w2.json')])
+  })
+})

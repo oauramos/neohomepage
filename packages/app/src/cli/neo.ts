@@ -28,7 +28,12 @@ const COMMANDS: readonly Command[] = [
     phase: 'F4',
     run: runValidate,
   },
-  { name: 'resolve', summary: 'Compile the sparse config into resolved.json', phase: 'F4' },
+  {
+    name: 'resolve',
+    summary: 'Compile the sparse config into resolved.json',
+    phase: 'F4',
+    run: runResolve,
+  },
   { name: 'publish', summary: 'Render a new generation and flip the pointer', phase: 'F7' },
   { name: 'backup', summary: 'Write a single restorable archive', phase: 'F4', run: runBackup },
   {
@@ -122,6 +127,49 @@ async function runValidate(): Promise<number> {
   console.log(`\nrevision ${loaded.revision} — ${counts}`)
   console.log(problems.length === 0 ? 'OK' : `${problems.length} problem(s)`)
   return problems.length === 0 ? 0 : 1
+}
+
+async function runResolve(argv: readonly string[]): Promise<number> {
+  const { ConfigStore } = await import('../server/store/configstore.ts')
+  const { loadCatalogDirectory } = await import('../server/catalog/load.ts')
+  const { resolve: resolveTree } = await import('../server/resolve/resolve.ts')
+  const { overridesSchema, EMPTY_OVERRIDES } = await import('../server/config/overrides.ts')
+  const { readFile } = await import('node:fs/promises')
+  const { resolve: resolvePath } = await import('node:path')
+
+  const store = new ConfigStore(env.configDir)
+  const { tree } = await store.load()
+
+  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog')
+  const catalog = await loadCatalogDirectory(catalogDir)
+  for (const entry of catalog.rejected)
+    console.error(`catalog: skipped ${entry.slug} — ${entry.reason}`)
+
+  let overrides = EMPTY_OVERRIDES
+  try {
+    overrides = overridesSchema.parse(JSON.parse(await readFile(store.paths.overrides, 'utf8')))
+  } catch {
+    // No local overrides is the normal case, not an error.
+  }
+
+  const resolved = resolveTree({
+    tree,
+    catalog: catalog.manifests,
+    overrides,
+    generatedAt: new Date().toISOString(),
+  })
+
+  const out = argv.find((a) => !a.startsWith('-'))
+  const text = `${JSON.stringify(resolved, null, 2)}\n`
+  if (out === undefined || out === '-') {
+    process.stdout.write(text)
+  } else {
+    const { writeFileDurable } = await import('../server/store/atomic.ts')
+    await writeFileDurable(out, text)
+    console.log(`wrote ${out}`)
+  }
+  for (const note of resolved.diagnostics) console.error(`diagnostic: ${note}`)
+  return 0
 }
 
 async function runBackup(argv: readonly string[]): Promise<number> {
