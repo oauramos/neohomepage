@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AA_NON_TEXT, AA_NORMAL_TEXT, contrastRatio, toHex } from './contrast.ts'
+import { AA_NON_TEXT, AA_NORMAL_TEXT, contrastRatio, hexToOklch, toHex } from './contrast.ts'
 import { DARK_DEFAULTS, LIGHT_DEFAULTS, resolveTokens, THEME_TOKENS } from './theme-tokens.ts'
 import { SHAPE_TOKENS, THEME_PRESETS } from './theme-presets.ts'
 import type { Theme } from '../server/config/schema.ts'
@@ -160,5 +160,40 @@ describe('the conversion itself', () => {
   it('returns null for anything it cannot parse, rather than a wrong number', () => {
     expect(contrastRatio('#ff0000', 'oklch(1 0 0)')).toBeNull()
     expect(toHex('rebeccapurple')).toBeNull()
+  })
+})
+
+/**
+ * The hex round trip.
+ *
+ * The design panel converts what a colour picker returns into the OKLCH a token has to be, so a
+ * drift here would silently shift every colour a user picks. Round-tripping against `toHex` — the
+ * function already trusted by the palette — is the check that cannot pass while the matrices are
+ * wrong, because the two directions use independently written constants.
+ */
+describe('hex to oklch', () => {
+  it.each(['#000000', '#ffffff', '#2aa34f', '#d8151e', '#38bdf8', '#0f172a', '#7f7f7f', '#ff00ff'])(
+    'round-trips %s back to itself',
+    (hex) => {
+      const oklch = hexToOklch(hex)
+      expect(oklch, `${hex} did not convert`).not.toBeNull()
+      expect(toHex(oklch as string)).toBe(hex)
+    },
+  )
+
+  it('accepts the three-digit form', () => {
+    expect(toHex(hexToOklch('#f0a') as string)).toBe('#ff00aa')
+  })
+
+  it('produces a value the palette maths can actually read', () => {
+    // The point of converting at all: the result has to be something contrastRatio parses.
+    const ratio = contrastRatio(hexToOklch('#ffffff') as string, hexToOklch('#000000') as string)
+    expect(ratio).toBeCloseTo(21, 1)
+  })
+
+  it('returns null for anything that is not a hex colour', () => {
+    for (const bad of ['', '#', 'white', '#12345', '#gggggg', 'oklch(0.5 0.1 200)']) {
+      expect(hexToOklch(bad), bad).toBeNull()
+    }
   })
 })

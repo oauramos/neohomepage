@@ -160,3 +160,49 @@ test('the design panel is reachable by thumb too', async ({ page }) => {
     expect(await undersizedControls(page), `${section} section`).toEqual([])
   }
 })
+
+test('a design control follows the pointer instead of the last round trip', async ({ page }) => {
+  // The regression this exists for: the panel's inputs were controlled by the theme that came back
+  // from the server, so every drag frame re-rendered them with the PREVIOUS value and the thumb was
+  // pulled back under the cursor. The control looked dead. Nothing in the unit suite can see it —
+  // it only exists once a real input event races a real fetch.
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+  await page.getByRole('button', { name: 'Shape', exact: true }).click()
+
+  const slider = page.locator('input[type=range]').first()
+  const seen: { sent: string; shows: string; painted: string }[] = []
+
+  for (const value of ['4', '10', '16', '22', '28']) {
+    await slider.fill(value)
+    seen.push({
+      sent: value,
+      shows: await slider.inputValue(),
+      painted: await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--nh-radius').trim(),
+      ),
+    })
+  }
+
+  // Every frame: the input shows what was sent, and the page is already painted with it.
+  expect(seen).toEqual(
+    ['4', '10', '16', '22', '28'].map((value) => ({
+      sent: value,
+      shows: value,
+      painted: `${value}px`,
+    })),
+  )
+
+  // And the write is debounced rather than dropped: the last value survives a reload.
+  await expect
+    .poll(
+      async () => {
+        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+          resolved: { theme: { cssVars: { theme: Record<string, string> } } }
+        }
+        return state.resolved.theme.cssVars.theme.radius
+      },
+      { timeout: 5000 },
+    )
+    .toBe('28px')
+})

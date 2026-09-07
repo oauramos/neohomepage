@@ -70,6 +70,54 @@ export function toHex(value: string): string | null {
   return `#${encode(linear.r)}${encode(linear.g)}${encode(linear.b)}`
 }
 
+/**
+ * `#2aa34f` -> `oklch(0.63 0.16 149)`, the inverse of `toHex`.
+ *
+ * The design panel offers a colour picker and a hex field because that is how people think about
+ * colour, but a token has to stay OKLCH: `parseOklch` is the only form `contrastRatio` reads, and
+ * a hex value stored in `cssVars` would make every ratio in the panel and in
+ * `theme-contrast.test.ts` come back null — which the test counts as a failure. Converting on the
+ * way IN keeps the picker friendly and the stored palette checkable.
+ *
+ * Returns null for anything that is not a 3- or 6-digit hex, rather than a plausible wrong colour.
+ */
+export function hexToOklch(value: string): string | null {
+  const hex = value.trim().replace(/^#/, '')
+  const full =
+    hex.length === 3
+      ? [...hex].map((character) => character + character).join('')
+      : hex.length === 6
+        ? hex
+        : null
+  if (full === null || !/^[0-9a-fA-F]{6}$/.test(full)) return null
+
+  // sRGB -> linear, undoing the same transfer function `toHex` applies.
+  const toLinear = (channel: number) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  const [r, g, b] = [0, 2, 4].map((at) =>
+    toLinear(Number.parseInt(full.slice(at, at + 2), 16) / 255),
+  )
+
+  // Linear sRGB -> LMS -> OKLab: the inverse matrices of the pair in `oklchToLinearRgb`.
+  const lCube = 0.4122214708 * (r ?? 0) + 0.5363325363 * (g ?? 0) + 0.0514459929 * (b ?? 0)
+  const mCube = 0.2119034982 * (r ?? 0) + 0.6806995451 * (g ?? 0) + 0.1073969566 * (b ?? 0)
+  const sCube = 0.0883024619 * (r ?? 0) + 0.2817188376 * (g ?? 0) + 0.6299787005 * (b ?? 0)
+  const l_ = Math.cbrt(lCube)
+  const m_ = Math.cbrt(mCube)
+  const s_ = Math.cbrt(sCube)
+
+  const lightness = 0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_
+  const a = 1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_
+  const bAxis = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_
+
+  const chroma = Math.sqrt(a * a + bAxis * bAxis)
+  // A neutral has no meaningful hue; pinning it to 0 keeps the round trip stable instead of
+  // letting floating-point noise pick an arbitrary angle.
+  const hue = chroma < 1e-6 ? 0 : ((Math.atan2(bAxis, a) * 180) / Math.PI + 360) % 360
+
+  return `oklch(${lightness.toFixed(4)} ${chroma.toFixed(4)} ${hue.toFixed(2)})`
+}
+
 /** AA for body text. Large text (18.66px bold / 24px) would be 3:1, which nothing here relies on. */
 export const AA_NORMAL_TEXT = 4.5
 /** AA for UI components and graphical objects: borders, focus rings, a status dot. */

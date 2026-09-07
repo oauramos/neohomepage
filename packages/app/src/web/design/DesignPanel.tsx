@@ -1,23 +1,31 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Theme } from '../../server/config/schema.ts'
-import { AA_NON_TEXT, AA_NORMAL_TEXT, contrastRatio } from '../../shared/contrast.ts'
+import {
+  AA_NON_TEXT,
+  AA_NORMAL_TEXT,
+  contrastRatio,
+  hexToOklch,
+  toHex,
+} from '../../shared/contrast.ts'
 import { BACKGROUNDS, GRADIENT_PREFIX } from '../../shared/theme-backgrounds.ts'
-import { THEME_PRESETS } from '../../shared/theme-presets.ts'
+import { SHAPE_TOKENS, THEME_PRESETS } from '../../shared/theme-presets.ts'
 import { resolveTokens } from '../../shared/theme-tokens.ts'
 import { currentScheme } from '../theme.ts'
 
 /**
  * The design panel.
  *
- * Everything here writes a CSS custom property, so a change is visible before it is saved and the
- * saved form is the same value — there is no separate preview renderer to drift.
+ * Every control here is driven by LOCAL draft state, not by the theme that comes back from the
+ * server. That is not a preference — a controlled input whose value arrives over the network is
+ * unusable: each drag frame re-renders the input with the value from the previous round trip, so
+ * the thumb is dragged back under the cursor and the control reads as dead. The draft is applied
+ * to the page immediately and the write is debounced, so one drag is one request rather than sixty.
  *
- * Colour is edited as hue and chroma with the preset's LIGHTNESS held fixed, rather than with a
- * hex picker. That is the whole trick: lightness is what WCAG contrast is mostly made of, so
- * rotating hue moves the accent a long way visually while keeping the ratio the preset was solved
- * for. A hex picker would let anyone produce an unreadable dashboard in one drag. The live ratio
- * readout is computed with `contrastRatio` — the same function the test suite asserts with — so
- * the panel cannot claim a pair passes when CI would say otherwise.
+ * Colour is edited with a picker and a hex field, because that is how people think about colour.
+ * The stored token is still `oklch(L C H)`: `contrastRatio` parses nothing else, so a hex in
+ * `cssVars` would make every ratio here and in `theme-contrast.test.ts` come back null. The
+ * conversion happens on the way in, and the ratios shown are computed with the same function the
+ * test suite asserts with — so the panel cannot claim a pair passes when CI would disagree.
  */
 
 export type ThemePatch = {
@@ -48,16 +56,49 @@ const FONT_STACKS: { id: string; label: string; value: string }[] = [
   { id: 'serif', label: 'Serif', value: 'ui-serif,Georgia,"Iowan Old Style",Palatino,serif' },
 ]
 
-/** Pull L, C and H back out of a token so a slider can move one of them. */
-function parts(value: string | undefined): { l: number; c: number; h: number } | null {
-  const match = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(value ?? '')
-  if (match === null) return null
-  return { l: Number(match[1]), c: Number(match[2]), h: Number(match[3]) }
-}
+/**
+ * Tokens that are scheme-independent, so a draft edit belongs in the shared `theme` bucket rather
+ * than in the current scheme's — a radius that changed when the OS went dark would be a bug.
+ * Derived from the contract rather than restated, so a new shape token cannot be missed here.
+ */
+const SHAPE_LIKE = new Set<string>(SHAPE_TOKENS)
 
-function oklch(p: { l: number; c: number; h: number }): string {
-  return `oklch(${p.l.toFixed(3)} ${p.c.toFixed(3)} ${p.h.toFixed(1)})`
-}
+/** The colour tokens, grouped the way someone thinks about a dashboard rather than alphabetically. */
+const COLOUR_GROUPS: { title: string; tokens: { name: string; label: string }[] }[] = [
+  {
+    title: 'Brand',
+    tokens: [
+      { name: 'accent', label: 'Accent' },
+      { name: 'accent-foreground', label: 'On accent' },
+    ],
+  },
+  {
+    title: 'Page',
+    tokens: [
+      { name: 'background', label: 'Background' },
+      { name: 'foreground', label: 'Text' },
+    ],
+  },
+  {
+    title: 'Tiles',
+    tokens: [
+      { name: 'surface', label: 'Tile' },
+      { name: 'surface-foreground', label: 'Tile text' },
+      { name: 'muted', label: 'Inset' },
+      { name: 'muted-foreground', label: 'Label' },
+      { name: 'border', label: 'Edge' },
+      { name: 'control-border', label: 'Field edge' },
+    ],
+  },
+  {
+    title: 'Status',
+    tokens: [
+      { name: 'ok', label: 'Healthy' },
+      { name: 'warn', label: 'Warning' },
+      { name: 'bad', label: 'Failing' },
+    ],
+  },
+]
 
 function Ratio({ value, floor, label }: { value: number | null; floor: number; label: string }) {
   const ok = value !== null && value >= floor
@@ -69,36 +110,194 @@ function Ratio({ value, floor, label }: { value: number | null; floor: number; l
   )
 }
 
+/** A colour picker, a hex field and a reset, all writing one token. */
+function ColourRow({
+  label,
+  value,
+  overridden,
+  onChange,
+  onReset,
+}: {
+  label: string
+  value: string
+  overridden: boolean
+  onChange: (oklch: string) => void
+  onReset: () => void
+}) {
+  const hex = toHex(value) ?? '#000000'
+  // The text field keeps its own string so a half-typed "#3b8" is not thrown away or "corrected"
+  // mid-keystroke; it only commits once it parses.
+  const [typed, setTyped] = useState<string | null>(null)
+  const shown = typed ?? hex
+
+  return (
+    <div className="nh-colour">
+      <label className="nh-colour-label">
+        <span>{label}</span>
+        <input
+          type="color"
+          className="nh-colour-picker"
+          value={hex}
+          onChange={(event) => {
+            setTyped(null)
+            const oklch = hexToOklch(event.target.value)
+            if (oklch !== null) onChange(oklch)
+          }}
+        />
+      </label>
+      <input
+        type="text"
+        className="nh-colour-hex"
+        value={shown}
+        spellCheck={false}
+        aria-label={`${label} hex`}
+        onChange={(event) => {
+          setTyped(event.target.value)
+          const oklch = hexToOklch(event.target.value)
+          if (oklch !== null) onChange(oklch)
+        }}
+        onBlur={() => setTyped(null)}
+      />
+      <button
+        type="button"
+        className="nh-colour-reset"
+        disabled={!overridden}
+        onClick={() => {
+          setTyped(null)
+          onReset()
+        }}
+        title="Back to the preset's value"
+      >
+        <span className="nh-sr-only">Reset {label}</span>
+        <span aria-hidden="true">↺</span>
+      </button>
+    </div>
+  )
+}
+
 export function DesignPanel({
   theme,
-  onPatch,
+  onPreview,
+  onCommit,
 }: {
   theme: Theme
-  onPatch: (patch: ThemePatch) => void
+  /** Paint a draft immediately. No network. */
+  onPreview: (theme: Theme) => void
+  /** Persist. Debounced by this component, so one drag is one request. */
+  onCommit: (patch: ThemePatch) => void
 }) {
   const scheme = currentScheme(theme)
-  const tokens = useMemo(() => resolveTokens(theme, scheme), [theme, scheme])
   const [section, setSection] = useState<'theme' | 'colour' | 'shape' | 'type' | 'background'>(
     'theme',
   )
 
-  const accent = parts(tokens.accent)
-  const background = tokens.background ?? ''
-  const surface = tokens.surface ?? ''
+  /**
+   * The draft. Seeded empty and cleared whenever the preset or the scheme changes, because those
+   * are wholesale changes the panel SHOULD follow; everything else is the user's own typing and
+   * must survive the round trip that a save triggers.
+   */
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [draftSurface, setDraftSurface] = useState<Partial<Theme['surface']>>({})
+  useEffect(() => {
+    setDraft({})
+    setDraftSurface({})
+  }, [theme.preset, theme.mode])
 
-  /** Per-scheme, so nudging the accent in dark does not repaint light too. */
-  const setToken = (token: string, value: string | null) =>
-    onPatch({ cssVars: { [scheme]: { [token]: value } } })
+  const saved = useMemo(() => resolveTokens(theme, scheme), [theme, scheme])
+  const tokens = useMemo(() => ({ ...saved, ...draft }), [saved, draft])
+  const surface = useMemo(
+    () => ({ ...theme.surface, ...draftSurface }),
+    [theme.surface, draftSurface],
+  )
 
-  const setShape = (token: string, value: string | null) =>
-    onPatch({ cssVars: { theme: { [token]: value } } })
+  /** The theme as the page should look right now, draft included. */
+  const draftTheme = useMemo((): Theme => {
+    const cssVars = {
+      theme: { ...theme.cssVars.theme },
+      light: { ...theme.cssVars.light },
+      dark: { ...theme.cssVars.dark },
+    }
+    for (const [token, value] of Object.entries(draft)) {
+      if (SHAPE_LIKE.has(token)) cssVars.theme[token] = value
+      else cssVars[scheme][token] = value
+    }
+    return { ...theme, cssVars, surface }
+  }, [theme, draft, scheme, surface])
+
+  const pending = useRef<ThemePatch>({})
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** Accumulate into one patch and send it once the user stops moving. */
+  const queue = (patch: ThemePatch) => {
+    const merged = pending.current
+    // Assigned only when present: under exactOptionalPropertyTypes, writing `undefined` is not the
+    // same as leaving the key off, and the server reads a present-but-undefined key as a change.
+    if (patch.mode !== undefined) merged.mode = patch.mode
+    if (patch.preset !== undefined) merged.preset = patch.preset
+    if (patch.surface !== undefined) merged.surface = { ...merged.surface, ...patch.surface }
+    for (const bucket of ['theme', 'light', 'dark'] as const) {
+      if (patch.cssVars?.[bucket] === undefined) continue
+      merged.cssVars = {
+        ...merged.cssVars,
+        [bucket]: { ...merged.cssVars?.[bucket], ...patch.cssVars[bucket] },
+      }
+    }
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const send = pending.current
+      pending.current = {}
+      onCommit(send)
+    }, 250)
+  }
+
+  // A pending write must not be lost because the panel closed.
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  const setColour = (token: string, value: string | null) => {
+    setDraft((current) => {
+      const next = { ...current }
+      if (value === null) delete next[token]
+      else next[token] = value
+      return next
+    })
+    queue({ cssVars: { [scheme]: { [token]: value } } })
+  }
+
+  const setShape = (token: string, value: string | null) => {
+    setDraft((current) => {
+      const next = { ...current }
+      if (value === null) delete next[token]
+      else next[token] = value
+      return next
+    })
+    queue({ cssVars: { theme: { [token]: value } } })
+  }
+
+  const setSurface = (patch: Partial<Theme['surface']>) => {
+    setDraftSurface((current) => ({ ...current, ...patch }))
+    queue({ surface: patch })
+  }
+
+  // Paint whatever the draft currently says, every render it changes.
+  useEffect(() => {
+    onPreview(draftTheme)
+  }, [draftTheme, onPreview])
+
+  const overridden = (token: string) =>
+    draft[token] !== undefined ||
+    theme.cssVars[scheme][token] !== undefined ||
+    theme.cssVars.theme[token] !== undefined
 
   const radius = Number.parseFloat(tokens.radius ?? '12') || 0
   const borderWidth = Number.parseFloat(tokens['border-width'] ?? '1') || 0
-  /** Which generated background is selected, or null for none/an uploaded image. */
   const activeBackground =
-    theme.surface.background?.startsWith(GRADIENT_PREFIX) === true
-      ? theme.surface.background.slice(GRADIENT_PREFIX.length)
+    surface.background?.startsWith(GRADIENT_PREFIX) === true
+      ? surface.background.slice(GRADIENT_PREFIX.length)
       : null
 
   return (
@@ -126,7 +325,7 @@ export function DesignPanel({
                 type="button"
                 className="nh-seg-item"
                 aria-pressed={theme.mode === mode.id}
-                onClick={() => onPatch({ mode: mode.id })}
+                onClick={() => onCommit({ mode: mode.id })}
               >
                 {mode.label}
               </button>
@@ -141,7 +340,7 @@ export function DesignPanel({
                     type="button"
                     className="nh-preset"
                     aria-current={theme.preset === preset.id}
-                    onClick={() => onPatch({ preset: preset.id })}
+                    onClick={() => onCommit({ preset: preset.id })}
                   >
                     <span
                       className="nh-preset-swatch"
@@ -174,78 +373,55 @@ export function DesignPanel({
         </div>
       ) : null}
 
-      {section === 'colour' && accent !== null ? (
+      {section === 'colour' ? (
         <div className="nh-design-section">
           <p className="nh-panel-note">
-            Editing the <strong>{scheme}</strong> scheme. Lightness is held at the value this preset
-            was checked against, so the contrast below stays honest as you move the hue.
+            Editing the <strong>{scheme}</strong> scheme — the other one keeps the preset&apos;s
+            values. Pick a colour or type a hex; it is stored as OKLCH so the ratios below stay
+            measurable.
           </p>
-          <label className="nh-field">
-            <span>Accent hue</span>
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={1}
-              value={accent.h}
-              onChange={(event) =>
-                setToken('accent', oklch({ ...accent, h: Number(event.target.value) }))
-              }
-            />
-            <output>{Math.round(accent.h)}°</output>
-          </label>
-          <label className="nh-field">
-            <span>Accent intensity</span>
-            <input
-              type="range"
-              min={0}
-              max={0.3}
-              step={0.005}
-              value={accent.c}
-              onChange={(event) =>
-                setToken('accent', oklch({ ...accent, c: Number(event.target.value) }))
-              }
-            />
-            <output>{accent.c.toFixed(3)}</output>
-          </label>
-          <label className="nh-field">
-            <span>Accent lightness</span>
-            <input
-              type="range"
-              min={0.2}
-              max={0.95}
-              step={0.01}
-              value={accent.l}
-              onChange={(event) =>
-                setToken('accent', oklch({ ...accent, l: Number(event.target.value) }))
-              }
-            />
-            <output>{accent.l.toFixed(2)}</output>
-          </label>
           <div className="nh-ratios">
             <Ratio
-              label="on page"
-              floor={AA_NON_TEXT}
-              value={contrastRatio(tokens.accent ?? '', background)}
+              label="text on page"
+              floor={AA_NORMAL_TEXT}
+              value={contrastRatio(tokens.foreground ?? '', tokens.background ?? '')}
             />
             <Ratio
-              label="on tile"
-              floor={AA_NON_TEXT}
-              value={contrastRatio(tokens.accent ?? '', surface)}
+              label="text on tile"
+              floor={AA_NORMAL_TEXT}
+              value={contrastRatio(tokens['surface-foreground'] ?? '', tokens.surface ?? '')}
             />
             <Ratio
-              label="label on fill"
+              label="label on inset"
+              floor={AA_NORMAL_TEXT}
+              value={contrastRatio(tokens['muted-foreground'] ?? '', tokens.muted ?? '')}
+            />
+            <Ratio
+              label="accent on tile"
+              floor={AA_NON_TEXT}
+              value={contrastRatio(tokens.accent ?? '', tokens.surface ?? '')}
+            />
+            <Ratio
+              label="on accent"
               floor={AA_NORMAL_TEXT}
               value={contrastRatio(tokens['accent-foreground'] ?? '', tokens.accent ?? '')}
             />
           </div>
-          <button
-            type="button"
-            className="nh-button-quiet"
-            onClick={() => setToken('accent', null)}
-          >
-            Reset to the preset
-          </button>
+          {COLOUR_GROUPS.map((group) => (
+            <fieldset key={group.title} className="nh-colour-group">
+              <legend>{group.title}</legend>
+              {group.tokens.map((token) => (
+                <ColourRow
+                  key={token.name}
+                  label={token.label}
+                  value={tokens[token.name] ?? 'oklch(0 0 0)'}
+                  overridden={overridden(token.name)}
+                  onChange={(value) => setColour(token.name, value)}
+                  onReset={() => setColour(token.name, null)}
+                />
+              ))}
+            </fieldset>
+          ))}
         </div>
       ) : null}
 
@@ -294,10 +470,9 @@ export function DesignPanel({
             type="button"
             className="nh-button-quiet"
             onClick={() => {
-              setShape('radius', null)
-              setShape('radius-control', null)
-              setShape('border-width', null)
-              setShape('max-width', null)
+              for (const token of ['radius', 'radius-control', 'border-width', 'max-width']) {
+                setShape(token, null)
+              }
             }}
           >
             Reset to the preset
@@ -353,9 +528,9 @@ export function DesignPanel({
             type="button"
             className="nh-button-quiet"
             onClick={() => {
-              setShape('font-sans', null)
-              setShape('title-transform', null)
-              setShape('title-tracking', null)
+              for (const token of ['font-sans', 'title-transform', 'title-tracking']) {
+                setShape(token, null)
+              }
             }}
           >
             Reset to the preset
@@ -366,16 +541,16 @@ export function DesignPanel({
       {section === 'background' ? (
         <div className="nh-design-section">
           <p className="nh-panel-note">
-            Generated in CSS from the theme's own tokens, so they recolour when you change preset —
-            and they still paint with JavaScript disabled.
+            Generated in CSS from the theme&apos;s own tokens, so they recolour when you change
+            preset — and they still paint with JavaScript disabled.
           </p>
           <ul className="nh-bg-grid">
             <li>
               <button
                 type="button"
                 className="nh-bg"
-                aria-current={theme.surface.background === null}
-                onClick={() => onPatch({ surface: { background: null } })}
+                aria-current={surface.background === null}
+                onClick={() => setSurface({ background: null })}
               >
                 <span className="nh-bg-swatch" style={{ background: tokens.background }} />
                 <span>None</span>
@@ -387,9 +562,7 @@ export function DesignPanel({
                   type="button"
                   className="nh-bg"
                   aria-current={activeBackground === option.id}
-                  onClick={() =>
-                    onPatch({ surface: { background: `${GRADIENT_PREFIX}${option.id}` } })
-                  }
+                  onClick={() => setSurface({ background: `${GRADIENT_PREFIX}${option.id}` })}
                 >
                   <span className="nh-bg-swatch" style={{ background: option.css }} />
                   <span>{option.label}</span>
@@ -404,10 +577,10 @@ export function DesignPanel({
               min={0}
               max={40}
               step={1}
-              value={theme.surface.blur}
-              onChange={(event) => onPatch({ surface: { blur: Number(event.target.value) } })}
+              value={surface.blur}
+              onChange={(event) => setSurface({ blur: Number(event.target.value) })}
             />
-            <output>{theme.surface.blur}px</output>
+            <output>{surface.blur}px</output>
           </label>
           <label className="nh-field">
             <span>Dim</span>
@@ -416,12 +589,10 @@ export function DesignPanel({
               min={0}
               max={0.9}
               step={0.05}
-              value={theme.surface.overlayOpacity}
-              onChange={(event) =>
-                onPatch({ surface: { overlayOpacity: Number(event.target.value) } })
-              }
+              value={surface.overlayOpacity}
+              onChange={(event) => setSurface({ overlayOpacity: Number(event.target.value) })}
             />
-            <output>{Math.round(theme.surface.overlayOpacity * 100)}%</output>
+            <output>{Math.round(surface.overlayOpacity * 100)}%</output>
           </label>
         </div>
       ) : null}

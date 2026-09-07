@@ -13,9 +13,11 @@
   seven presets in both schemes — every text token against every surface, the accent fill, the
   control border and the focus ring. A preset that fails AA cannot be merged.
 - **A design panel**, on a second floating button in the bottom-right. Themes, colour, shape, type
-  and backgrounds. Colour is edited as hue/chroma/lightness with a live contrast readout computed
-  by the same function the test suite asserts with, rather than a hex picker that would let one
-  drag produce an unreadable board.
+  and backgrounds. All thirteen colour tokens are editable with a native picker and a hex field,
+  grouped as Brand / Page / Tiles / Status, each with a reset that is live only where an override
+  exists. A hex is converted to OKLCH on the way in, because `contrastRatio` parses nothing else —
+  so the panel's live ratios, computed by the same function the test suite asserts with, keep
+  working on a colour you picked yourself.
 - **Eight generated backgrounds** — mesh, aurora, dusk, spotlight, blueprint, dot matrix, scanlines
   and vignette. Written in CSS in terms of the theme's own tokens, so they recolour with the preset
   and still paint with JavaScript disabled.
@@ -36,6 +38,11 @@
 - The board had no maximum width, so a four-column tile on an ultrawide became a metre of button.
 - `pnpm dev` resolved the catalog against `packages/app`, where no catalog exists, so the editor
   reported that the catalog could not be read.
+- Every control in the design panel was dead to a drag. They were controlled by the theme returned
+  from the server, so each frame re-rendered the input with the previous round trip's value and
+  pulled the thumb back under the cursor. The panel now holds its own draft, paints it immediately
+  and debounces the write — one drag is one request. An e2e test asserts the input tracks and the
+  page is already painted on every frame.
 - The error and stale chips painted their tone on an 18% wash of itself — 3.82:1, under AA. axe had
   never seen one because the accessibility board carried no widgets. Both now sit on `muted`, the
   pair the contrast test already proves, and carry the tone as a ring.
