@@ -3,7 +3,8 @@
 A self-hosted start page for your homelab that you configure **in the browser** — not by editing
 YAML and restarting a container.
 
-> Early development. See the [roadmap](#roadmap) for what works today.
+> Beta. Everything below works; there is no published container tag yet, so install from source
+> or build the image yourself. See [the roadmap](#roadmap).
 
 ## Why
 
@@ -43,27 +44,60 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:5173>. See [docs/install.md](docs/install.md) for the full guide and
+Open <http://localhost:5173> and add a service from the button in the bottom-left corner. Or with
+Docker, once a release is tagged:
+
+```sh
+curl -O https://raw.githubusercontent.com/oauramos/neohomepage/main/compose.yaml
+docker compose up -d
+```
+
+See [docs/install.md](docs/install.md) for the full guide and
 [docs/guide/backup.md](docs/guide/backup.md) for how backup and restore work.
 
 ```sh
-pnpm lint         # eslint, including the client/server boundary rule
+pnpm lint            # eslint, including the client/server boundary rule
 pnpm typecheck
-pnpm test
+pnpm test            # 469 unit tests
+pnpm e2e             # 28 browser tests: axe, keyboard-only editing, no-JS, tap targets
+pnpm catalog:test    # every widget's projection against its fixtures, with the network blocked
+pnpm budgets         # cold start and publish latency at 60 widgets
+pnpm drill           # the restore claim, executed: commit, clone, boot, compare
 pnpm build
-pnpm docs:dev     # the documentation site
+pnpm docs:dev        # the documentation site
 ```
 
 `pnpm --filter @neohomepage/app neo --help` lists the command line surface. Every capability the UI
 gets must be reachable there first — that is what keeps each phase testable without a browser.
+`neo doctor` explains anything that is wrong with an install and exits non-zero if it matters.
+
+## What is checked, and how
+
+Claims about this kind of software are cheap, so the ones this project makes are executable:
+
+| Claim | The check |
+| --- | --- |
+| Widgets cannot drift from their forms | `requires` is derived from each manifest and compared to what the author declared |
+| A widget works offline | `catalog:test` makes `fetch` **throw**, not merely go unused |
+| The catalog covers what it claims | a coverage footer: templates 5/5, auth kinds 5/5, decoders 3/3 |
+| Two builds are identical | CI builds the catalog twice and compares the bytes |
+| The board works without JavaScript | a Playwright profile with JS disabled |
+| The editor works without a mouse | a fixture that makes `page.mouse` throw |
+| The theme meets WCAG AA | every text token against every surface, as colour maths |
+| It fits on a 1 GB box | an hour-long soak on real arm64 under a 1 GiB cgroup |
+| Restore actually restores | commit `/data`, clone it, boot with the key in the environment, compare hashes |
+| Nothing needed changing for Docker | `git diff f12..HEAD -- 'packages/*/src/'` prints nothing |
 
 ## Roadmap
 
-Phase F0 (this) is the skeleton. What follows, in order: an ARM64 memory experiment on real
-hardware, the layout engine, the projection DSL, the config kernel, the SSRF-safe fetcher, the poll
-scheduler, publishing, the SPA and templates, the editor, auth and MCP, the catalog and widgets,
-accessibility, and only then Docker. Docker is deliberately last: nothing ships until it has been
-validated running locally.
+F0–F13 are done: the workspace, the arm64 memory experiment, the layout engine, the projection
+DSL, the config kernel, the SSRF-safe fetcher, the poll scheduler, publishing, the SPA and
+templates, the editor, auth and MCP, the catalog and its sixteen widgets, accessibility and
+hardening, and — last, on purpose — the container.
+
+Next: run the widgets against real hardware, publish a release, and the deliberately post-1.0
+list — a gethomepage compatibility report, Docker label discovery, multiple pages, OIDC, and write
+actions, which turn the egress posture from read-only to mutating and need their own threat model.
 
 ## Licence and attribution
 
