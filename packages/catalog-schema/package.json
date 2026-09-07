@@ -1,6 +1,6 @@
 {
   "name": "@neohomepage/catalog-schema",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Widget manifest schema, projection DSL evaluator and capability deriver for neohomepage",
   "license": "MIT",
   "type": "module",

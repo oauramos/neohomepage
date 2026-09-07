@@ -239,10 +239,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          # `latest=auto` is what actually applies `latest`, and it applies it only to a semver
+          # tag with no prerelease suffix — so `v0.2.0` becomes latest and `v0.2.0-rc.1` does not.
+          # The explicit `type=raw,value=latest,enable={{is_default_branch}}` that used to be here
+          # was dead code: on a tag push `is_default_branch` is false, so the rule never fired and
+          # `latest` was being applied by a default nobody had written down.
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Verify both architectures, then tag
         working-directory: /tmp/digests
