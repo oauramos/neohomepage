@@ -10,14 +10,12 @@
 
 services:
   neohomepage:
-    # PRE-RELEASE: no tag has been published yet, so this pull fails with "manifest unknown".
-    # Until the first release, comment this line out and uncomment `build: .` below, with this
-    # file inside a clone of the repository:
+    # Multi-arch (amd64 + arm64). Pin a version instead of `latest` if you want upgrades to be
+    # deliberate: ghcr.io/oauramos/neohomepage:0.1.0
     #
-    #   git clone https://github.com/oauramos/neohomepage && cd neohomepage
-    #   docker compose up -d --build
+    # To run from a checkout instead — for hacking on it — swap `image:` for `build: .` and
+    # `docker compose up -d --build` from the repository root.
     image: ghcr.io/oauramos/neohomepage:latest
-    # build: .
     container_name: neohomepage
     restart: unless-stopped
     ports:

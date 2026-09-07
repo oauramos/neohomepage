@@ -1,11 +1,5 @@
 # Install
 
-::: warning Pre-release
-The container image is built by CI on a tagged release; there is no published tag yet. Until there
-is, use the source install below — it is the same code the image runs, because the image ships the
-sources rather than a compiled bundle.
-:::
-
 ## Docker
 
 One directory, one port, one file:

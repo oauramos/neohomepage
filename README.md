@@ -56,19 +56,6 @@ docker compose up -d
 
 Open `http://<this-host>:7575`. Add a service from the button in the bottom-left corner.
 
-> **Note**
-> No release is tagged yet, so `ghcr.io/oauramos/neohomepage:latest` does not exist and the pull
-> above fails with `manifest unknown`. Until it does, build it from a clone — `compose.yaml`
-> carries a commented-out `build: .` for exactly this:
->
-> ```sh
-> git clone https://github.com/oauramos/neohomepage && cd neohomepage
-> # uncomment `build: .` and comment out `image:` in compose.yaml
-> docker compose up -d --build
-> ```
->
-> Or run from source, below.
-
 <details>
 <summary><b>From source</b></summary>
 
