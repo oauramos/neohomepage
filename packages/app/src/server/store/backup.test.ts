@@ -4,11 +4,54 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { backup, defaultArchiveName, restore } from './backup.ts'
 import { seedDataDirectory } from './seed.ts'
 
 const run = promisify(execFile)
 const created: string[] = []
+
+/**
+ * Write a gzipped tar with an entry name chosen exactly, byte for byte.
+ *
+ * Not `tar(1)`, because the two tars disagree about the one thing under test: GNU tar silently
+ * rewrites `../escape` to `escape` and warns, BSD tar keeps it. A hostile-archive test built by
+ * shelling out therefore asserts a different guard on Linux than on macOS — which is precisely
+ * what happened, and it passed locally and failed in CI.
+ *
+ * A ustar header is 512 bytes of fixed-offset fields; this writes one, the payload padded to a
+ * block, and the two zero blocks that end an archive.
+ */
+function tarball(entries: readonly { name: string; body: string }[]): Buffer {
+  const blocks: Buffer[] = []
+
+  for (const entry of entries) {
+    const header = Buffer.alloc(512)
+    const payload = Buffer.from(entry.body, 'utf8')
+    const octal = (value: number, width: number) =>
+      value.toString(8).padStart(width - 1, '0') + '\0'
+
+    header.write(entry.name, 0, 100, 'utf8')
+    header.write(octal(0o644, 8), 100, 8, 'ascii') // mode
+    header.write(octal(0, 8), 108, 8, 'ascii') // uid
+    header.write(octal(0, 8), 116, 8, 'ascii') // gid
+    header.write(octal(payload.length, 12), 124, 12, 'ascii')
+    header.write(octal(0, 12), 136, 12, 'ascii') // mtime, fixed so the bytes are reproducible
+    header.write('        ', 148, 8, 'ascii') // checksum field is spaces while summing
+    header.write('0', 156, 1, 'ascii') // typeflag: regular file
+    header.write('ustar\0', 257, 6, 'ascii')
+    header.write('00', 263, 2, 'ascii')
+
+    let checksum = 0
+    for (const byte of header) checksum += byte
+    header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'ascii')
+
+    blocks.push(header, payload, Buffer.alloc((512 - (payload.length % 512)) % 512))
+  }
+
+  blocks.push(Buffer.alloc(1024)) // two zero blocks terminate the archive
+  return gzipSync(Buffer.concat(blocks))
+}
 
 async function dataDir() {
   const root = await mkdtemp(join(tmpdir(), 'neo-backup-'))
@@ -108,14 +151,30 @@ describe('restore refuses a hostile archive', () => {
   it('rejects an entry that escapes the data directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'neo-evil-'))
     created.push(root)
-    await mkdir(join(root, 'src', 'config'), { recursive: true })
-    await writeFile(join(root, 'src', 'config', 'ok.json'), '{}\n')
     const archive = join(root, 'evil.tar.gz')
-    // `tar` itself will happily create this; the check has to happen before extraction.
-    await run('tar', ['-czf', archive, '-C', join(root, 'src'), 'config', '../src'])
+    // Handwritten, so the entry name really is `../` and not whatever the local tar decided to
+    // rewrite it to. `tar` will happily create this; the check has to happen before extraction.
+    await writeFile(
+      archive,
+      tarball([
+        { name: 'config/ok.json', body: '{}\n' },
+        { name: '../escaped.json', body: '{"owned":true}\n' },
+      ]),
+    )
     await expect(restore({ archive, dataDir: join(root, 'out') })).rejects.toThrow(
       /escapes the data directory/,
     )
+  })
+
+  it('rejects an absolute entry name too', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'neo-evil-abs-'))
+    created.push(root)
+    const archive = join(root, 'evil.tar.gz')
+    await writeFile(
+      archive,
+      tarball([{ name: '/etc/cron.d/owned', body: '* * * * * root sh\n' }]),
+    )
+    await expect(restore({ archive, dataDir: join(root, 'out') })).rejects.toThrow()
   })
 
   it('rejects an archive that would write outside config/ and assets/', async () => {
