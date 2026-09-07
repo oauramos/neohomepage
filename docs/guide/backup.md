@@ -52,14 +52,22 @@ Put the keys in your `compose.yaml` or systemd unit — something you already ke
 and a restore is `git clone` plus starting the service. Nothing sensitive ever touches the
 repository.
 
-### 2. An encrypted archive, kept outside the repository
+### 2. Your own encrypted copy
 
-```sh
-neo backup --include-secrets     # prompts for a passphrase
+There is deliberately **no** `neo backup --include-secrets`. `neo backup` writes `config/` and
+`assets/` and nothing else — the exclusion is structural rather than an option you could pass by
+mistake, and the command says so on every run:
+
+```
+  secrets/ and state/ are never included — see docs/guide/backup.md
 ```
 
-Writes a single encrypted file _outside_ the data directory, for a password manager or cold
-storage. `neo restore` asks for the passphrase.
+If you want them in cold storage, do it yourself and keep the result away from the data
+directory:
+
+```sh
+tar -czf - -C /data secrets | age -p > ~/neohomepage-secrets.tar.gz.age
+```
 
 ### 3. Just retype them
 

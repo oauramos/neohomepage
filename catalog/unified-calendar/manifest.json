@@ -5,7 +5,7 @@
   "displayName": "Calendar",
   "category": "information",
   "icon": "calendar",
-  "docs": "https://neohomepage.dev/widgets/unified-calendar",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/unified-calendar",
   "config": [],
   "roles": {
     "calendars": {

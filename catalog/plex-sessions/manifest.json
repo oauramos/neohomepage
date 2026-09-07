@@ -5,7 +5,7 @@
   "displayName": "Plex",
   "category": "media",
   "icon": "plex",
-  "docs": "https://neohomepage.dev/widgets/plex-sessions",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/plex-sessions",
   "target": {
     "fields": [
       {

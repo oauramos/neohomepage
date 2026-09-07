@@ -17,6 +17,12 @@ permissions:
   contents: read
   packages: write
 
+# Never two releases at once: `imagetools create` is last-write-wins on a tag, so two tags pushed
+# together would race and `latest` would end up pointing at whichever finished second.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
@@ -115,10 +121,22 @@ jobs:
           done
 
           # SIGTERM, not SIGKILL: a container that ignores it gets killed mid-write.
+          #
+          # `docker stop` exits 0 either way, so timing it and printing the number asserts
+          # nothing — it passes just as happily on an image that ignored the signal for the whole
+          # 15-second grace period. Exit 137 is the tell: that is 128+9, the process was SIGKILLed.
           start=$(date +%s)
           docker stop -t 15 neo >/dev/null
-          echo "stopped in $(( $(date +%s) - start ))s"
+          elapsed=$(( $(date +%s) - start ))
+          code="$(docker inspect -f '{{.State.ExitCode}}' neo)"
+          echo "stopped in ${elapsed}s with exit ${code}"
           docker logs neo 2>&1 | tail -20
+          test "$code" != "137" || {
+            echo "::error::the server ignored SIGTERM and was SIGKILLed after the grace period"
+            exit 1; }
+          test "$elapsed" -lt 10 || {
+            echo "::error::shutdown took ${elapsed}s, which means SIGTERM was not handled promptly"
+            exit 1; }
 
       - name: It fits
         run: |
@@ -175,9 +193,12 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          # By digest, with no tag: the tags belong to the manifest list the next job assembles,
-          # and tagging here would leave whichever architecture finished last holding `latest`.
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          # By digest, with no TAG — but the exporter still needs to know which repository to
+          # push the blob to. `push-by-digest` without `name=` fails with "tag is needed when
+          # pushing to registry", on both legs, before a byte reaches the registry. The tags
+          # belong to the manifest list the next job assembles; tagging here would leave whichever
+          # architecture finished last holding `latest`.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           provenance: mode=max
@@ -223,19 +244,45 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Assemble the manifest list
+      - name: Verify both architectures, then tag
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          set -euo pipefail
+
+          # Two digests, one per matrix leg. Anything else means a leg failed silently or an
+          # artifact went missing, and assembling a one-architecture list under `latest` would
+          # publish it to every compose.yaml in the wild.
+          count="$(ls -1 | wc -l | tr -d ' ')"
+          test "$count" -eq 2 || { echo "::error::expected 2 digests, found ${count}"; exit 1; }
+
+          tags="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          test -n "$tags" || { echo "::error::the metadata action produced no tags"; exit 1; }
+
+          # Assemble under a throwaway tag first and inspect THAT. The release tags are applied
+          # only once both platforms are confirmed present — otherwise the check runs after
+          # `latest` is already live and pulled, and turning the job red afterwards fixes nothing.
+          probe="${REGISTRY}/${IMAGE}:verify-${GITHUB_RUN_ID}"
+          docker buildx imagetools create -t "$probe" \
             $(printf "${REGISTRY}/${IMAGE}@sha256:%s " *)
 
-      - name: Both architectures are present
-        run: |
-          set -euo pipefail
-          version="$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
-          docker buildx imagetools inspect "$version"
           for want in linux/amd64 linux/arm64; do
-            docker buildx imagetools inspect "$version" --raw \
+            docker buildx imagetools inspect "$probe" --raw \
               | jq -e --arg p "$want" '[.manifests[] | "\(.platform.os)/\(.platform.architecture)"] | index($p)' >/dev/null \
               || { echo "::error::${want} is missing from the manifest list"; exit 1; }
           done
+
+          docker buildx imagetools create $tags $(printf "${REGISTRY}/${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+
+      - name: A stranger can pull it
+        run: |
+          set -euo pipefail
+          # A package first published by GITHUB_TOKEN is created PRIVATE even on a public
+          # repository, so the release goes green while every `docker compose up -d` in the
+          # documentation gets `denied`. Logging out and pulling is the only way to find out.
+          version="$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          docker logout ghcr.io
+          docker pull "$version" || {
+            echo "::error::${version} is not anonymously pullable — the GHCR package is private."
+            echo "::error::Fix once at Packages -> neohomepage -> Package settings -> Change visibility."
+            exit 1; }

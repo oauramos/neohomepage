@@ -38,9 +38,7 @@ export const dashboardSchema = z
          * gets a custom domain or its own repository the old URL keeps answering and says where
          * the payload went. That is what the two-file pointer design is for.
          */
-        url: z
-          .url()
-          .default('https://oauramos.github.io/neohomepage/catalog/v1/latest.json'),
+        url: z.url().default('https://oauramos.github.io/neohomepage/catalog/v1/latest.json'),
         pinnedRelease: z.string().max(64).nullable().default(null),
         autoUpdate: z.boolean().default(true),
       })

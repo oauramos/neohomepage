@@ -5,7 +5,7 @@
   "displayName": "AdGuard Home",
   "category": "network",
   "icon": "adguard-home",
-  "docs": "https://neohomepage.dev/widgets/adguard-stats",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/adguard-stats",
   "target": {
     "fields": [
       {

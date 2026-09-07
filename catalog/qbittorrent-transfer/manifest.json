@@ -5,7 +5,7 @@
   "displayName": "qBittorrent",
   "category": "downloads",
   "icon": "qbittorrent",
-  "docs": "https://neohomepage.dev/widgets/qbittorrent-transfer",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/qbittorrent-transfer",
   "target": {
     "fields": [
       {

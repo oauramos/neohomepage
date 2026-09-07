@@ -5,7 +5,7 @@
   "displayName": "Speedtest Tracker",
   "category": "network",
   "icon": "speedtest-tracker",
-  "docs": "https://neohomepage.dev/widgets/speedtest-tracker",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/speedtest-tracker",
   "target": {
     "fields": [
       {

@@ -5,7 +5,7 @@
   "displayName": "Jellyfin sessions",
   "category": "media",
   "icon": "jellyfin",
-  "docs": "https://neohomepage.dev/widgets/jellyfin-sessions",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/jellyfin-sessions",
   "target": {
     "fields": [
       {

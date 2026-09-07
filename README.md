@@ -55,8 +55,17 @@ docker compose up -d
 Open `http://<this-host>:7575`. Add a service from the button in the bottom-left corner.
 
 > **Note**
-> No release is tagged yet, so `ghcr.io/oauramos/neohomepage:latest` does not exist. Until it does,
-> either build it — `docker build -t neohomepage:local .` — or run from source below.
+> No release is tagged yet, so `ghcr.io/oauramos/neohomepage:latest` does not exist and the pull
+> above fails with `manifest unknown`. Until it does, build it from a clone — `compose.yaml`
+> carries a commented-out `build: .` for exactly this:
+>
+> ```sh
+> git clone https://github.com/oauramos/neohomepage && cd neohomepage
+> # uncomment `build: .` and comment out `image:` in compose.yaml
+> docker compose up -d --build
+> ```
+>
+> Or run from source, below.
 
 <details>
 <summary><b>From source</b></summary>
@@ -132,7 +141,7 @@ The full reasoning is in [the documentation](https://oauramos.github.io/neohomep
 ```sh
 pnpm lint            # eslint, including the client/server boundary rule
 pnpm typecheck
-pnpm test            # 470 unit tests
+pnpm test            # the unit suite, both packages
 pnpm e2e             # 28 browser tests: axe, keyboard-only editing, no-JS, tap targets
 pnpm catalog:test    # every widget's projection against its fixtures, network blocked
 pnpm budgets         # first boot, restart and publish latency at 60 widgets

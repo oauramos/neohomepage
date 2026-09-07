@@ -46,8 +46,9 @@ an hour on arm64 under a 1 GiB cgroup: 89,937 requests, no failures, no drift.
 
 ## Does it work on a Raspberry Pi?
 
-Images are published for `linux/arm64`, so a Pi 4 or 5 running a 64-bit OS is fine. 32-bit is not
-built.
+`linux/arm64` is one of the two architectures built, so a Pi 4 or 5 running a 64-bit OS is fine.
+32-bit is not built. Note that no release is tagged yet, so for now that means building the image
+from a clone rather than pulling one.
 
 ## Why is there no database?
 

@@ -7,10 +7,10 @@ Two ways, and the LXC one has a footgun that is not this project's doing.
 The intended target: a Debian 13 container with 1 GB of RAM and 2 vCPUs, no swap.
 
 ```sh
-apt install -y docker.io docker-compose-v2
-mkdir -p /opt/neohomepage && cd /opt/neohomepage
-curl -O https://raw.githubusercontent.com/oauramos/neohomepage/main/compose.yaml
-docker compose up -d
+apt install -y docker.io docker-compose-v2 git
+git clone https://github.com/oauramos/neohomepage /opt/neohomepage
+cd /opt/neohomepage
+docker compose up -d --build   # until a release is tagged; see the note in compose.yaml
 ```
 
 For Docker inside an unprivileged LXC you need `nesting=1` and `keyctl=1` on the container:

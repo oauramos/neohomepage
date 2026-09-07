@@ -5,7 +5,7 @@
   "displayName": "Portainer",
   "category": "virtualization",
   "icon": "portainer",
-  "docs": "https://neohomepage.dev/widgets/portainer-containers",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/portainer-containers",
   "target": {
     "fields": [
       {

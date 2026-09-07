@@ -170,10 +170,7 @@ describe('restore refuses a hostile archive', () => {
     const root = await mkdtemp(join(tmpdir(), 'neo-evil-abs-'))
     created.push(root)
     const archive = join(root, 'evil.tar.gz')
-    await writeFile(
-      archive,
-      tarball([{ name: '/etc/cron.d/owned', body: '* * * * * root sh\n' }]),
-    )
+    await writeFile(archive, tarball([{ name: '/etc/cron.d/owned', body: '* * * * * root sh\n' }]))
     await expect(restore({ archive, dataDir: join(root, 'out') })).rejects.toThrow()
   })
 

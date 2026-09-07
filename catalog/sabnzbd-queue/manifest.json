@@ -5,7 +5,7 @@
   "displayName": "SABnzbd",
   "category": "downloads",
   "icon": "sabnzbd",
-  "docs": "https://neohomepage.dev/widgets/sabnzbd-queue",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/sabnzbd-queue",
   "target": {
     "fields": [
       {

@@ -5,7 +5,7 @@
   "displayName": "Radarr queue",
   "category": "media-automation",
   "icon": "radarr",
-  "docs": "https://neohomepage.dev/widgets/radarr-queue",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/radarr-queue",
   "target": {
     "fields": [
       {

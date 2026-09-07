@@ -5,7 +5,7 @@
   "displayName": "Sonarr queue",
   "category": "media-automation",
   "icon": "sonarr",
-  "docs": "https://neohomepage.dev/widgets/sonarr-queue",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/sonarr-queue",
   "target": {
     "fields": [
       {

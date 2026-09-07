@@ -5,7 +5,7 @@
   "displayName": "Proxmox cluster",
   "category": "virtualization",
   "icon": "proxmox",
-  "docs": "https://neohomepage.dev/widgets/proxmox-cluster",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/proxmox-cluster",
   "target": {
     "fields": [
       {

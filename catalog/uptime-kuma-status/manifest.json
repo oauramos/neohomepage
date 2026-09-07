@@ -5,7 +5,7 @@
   "displayName": "Uptime Kuma",
   "category": "monitoring",
   "icon": "uptime-kuma",
-  "docs": "https://neohomepage.dev/widgets/uptime-kuma-status",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/uptime-kuma-status",
   "target": {
     "fields": [],
     "auth": {

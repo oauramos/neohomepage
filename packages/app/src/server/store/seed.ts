@@ -22,7 +22,7 @@ const GITIGNORE = `# Written by neohomepage on first boot.
 #
 # secrets/ holds API keys. It must never be committed — not even encrypted: a repository gets
 # copied, mirrored and cloned, and an offline attacker gets unlimited attempts at the passphrase.
-# See https://neohomepage.dev/guide/backup for how credentials survive a restore instead.
+# See https://oauramos.github.io/neohomepage/guide/backup for how credentials survive a restore instead.
 secrets/
 
 # state/ is derived from config/ and rebuilt on boot. Committing it would turn every publish into
@@ -75,7 +75,7 @@ environment variables — config only ever stores a reference like {"$secret": "
 the value is read from NEOHOMEPAGE_SECRET_SONARR_APIKEY (or ..._FILE) at request time. Keep them in
 your compose file or systemd unit, which you already store somewhere safe.
 
-See https://neohomepage.dev/guide/backup for the other two options.
+See https://oauramos.github.io/neohomepage/guide/backup for the other two options.
 `
 
 async function exists(path: string): Promise<boolean> {

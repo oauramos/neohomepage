@@ -5,7 +5,7 @@
   "displayName": "Pi-hole",
   "category": "network",
   "icon": "pi-hole",
-  "docs": "https://neohomepage.dev/widgets/pihole-summary",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/pihole-summary",
   "target": {
     "fields": [
       {

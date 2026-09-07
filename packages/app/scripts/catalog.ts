@@ -138,8 +138,19 @@ const FIXTURE_EXTENSION: Record<Decoder, string> = { json: 'json', ics: 'ics', t
 
 function validate(entries: readonly Entry[]): number {
   let problems = 0
-  for (const { slug, manifest } of entries) {
+  for (const { slug, dir, manifest } of entries) {
     const found = auditManifest(manifest)
+
+    // The provenance README is not a nicety. Clean-room is a review gate with a paper trail —
+    // "written from the vendor's own documentation, here is which page" — and a widget without
+    // one cannot be reviewed for it. Nine of the first sixteen shipped without one because the
+    // requirement lived only in the contributor docs.
+    if (!existsSync(join(dir, 'README.md'))) {
+      console.log(
+        `  FAIL ${slug}  no README.md — every widget states which vendor documentation it was written from`,
+      )
+      problems++
+    }
     let described = false
     try {
       const totals = probesOf(manifest)
@@ -173,7 +184,7 @@ function validate(entries: readonly Entry[]): number {
  * over a header auth into a stat-grid would leave three quarters of the runtime untested while
  * looking like a full catalog.
  */
-function coverage(entries: readonly Entry[]): void {
+function coverage(entries: readonly Entry[]): number {
   const seen = {
     templates: new Set<string>(),
     authKinds: new Set<string>(),
@@ -198,6 +209,16 @@ function coverage(entries: readonly Entry[]): void {
     `coverage: ${line('templates', seen.templates, TEMPLATES)} · ` +
       `${line('auth kinds', seen.authKinds, AUTH_KINDS)} · ` +
       `${line('decoders', seen.fetchKinds, DECODERS)}`,
+  )
+
+  // Counted, not just printed. The README lists "the catalog covers what it claims" next to this
+  // command, and a footer reporting `decoders 2/3` while exiting 0 makes that claim false the
+  // moment someone deletes the only ICS widget. A capability with no widget exercising it is a
+  // capability nobody would notice breaking.
+  return (
+    TEMPLATES.filter((t) => !seen.templates.has(t)).length +
+    AUTH_KINDS.filter((k) => !seen.authKinds.has(k)).length +
+    DECODERS.filter((d) => !seen.fetchKinds.has(d)).length
   )
 }
 
@@ -354,9 +375,13 @@ function main(): number {
   }
 
   console.log('')
-  coverage(entries)
-  console.log(problems === 0 ? 'PASS' : `FAIL: ${problems} problem(s)`)
-  return problems === 0 ? 0 : 1
+  const uncovered = coverage(entries)
+  if (uncovered > 0) {
+    console.log(`       ${uncovered} capability(ies) have no widget exercising them`)
+  }
+  const total = problems + uncovered
+  console.log(total === 0 ? 'PASS' : `FAIL: ${total} problem(s)`)
+  return total === 0 ? 0 : 1
 }
 
 process.exitCode = main()

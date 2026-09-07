@@ -19,3 +19,10 @@ packages/app/e2e
 .vscode
 .idea
 *.log
+
+# Never let a local .env into the build context. Nothing in the Dockerfile reads one, but a
+# COPY . . in the build stage would put it in a layer, and a layer is forever.
+.env
+.env.*
+*.pem
+*.key

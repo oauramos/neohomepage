@@ -5,7 +5,7 @@
   "displayName": "Service link",
   "category": "misc",
   "icon": "link",
-  "docs": "https://neohomepage.dev/widgets/service-link",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/service-link",
   "target": {
     "fields": [],
     "auth": {

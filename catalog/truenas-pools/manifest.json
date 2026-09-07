@@ -5,7 +5,7 @@
   "displayName": "TrueNAS pools",
   "category": "nas",
   "icon": "truenas",
-  "docs": "https://neohomepage.dev/widgets/truenas-pools",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/truenas-pools",
   "target": {
     "fields": [
       {

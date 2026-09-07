@@ -10,7 +10,14 @@
 
 services:
   neohomepage:
+    # PRE-RELEASE: no tag has been published yet, so this pull fails with "manifest unknown".
+    # Until the first release, comment this line out and uncomment `build: .` below, with this
+    # file inside a clone of the repository:
+    #
+    #   git clone https://github.com/oauramos/neohomepage && cd neohomepage
+    #   docker compose up -d --build
     image: ghcr.io/oauramos/neohomepage:latest
+    # build: .
     container_name: neohomepage
     restart: unless-stopped
     ports:

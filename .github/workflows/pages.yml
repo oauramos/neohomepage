@@ -5,8 +5,17 @@ name: Pages
 # the pointer file's `movedTo` field is what makes that safe to bake into clients, so moving the
 # catalog to its own repository later costs a one-line change to a JSON file and no client release.
 
+# Only after CI has passed on that exact commit.
+#
+# This used to trigger directly on a push to main, sharing nothing with ci.yml — so a commit that
+# failed lint, typecheck, the test suite, the catalog's byte-identical rebuild or its 256 KiB
+# ceiling would still deploy the site AND republish `catalog/v1/latest.json` to every installed
+# client. The two gates that exist specifically to protect the published catalog ran in a
+# workflow that had no say in whether it got published.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -23,12 +32,21 @@ concurrency:
 
 jobs:
   build:
+    # A failed CI run must not publish. `workflow_dispatch` has no conclusion, so it is allowed
+    # through explicitly — that is the manual escape hatch for republishing after fixing Pages
+    # settings or the like.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           # VitePress reads git history for "last updated" timestamps.
           fetch-depth: 0
+          # The commit CI actually tested, not whatever main has moved to since.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -40,6 +58,16 @@ jobs:
         # The catalog is published from the same commit that passes this, so a manifest that fails
         # its own fixture can never reach a user's install.
         run: pnpm catalog:test
+
+      - name: The widget reference matches the manifests
+        # The same staleness check ci.yml runs, repeated here because this is the job that
+        # actually publishes the page. A stale reference passing in CI and then being deployed
+        # from a later commit is the gap this closes.
+        run: |
+          pnpm catalog:docs
+          git diff --exit-code docs/widgets/index.md || {
+            echo "::error::docs/widgets/index.md is stale — run: pnpm catalog:docs"
+            exit 1; }
 
       - run: pnpm docs:build
       - run: pnpm catalog:build

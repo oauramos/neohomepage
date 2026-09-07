@@ -60,7 +60,12 @@ const COMMANDS: readonly Command[] = [
     phase: 'F12',
     run: runDoctorCommand,
   },
-  { name: 'catalog', summary: 'sync | verify | test | record | snapshot', phase: 'F11' },
+  {
+    name: 'catalog',
+    summary: 'validate | test [--write] | requires [--write]',
+    phase: 'F11',
+    run: runCatalog,
+  },
   { name: 'mcp', summary: 'Serve the MCP tools over stdio', phase: 'F10', run: runMcp },
   { name: 'import', summary: 'Report gethomepage config coverage', phase: 'post-1.0' },
 ]
@@ -462,7 +467,35 @@ async function runMcp(argv: readonly string[]): Promise<number> {
   return 0
 }
 
+/**
+ * Refuse a flag this command does not implement.
+ *
+ * `neo backup --include-secrets` used to be documented, was never implemented, and was silently
+ * discarded — so it wrote a perfectly ordinary archive, printed success, and left someone
+ * believing their credentials were backed up. A command that accepts an option it does not honour
+ * is worse than one that has no options.
+ */
+class UsageError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UsageError'
+  }
+}
+
+function rejectUnknownFlags(argv: readonly string[], known: readonly string[]): void {
+  for (const arg of argv) {
+    if (!arg.startsWith('-')) continue
+    const name = arg.split('=', 1)[0] as string
+    if (known.includes(name)) continue
+    throw new UsageError(
+      `unknown option "${name}"` +
+        (known.length > 0 ? ` — this command accepts ${known.join(', ')}` : ' — it takes none'),
+    )
+  }
+}
+
 async function runBackup(argv: readonly string[]): Promise<number> {
+  rejectUnknownFlags(argv, [])
   const { backup, defaultArchiveName } = await import('../server/store/backup.ts')
   const explicit = argv.find((a) => !a.startsWith('-'))
   const archive = explicit ?? defaultArchiveName(new Date())
@@ -486,6 +519,26 @@ async function runRestore(argv: readonly string[]): Promise<number> {
   return 0
 }
 
+/**
+ * `neo catalog` — the same script `pnpm catalog:*` runs.
+ *
+ * It was listed in the help as `sync | verify | test | record | snapshot` and had no
+ * implementation at all, so three of those five subcommands do not exist and `neo catalog test`
+ * printed "not implemented yet" while `pnpm catalog:test` worked. Advertising a command surface
+ * that does not match the one that exists is worse than advertising nothing.
+ */
+async function runCatalog(argv: readonly string[]): Promise<number> {
+  const { resolve: resolvePath } = await import('node:path')
+  const { spawnSync } = await import('node:child_process')
+
+  const script = resolvePath(import.meta.dirname, '../../scripts/catalog.ts')
+  const result = spawnSync(process.execPath, [script, ...argv], {
+    stdio: 'inherit',
+    env: process.env,
+  })
+  return result.status ?? 1
+}
+
 async function runServe(): Promise<number> {
   await import('../server/main.ts')
   return 0
@@ -507,7 +560,19 @@ async function main(argv: readonly string[]): Promise<number> {
     console.error(`neo ${command.name}: not implemented yet — scheduled for ${command.phase}`)
     return 3
   }
-  return await command.run(rest)
+
+  try {
+    return await command.run(rest)
+  } catch (error) {
+    // A usage mistake is a message, not a stack trace. The trace is still available when
+    // something genuinely unexpected happens — it is only the argument errors that are quiet,
+    // because those are the ones where the reader is the person who mistyped.
+    if (error instanceof UsageError) {
+      console.error(`neo ${command.name}: ${error.message}`)
+      return 2
+    }
+    throw error
+  }
 }
 
 process.exitCode = await main(process.argv.slice(2))

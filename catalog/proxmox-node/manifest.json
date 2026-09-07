@@ -5,7 +5,7 @@
   "displayName": "Proxmox node",
   "category": "virtualization",
   "icon": "proxmox",
-  "docs": "https://neohomepage.dev/widgets/proxmox-node",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/proxmox-node",
   "target": {
     "fields": [
       {
