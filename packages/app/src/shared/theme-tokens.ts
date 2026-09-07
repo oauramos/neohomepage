@@ -1,4 +1,5 @@
 import type { Theme } from '../server/config/schema.ts'
+import { presetById, SHAPE_DEFAULTS, SHAPE_TOKENS } from './theme-presets.ts'
 
 /**
  * The theme token contract, shared by the two paths that apply it.
@@ -35,6 +36,16 @@ export const THEME_TOKENS = [
 ] as const
 
 export type ThemeToken = (typeof THEME_TOKENS)[number]
+
+/**
+ * Every custom property a theme emits: colour plus shape.
+ *
+ * The two paths that apply a theme must iterate ONE list or they drift, and that is not
+ * hypothetical — `THEME_TOKENS` alone was already the runtime applier's list, so the first shape
+ * token added would have been baked into the published stylesheet and silently skipped in the live
+ * preview. The parity test asserts the emitted set is exactly this.
+ */
+export const ALL_TOKENS = [...THEME_TOKENS, ...SHAPE_TOKENS] as const
 
 export const LIGHT_DEFAULTS: Record<ThemeToken, string> = {
   background: 'oklch(0.985 0 0)',
@@ -84,9 +95,23 @@ export const DARK_DEFAULTS: Record<ThemeToken, string> = {
  * The token values a theme resolves to, for one scheme.
  *
  * This is the single source both the stylesheet emitter and the runtime applier call, so they
- * cannot disagree about precedence: defaults, then the scheme's overrides, then the shared block.
+ * cannot disagree about precedence: shape defaults, colour defaults, the preset, then the scheme's
+ * overrides, then the shared block.
+ *
+ * The preset sits BELOW `cssVars` on purpose. Picking "Terminal" and then nudging its accent has
+ * to keep the rest of Terminal, and clearing that nudge has to fall back to Terminal rather than
+ * to the stock grey — which is only true if the preset is a layer in this merge rather than
+ * something copied into `cssVars` at pick time.
  */
 export function resolveTokens(theme: Theme, scheme: 'light' | 'dark'): Record<string, string> {
   const base = scheme === 'dark' ? DARK_DEFAULTS : LIGHT_DEFAULTS
-  return { ...base, ...theme.cssVars[scheme], ...theme.cssVars.theme }
+  const preset = presetById(theme.preset)
+  return {
+    ...SHAPE_DEFAULTS,
+    ...base,
+    ...preset?.shape,
+    ...preset?.[scheme],
+    ...theme.cssVars[scheme],
+    ...theme.cssVars.theme,
+  }
 }

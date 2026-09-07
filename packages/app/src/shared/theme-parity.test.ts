@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { themeSchema } from '../server/config/schema.ts'
 import { themeVariables } from '../server/render/theme.ts'
-import { DARK_DEFAULTS, LIGHT_DEFAULTS, resolveTokens, THEME_TOKENS } from './theme-tokens.ts'
+import {
+  ALL_TOKENS,
+  DARK_DEFAULTS,
+  LIGHT_DEFAULTS,
+  resolveTokens,
+  THEME_TOKENS,
+} from './theme-tokens.ts'
 
 /**
  * Theme parity.
@@ -35,25 +41,25 @@ describe('every token reaches both paths', () => {
   it('emits exactly the tokens the runtime applier would write, for light', () => {
     const baked = tokensIn(themeVariables(theme), ':root{')
     const runtime = resolveTokens(theme, 'light')
-    for (const token of THEME_TOKENS) {
+    for (const token of ALL_TOKENS) {
       expect(baked[token], `token "${token}" is missing from the baked stylesheet`).toBe(
         runtime[token],
       )
     }
     // And nothing extra: a token in the stylesheet that the applier does not know about would
     // silently revert the moment the editor touched the theme.
-    expect(Object.keys(baked).sort()).toEqual([...THEME_TOKENS].sort())
+    expect(Object.keys(baked).sort()).toEqual([...ALL_TOKENS].sort())
   })
 
   it('emits exactly the tokens the runtime applier would write, for dark', () => {
     const baked = tokensIn(themeVariables(theme), ':root[data-theme="dark"]')
     const runtime = resolveTokens(theme, 'dark')
-    for (const token of THEME_TOKENS) {
+    for (const token of ALL_TOKENS) {
       expect(baked[token], `token "${token}" is missing from the dark stylesheet`).toBe(
         runtime[token],
       )
     }
-    expect(Object.keys(baked).sort()).toEqual([...THEME_TOKENS].sort())
+    expect(Object.keys(baked).sort()).toEqual([...ALL_TOKENS].sort())
   })
 
   it('agrees on a user override, not just on the defaults', () => {

@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import { expect, startServer, test, type Harness } from './fixtures.ts'
+import type { Page } from '@playwright/test'
 
 /**
  * The board as a document: with JavaScript off, and at the widths people actually use.
@@ -120,15 +121,9 @@ for (const width of [1400, 900, 380]) {
   })
 }
 
-test('every control is big enough to hit on a touchscreen', async ({ page }) => {
-  // WCAG 2.5.8 (AA): 24×24 CSS pixels. The FAB and the editor's tabs are the controls a phone
-  // user reaches for, and they are also the smallest things on the page.
-  await page.setViewportSize({ width: 380, height: 800 })
-  await page.goto(`${harness.baseURL}/`)
-  await page.locator('button.nh-fab').click()
-  await expect(page.getByRole('dialog')).toBeVisible()
-
-  const tooSmall = await page.evaluate(() => {
+/** Every visible control, with the ones under WCAG 2.5.8's 24×24 named. */
+async function undersizedControls(page: Page) {
+  return page.evaluate(() => {
     const controls = [...document.querySelectorAll<HTMLElement>('button, a[href], input, select')]
     return controls
       .filter((control) => control.offsetParent !== null)
@@ -138,5 +133,30 @@ test('every control is big enough to hit on a touchscreen', async ({ page }) => 
       })
       .filter((entry) => entry.w < 24 || entry.h < 24)
   })
-  expect(tooSmall).toEqual([])
+}
+
+test('every control is big enough to hit on a touchscreen', async ({ page }) => {
+  // WCAG 2.5.8 (AA): 24×24 CSS pixels. The FABs and the editor's tabs are the controls a phone
+  // user reaches for, and they are also the smallest things on the page.
+  await page.setViewportSize({ width: 380, height: 800 })
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-editor').click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  expect(await undersizedControls(page)).toEqual([])
+})
+
+test('the design panel is reachable by thumb too', async ({ page }) => {
+  // The panel is a second modal full of small controls — swatches, sliders, segmented buttons —
+  // and it is the surface most likely to grow one that is too small to hit.
+  await page.setViewportSize({ width: 380, height: 800 })
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  expect(await undersizedControls(page)).toEqual([])
+
+  // Each section renders a different set of controls, so one open dialog checks only one of them.
+  for (const section of ['Colour', 'Shape', 'Type', 'Background']) {
+    await page.getByRole('button', { name: section, exact: true }).click()
+    expect(await undersizedControls(page), `${section} section`).toEqual([])
+  }
 })

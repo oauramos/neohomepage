@@ -447,3 +447,237 @@ body {
 .nh-test-result[data-neo-ok='true'] {
   color: var(--nh-ok);
 }
+
+/* ---------------------------------------------------------------- the design panel
+
+   Anchored bottom-right against the editor's bottom-left. The scrim uses `place-items`, so a
+   right-hand modal only needs to override the inline axis rather than re-position anything. */
+.nh-fab-design {
+  left: auto;
+  right: 20px;
+}
+.nh-fab-icon {
+  display: block;
+  margin: 0 auto;
+}
+.nh-modal-scrim:has(.nh-modal-right) {
+  place-items: end end;
+}
+.nh-modal-right {
+  width: min(400px, calc(100vw - 40px));
+  max-height: min(78vh, 720px);
+}
+.nh-modal-body-plain {
+  display: block;
+  overflow: auto;
+  padding: 14px 16px 18px;
+}
+.nh-design-nav {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--nh-border);
+}
+.nh-design-navitem {
+  border: 0;
+  background: transparent;
+  color: var(--nh-muted-foreground);
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.nh-design-navitem[aria-current='true'] {
+  color: var(--nh-foreground);
+  border-bottom-color: var(--nh-accent);
+}
+.nh-design-navitem:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: -2px;
+}
+.nh-design-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A segmented control, used for scheme, font and title case. */
+.nh-seg {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.nh-seg-item {
+  flex: 1 1 auto;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--nh-control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.nh-seg-item[aria-pressed='true'] {
+  background: var(--nh-accent);
+  color: var(--nh-accent-foreground);
+  border-color: var(--nh-accent);
+}
+.nh-seg-item:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
+
+/* The preset cards: each swatch is painted with that preset's OWN tokens, radius and border
+   included, so the card is a sample of the theme rather than a label for it. */
+.nh-preset-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.nh-preset {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 10px;
+  align-items: center;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid var(--nh-border);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.nh-preset:hover {
+  border-color: var(--nh-control-border);
+}
+.nh-preset[aria-current='true'] {
+  border-color: var(--nh-accent);
+  box-shadow: inset 0 0 0 1px var(--nh-accent);
+}
+.nh-preset:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}
+.nh-preset-swatch {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 40px;
+  padding: 0 6px;
+}
+.nh-preset-swatch i {
+  display: block;
+  width: 7px;
+  height: 20px;
+}
+.nh-preset strong {
+  font-size: 0.8125rem;
+  align-self: end;
+}
+.nh-preset-blurb {
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+  align-self: start;
+  line-height: 1.35;
+}
+
+/* Sliders. `nh-field` already stacks label over control; this adds the readout column. */
+.nh-design-section .nh-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  align-items: center;
+}
+.nh-design-section .nh-field > span {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.nh-design-section .nh-field > output {
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.nh-design-section .nh-field input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--nh-accent);
+  min-height: 24px;
+}
+.nh-design-section .nh-field select {
+  grid-column: 1 / -1;
+  min-height: 34px;
+  border: 1px solid var(--nh-control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0 8px;
+}
+
+/* The live contrast readout, computed with the same function the test suite asserts with. */
+.nh-ratios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.nh-ratio {
+  font-size: 0.6875rem;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in oklch, var(--nh-bad) 16%, transparent);
+  color: var(--nh-bad);
+}
+.nh-ratio[data-neo-pass='true'] {
+  background: color-mix(in oklch, var(--nh-ok) 16%, transparent);
+  color: var(--nh-ok);
+}
+
+.nh-bg-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.nh-bg {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+.nh-bg-swatch {
+  display: block;
+  height: 46px;
+  border-radius: 8px;
+  border: 1px solid var(--nh-border);
+}
+.nh-bg[aria-current='true'] .nh-bg-swatch {
+  border-color: var(--nh-accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--nh-accent) 45%, transparent);
+}
+.nh-bg:focus-visible .nh-bg-swatch {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 2px;
+}

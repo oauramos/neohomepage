@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { AA_NON_TEXT, AA_NORMAL_TEXT, contrastRatio, toHex } from './contrast.ts'
-import { DARK_DEFAULTS, LIGHT_DEFAULTS, THEME_TOKENS } from './theme-tokens.ts'
+import { DARK_DEFAULTS, LIGHT_DEFAULTS, resolveTokens, THEME_TOKENS } from './theme-tokens.ts'
+import { SHAPE_TOKENS, THEME_PRESETS } from './theme-presets.ts'
+import type { Theme } from '../server/config/schema.ts'
 
 /**
  * The theme's contrast, checked as maths rather than waited for from axe.
@@ -75,6 +77,74 @@ describe.each([
     }
   })
 })
+
+/**
+ * The same matrix, for every preset.
+ *
+ * A preset is a whole palette a user can pick in one click, so "the defaults are accessible" stops
+ * being the interesting claim the moment there is more than one. Each is resolved through
+ * `resolveTokens` rather than read from the table directly, so a preset that omits a token is
+ * checked as the value it will actually paint — the default it falls through to.
+ */
+describe.each(THEME_PRESETS.map((preset) => [preset.id, preset] as const))(
+  'preset %s',
+  (id, preset) => {
+    const theme = (): Theme =>
+      ({
+        mode: 'system',
+        preset: id,
+        cssVars: { theme: {}, light: {}, dark: {} },
+        surface: { background: null, blur: 0, overlayOpacity: 0 },
+      }) as Theme
+
+    describe.each(['light', 'dark'] as const)('%s', (scheme) => {
+      const tokens = resolveTokens(theme(), scheme)
+
+      it.each(TEXT_TOKENS)('%s reads on every surface', (token) => {
+        for (const surface of SURFACES) {
+          const ratio = contrastRatio(tokens[token] ?? '', tokens[surface] ?? '')
+          expect(
+            ratio,
+            `${preset.label} ${scheme}: ${token} ${toHex(tokens[token] ?? '')} on ${surface} ` +
+              `${toHex(tokens[surface] ?? '')} is ${ratio?.toFixed(2)}:1, below AA's ${AA_NORMAL_TEXT}:1`,
+          ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT)
+        }
+      })
+
+      it('puts readable text on the accent fill', () => {
+        const ratio = contrastRatio(tokens['accent-foreground'] ?? '', tokens.accent ?? '')
+        expect(ratio ?? 0, `${preset.label} ${scheme}`).toBeGreaterThanOrEqual(AA_NORMAL_TEXT)
+      })
+
+      it('makes an input identifiable as an input', () => {
+        for (const surface of SURFACES) {
+          const ratio = contrastRatio(tokens['control-border'] ?? '', tokens[surface] ?? '')
+          expect(
+            ratio ?? 0,
+            `${preset.label} ${scheme}: control-border on ${surface}`,
+          ).toBeGreaterThanOrEqual(AA_NON_TEXT)
+        }
+      })
+
+      it('has a focus ring that can be seen', () => {
+        for (const surface of ['background', 'surface'] as const) {
+          expect(
+            contrastRatio(tokens.accent ?? '', tokens[surface] ?? '') ?? 0,
+            `${preset.label} ${scheme}: accent on ${surface}`,
+          ).toBeGreaterThanOrEqual(AA_NON_TEXT)
+        }
+      })
+
+      it('sets every shape token to something', () => {
+        // The stylesheet consumes these by name; an unset one resolves to nothing and the
+        // declaration is dropped, which is how a theme silently loses its corners.
+        for (const token of SHAPE_TOKENS) {
+          expect(tokens[token], `${preset.label} is missing ${token}`).toBeTruthy()
+        }
+      })
+    })
+  },
+)
 
 describe('the conversion itself', () => {
   it('agrees with a known sRGB value', () => {

@@ -111,7 +111,7 @@ export function Fab({
       <button
         ref={buttonRef}
         type="button"
-        className="nh-fab"
+        className="nh-fab nh-fab-editor"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}

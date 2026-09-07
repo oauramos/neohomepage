@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Manifest } from '@neohomepage/catalog-schema'
 import type { AppContext } from '../context.ts'
-import { layoutFileSchema, targetSchema, widgetSchema } from '../config/schema.ts'
+import { layoutFileSchema, targetSchema, themeSchema, widgetSchema } from '../config/schema.ts'
 import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts'
 import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
@@ -211,6 +211,61 @@ export function createApiRoutes(options: ApiOptions): Hono {
                 : { config: { ...widget.config, ...body.config } }),
             }),
           )
+        },
+        ifMatch(c.req.header('if-match')),
+      ),
+    )
+
+    if (!result.ok) return c.json({ error: result.message }, result.status)
+    await context.reload()
+    void context.requestPublish('ui')
+    return c.json({ revision: result.value.revision })
+  })
+
+  /**
+   * Change the look: preset, scheme, token overrides, background.
+   *
+   * `cssVars` merges per bucket rather than replacing, so the design panel can send one slider's
+   * token without resending the palette — and sending `null` for a token DELETES the override
+   * rather than writing the string "null", which is what makes "reset this back to the preset" a
+   * thing the UI can express at all.
+   *
+   * The values themselves are not interpreted here. They are custom properties on `:root`, so the
+   * blast radius of a malformed one is a declaration the browser drops; `themeSchema` caps their
+   * length, and nothing in this payload can name a URL, a host or a path.
+   */
+  api.patch('/theme', async (c) => {
+    const body = (await c.req.json()) as {
+      mode?: 'light' | 'dark' | 'system'
+      preset?: string
+      cssVars?: Partial<Record<'theme' | 'light' | 'dark', Record<string, string | null>>>
+      surface?: { background?: string | null; blur?: number; overlayOpacity?: number }
+    }
+
+    const result = await handle(() =>
+      context.store.transaction(
+        'ui',
+        (draft) => {
+          const current = draft.theme
+          const buckets = ['theme', 'light', 'dark'] as const
+          const cssVars = Object.fromEntries(
+            buckets.map((bucket) => {
+              const merged: Record<string, string> = { ...current.cssVars[bucket] }
+              for (const [token, value] of Object.entries(body.cssVars?.[bucket] ?? {})) {
+                if (value === null) delete merged[token]
+                else merged[token] = value
+              }
+              return [bucket, merged]
+            }),
+          ) as Record<'theme' | 'light' | 'dark', Record<string, string>>
+
+          draft.theme = themeSchema.parse({
+            ...current,
+            ...(body.mode === undefined ? {} : { mode: body.mode }),
+            ...(body.preset === undefined ? {} : { preset: body.preset }),
+            cssVars,
+            surface: { ...current.surface, ...body.surface },
+          })
         },
         ifMatch(c.req.header('if-match')),
       ),

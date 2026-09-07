@@ -96,6 +96,10 @@ function gaugesBlock(envelope: ProjectionEnvelope): ReactNode {
           },
           h('span', {
             className: 'nh-gauge-fill',
+            // A gauge whose fill is one colour at every level is a picture of a number, not a
+            // warning. The thresholds live here rather than in the manifest because "nearly full"
+            // means the same thing for a disk, a pool and a memory bar.
+            'data-neo-tone': fraction >= 0.9 ? 'bad' : fraction >= 0.75 ? 'warn' : 'ok',
             style: { width: `${(fraction * 100).toFixed(1)}%` },
           }),
         ),
@@ -228,7 +232,19 @@ export function board(
   return h(
     'div',
     { className: 'neo-board', 'data-neo-page': page.id },
-    onPage.map((widget) => widgetTile(widget, data[widget.id])),
+    // The most-seen screen in the product's life is the one before anybody has added anything,
+    // and it used to render as an empty div: a heading over blank space, with nothing naming the
+    // round button in the corner as the way in.
+    onPage.length === 0
+      ? h('div', { className: 'nh-board-empty', key: 'empty' }, [
+          h('strong', { key: 'title' }, 'No widgets yet'),
+          h(
+            'span',
+            { key: 'hint' },
+            'Open the editor with the button in the bottom-left corner to add your first service.',
+          ),
+        ])
+      : onPage.map((widget) => widgetTile(widget, data[widget.id])),
   )
 }
 

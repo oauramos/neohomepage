@@ -5,6 +5,8 @@ import type { Resolved } from '../shared/resolved.ts'
 import { AddWidget } from './fab/AddWidget.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
+import { DesignFab } from './design/DesignFab.tsx'
+import { DesignPanel, type ThemePatch } from './design/DesignPanel.tsx'
 import { widgetTile } from '../shared/board.ts'
 import type { LayoutItem } from '../shared/grid-geometry.ts'
 import { DashboardClient, readEmbeddedState, type DashboardState } from './state.ts'
@@ -82,14 +84,14 @@ function TabPanel({
         </div>
       )
     case 'theme':
+    case 'background':
       return (
         <p className="nh-panel-note">
-          Mode: <code>{state.resolved.theme.mode}</code>. Colours apply immediately when changed and
-          are baked into the page on the next publish.
+          Themes, colour, shape, type and backgrounds all live in the design panel — the button in
+          the bottom-right corner. Current theme: <code>{state.resolved.theme.preset}</code>, mode{' '}
+          <code>{state.resolved.theme.mode}</code>.
         </p>
       )
-    case 'background':
-      return <p className="nh-panel-note">Background uploads land with the assets store.</p>
     case 'about':
       return (
         <dl className="nh-panel-facts">
@@ -136,6 +138,41 @@ function App({ client }: { client: DashboardClient }) {
     await client.refresh()
   }
 
+  /**
+   * Apply first, then persist.
+   *
+   * `applyTheme` writes the same custom properties the publish step bakes, so the board repaints
+   * on the next frame and the PATCH is what makes it survive a reload. Sending the patch rather
+   * than the whole theme is what lets one slider move one token without racing the others.
+   */
+  const patchTheme = async (patch: ThemePatch) => {
+    const merged = {
+      ...state.resolved.theme,
+      ...(patch.mode === undefined ? {} : { mode: patch.mode }),
+      ...(patch.preset === undefined ? {} : { preset: patch.preset }),
+      cssVars: {
+        theme: { ...state.resolved.theme.cssVars.theme },
+        light: { ...state.resolved.theme.cssVars.light },
+        dark: { ...state.resolved.theme.cssVars.dark },
+      },
+      surface: { ...state.resolved.theme.surface, ...patch.surface },
+    }
+    for (const bucket of ['theme', 'light', 'dark'] as const) {
+      for (const [token, value] of Object.entries(patch.cssVars?.[bucket] ?? {})) {
+        if (value === null) delete merged.cssVars[bucket][token]
+        else merged.cssVars[bucket][token] = value
+      }
+    }
+    applyTheme(merged)
+
+    await fetch('/api/theme', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    await client.refresh()
+  }
+
   const removeWidget = async (id: string) => {
     await fetch(`/api/widgets/${id}`, { method: 'DELETE' })
     await client.refresh()
@@ -172,6 +209,11 @@ function App({ client }: { client: DashboardClient }) {
           />
         )}
       />
+      <DesignFab>
+        {() => (
+          <DesignPanel theme={state.resolved.theme} onPatch={(patch) => void patchTheme(patch)} />
+        )}
+      </DesignFab>
     </>
   )
 }

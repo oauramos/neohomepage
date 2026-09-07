@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### Themes and the design panel
+
+- **Seven theme presets** — Default, Nord, Terminal, Glass, Brutalist, Amber and Synthwave. A
+  preset carries a whole look, not just a hue: corner radius, border weight, elevation, the type
+  stack, the tile-title treatment and how a bookmark button is painted. `theme.preset` had been in
+  the schema since v1 resolving to nothing; it is now a layer in `resolveTokens`, below `cssVars`,
+  so picking one never traps you and clearing an override falls back to the preset.
+- **Every preset is checked as maths.** `theme-contrast.test.ts` now runs its full matrix over all
+  seven presets in both schemes — every text token against every surface, the accent fill, the
+  control border and the focus ring. A preset that fails AA cannot be merged.
+- **A design panel**, on a second floating button in the bottom-right. Themes, colour, shape, type
+  and backgrounds. Colour is edited as hue/chroma/lightness with a live contrast readout computed
+  by the same function the test suite asserts with, rather than a hex picker that would let one
+  drag produce an unreadable board.
+- **Eight generated backgrounds** — mesh, aurora, dusk, spotlight, blueprint, dot matrix, scanlines
+  and vignette. Written in CSS in terms of the theme's own tokens, so they recolour with the preset
+  and still paint with JavaScript disabled.
+- **`PATCH /api/theme`**, the first write path for the theme. Merges per bucket and treats a `null`
+  token as a delete, so one slider can move one token and "reset to the preset" is expressible.
+
+### Fixes this surfaced
+
+- `gauge-set` and `status-badge` emitted markup that no stylesheet matched, so two of the five
+  presentation templates drew nothing — an empty status dot has no width. Both are styled now, and
+  gauges take a severity tone at 75% and 90%.
+- `data-neo-tone` on stats and `data-neo-state` on tiles were emitted and never painted. A failing
+  tile now carries a coloured rule down its edge instead of differing by an 11px chip.
+- The runtime applier iterated `THEME_TOKENS` while the publish step baked more, so shape tokens
+  would have applied only after a republish. Both now iterate `ALL_TOKENS`, asserted by the parity
+  test.
+- A board with no widgets rendered as an empty `div`. It now says so and points at the editor.
+- The board had no maximum width, so a four-column tile on an ultrawide became a metre of button.
+- `pnpm dev` resolved the catalog against `packages/app`, where no catalog exists, so the editor
+  reported that the catalog could not be read.
+
 ## 0.1.0 — first release
 
 The first tagged release. Beta: everything below works and has a check that proves it, but this
