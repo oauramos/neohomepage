@@ -80,6 +80,17 @@ export class PollScheduler {
   }
 
   /**
+   * Every key currently registered, fetched or not.
+   *
+   * Reconciliation must iterate THIS, not the cache: a key that was registered but has not
+   * succeeded yet has no cache entry, and a cleanup keyed on the cache would leave it polling a
+   * service for a widget that has been deleted.
+   */
+  registeredKeys(): string[] {
+    return [...this.#registrations.keys()]
+  }
+
+  /**
    * Register a fetch, or add a subscriber to one that already exists.
    *
    * Returns an unsubscribe function rather than exposing a decrement, so a caller cannot

@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import type { AppContext } from '../context.ts'
 import { env } from '../env.ts'
+import { createApiRoutes } from './api.ts'
 import { formatEvent, KEEPALIVE_FRAME } from './events.ts'
 
 /**
@@ -182,6 +183,8 @@ export function createApp(options: AppOptions): Hono {
       release()
     })
   })
+
+  app.route('/api', createApiRoutes({ context, catalog: () => context.catalog() }))
 
   return app
 }

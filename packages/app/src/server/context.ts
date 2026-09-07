@@ -43,6 +43,9 @@ export type AppContext = {
   widgetData(): Record<string, unknown>
   pending(): Promise<{ pending: boolean; generation: number | null; revision: string }>
   refreshWidget(widgetId: string): Promise<boolean>
+  writeSecrets(values: Readonly<Record<string, string>>): Promise<void>
+  deleteSecrets(names: readonly string[]): Promise<void>
+  catalog(): ReadonlyMap<string, Manifest>
   requestPublish(actor: string, mode?: PublishMode): Promise<PublishResult | null>
   publishNow(actor: string, label?: string): Promise<PublishResult>
   shutdown(): Promise<void>
@@ -190,7 +193,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       }
     }
 
-    for (const key of scheduler.cache.keys()) {
+    for (const key of scheduler.registeredKeys()) {
       if (!live.has(key)) scheduler.unregister(key)
     }
   }
@@ -246,6 +249,57 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       if (key === null) return false
       await scheduler.refreshNow(key)
       return true
+    },
+
+    catalog() {
+      return catalog
+    },
+
+    /**
+     * Store secret values.
+     *
+     * The only writer of the secrets directory, and the reason config can never contain a
+     * credential: the write API hands values here and puts a `$secret` reference in the tree.
+     * Mode 0600, in a directory the seeder already excluded from git.
+     */
+    async writeSecrets(values) {
+      const { readFile } = await import('node:fs/promises')
+      const { join } = await import('node:path')
+      const { writeFileDurable } = await import('./store/atomic.ts')
+      const path = join(env.secretsDir, 'secrets.json')
+
+      let existing: Record<string, unknown> = {}
+      try {
+        const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existing = parsed as Record<string, unknown>
+        }
+      } catch {
+        // First secret on a fresh install.
+      }
+      await writeFileDurable(path, `${JSON.stringify({ ...existing, ...values }, null, 2)}\n`, {
+        mode: 0o600,
+      })
+    },
+
+    /** Remove secrets whose owning target is gone. */
+    async deleteSecrets(names) {
+      const { readFile } = await import('node:fs/promises')
+      const { join } = await import('node:path')
+      const { writeFileDurable } = await import('./store/atomic.ts')
+      const path = join(env.secretsDir, 'secrets.json')
+
+      let existing: Record<string, unknown> = {}
+      try {
+        const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existing = parsed as Record<string, unknown>
+        }
+      } catch {
+        return
+      }
+      for (const name of names) delete existing[name]
+      await writeFileDurable(path, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 })
     },
 
     widgetData() {
