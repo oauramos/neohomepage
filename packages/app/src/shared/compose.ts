@@ -128,18 +128,21 @@ export function composeSources(compose: Compose, parts: readonly SourcePart[]): 
 
   let items: Item[] = answered.flatMap((part) => [...part.items])
 
-  if (compose.distinctBy !== undefined) {
+  const distinctBy = compose.distinctBy
+  if (distinctBy !== undefined) {
     const seen = new Set<string>()
     const distinct: Item[] = []
     for (const item of items) {
-      // An item with no value at the key is never a duplicate of another such item: dropping all
-      // but one of them would silently delete rows whose only fault is a sparse upstream.
-      const value = at(item, compose.distinctBy)
-      if (value === undefined || value === null) {
+      const parts = distinctBy.map((path) => at(item, path))
+      // An item missing ANY key is never a duplicate: two rows the upstream left sparse are not
+      // the same event, and collapsing them silently deletes data whose only fault is a thin
+      // response. Two episodes of one series differ only by their instant, so a single key is
+      // almost always the wrong granularity — which is why this takes a list.
+      if (parts.some((value) => value === undefined || value === null)) {
         distinct.push(item)
         continue
       }
-      const stamp = `${typeof value}:${String(value)}`
+      const stamp = parts.map((value) => `${typeof value}:${String(value)}`).join('\u0000')
       if (seen.has(stamp)) continue
       seen.add(stamp)
       distinct.push(item)

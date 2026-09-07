@@ -201,19 +201,25 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
     label: string,
     widgetType: string,
     where: { scheme: string; host: string; port: string; basePath: string },
-    fields: readonly Field[],
     values: FieldValues,
   ): Promise<string | null> => {
-    const { secrets, plain } = splitValues(fields, values)
     const response = await fetch('/api/targets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         label,
         widgetType,
-        base: { ...where, port: Number(where.port) },
-        fields: plain,
-        secrets,
+        // Named explicitly, never spread from a wider object. Spreading a draft source here once
+        // put its API key into config/ in plaintext, because `base` accepted unknown keys.
+        base: {
+          scheme: where.scheme,
+          host: where.host,
+          port: Number(where.port),
+          basePath: where.basePath,
+        },
+        // One bag; the server splits it by what the manifest declares a secret. The browser has
+        // no business deciding which of these values is a credential.
+        values,
       }),
     })
     if (!response.ok) {
@@ -261,7 +267,7 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
           for (const draft of drafts) {
             const kind = role.kinds.find((one) => one.name === draft.kind)
             if (kind === undefined) continue
-            const id = await createTarget(kind.label, draft.kind, draft, kind.fields, draft.values)
+            const id = await createTarget(kind.label, draft.kind, draft, draft.values)
             // Stop on the first failure rather than pressing on: a widget bound to three of the
             // four sources someone entered is worse than none, because it looks like it worked.
             if (id === null) return
@@ -277,13 +283,7 @@ export function AddWidget({ onAdded }: { onAdded: () => void }) {
 
       let targetId: string | null = null
       if (target.host !== '' && target.port !== '') {
-        targetId = await createTarget(
-          selected.displayName,
-          selected.id,
-          target,
-          selected.target?.fields ?? [],
-          targetValues,
-        )
+        targetId = await createTarget(selected.displayName, selected.id, target, targetValues)
         if (targetId === null) return
       }
 

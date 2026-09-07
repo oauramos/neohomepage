@@ -510,7 +510,10 @@
         "direction": "asc"
       }
     ],
-    "distinctBy": "title",
+    "distinctBy": [
+      "title",
+      "badge.iso"
+    ],
     "limit": 20,
     "partial": true
   },

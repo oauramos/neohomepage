@@ -7,6 +7,7 @@ import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts
 import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
+import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
 import { probe } from '../fetcher/probe.ts'
 import { loadSecrets } from '../secrets/vault.ts'
 import { env } from '../env.ts'
@@ -352,6 +353,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
       label?: string
       widgetType?: string
       base?: { scheme?: string; host?: string; port?: number; basePath?: string }
+      /** Everything the manifest declares, in one bag. The SERVER decides what is a credential. */
+      values?: Record<string, unknown>
       fields?: Record<string, string | number | boolean>
       secrets?: Record<string, string>
     }
@@ -360,7 +363,31 @@ export function createApiRoutes(options: ApiOptions): Hono {
     }
 
     const id = body.id ?? newId('t')
-    const secretNames = Object.keys(body.secrets ?? {})
+    const widgetType = body.widgetType ?? 'custom'
+
+    /**
+     * Route values by what the MANIFEST declares, never by which key the caller put them under.
+     *
+     * `fields` and `secrets` are still accepted so an existing client keeps working, but they are
+     * merged and re-split here. A caller that puts an API key in `fields` gets it stored as a
+     * secret anyway, because the field's kind is what decides — not the caller's opinion.
+     */
+    const declared = targetShapeFields(options.catalog(), widgetType)
+    const routed = routeValues(declared, {
+      ...(body.fields === undefined ? {} : { fields: body.fields }),
+      ...(body.secrets === undefined ? {} : { secrets: body.secrets }),
+      ...(body.values === undefined ? {} : { values: body.values }),
+    })
+    const secretNames = Object.keys(routed.secrets)
+
+    // Only the four keys `base` is allowed to have. The whole reason this is picked apart rather
+    // than spread is that spreading a caller's object once put a plaintext credential in config.
+    const base = {
+      ...(body.base.scheme === undefined ? {} : { scheme: body.base.scheme }),
+      host: body.base.host,
+      port: body.base.port,
+      ...(body.base.basePath === undefined ? {} : { basePath: body.base.basePath }),
+    }
 
     const result = await handle(() =>
       context.store.transaction(
@@ -374,10 +401,11 @@ export function createApiRoutes(options: ApiOptions): Hono {
               id,
               label: body.label,
               widgetType: body.widgetType ?? existing?.widgetType ?? 'custom',
-              base: { ...existing?.base, ...body.base },
-              fields: { ...existing?.fields, ...body.fields },
+              base: { ...existing?.base, ...base },
+              fields: { ...existing?.fields, ...routed.fields },
               // Only the REFERENCE is written to config. The value goes to the secrets directory,
-              // which is gitignored — there is no code path that puts it here.
+              // which is gitignored — and the split above is what makes "there is no code path
+              // that puts it here" a property of the code rather than a claim about it.
               secrets: {
                 ...existing?.secrets,
                 ...Object.fromEntries(
@@ -395,16 +423,23 @@ export function createApiRoutes(options: ApiOptions): Hono {
     if (secretNames.length > 0) {
       await context.writeSecrets(
         Object.fromEntries(
-          secretNames.map((name) => [
-            `${id}.${name}`,
-            (body.secrets as Record<string, string>)[name] as string,
-          ]),
+          secretNames.map((name) => [`${id}.${name}`, routed.secrets[name] as string]),
         ),
       )
     }
     await context.reload()
     void context.requestPublish('ui')
-    return c.json({ id, revision: result.value.revision }, 201)
+    // `ignored` is reported rather than silently dropped: a client sending a field this shape does
+    // not declare has a bug, and the quiet version of that is a credential the user thinks is
+    // saved and a widget that will never authenticate.
+    return c.json(
+      {
+        id,
+        revision: result.value.revision,
+        ...(routed.unknown.length > 0 ? { ignored: routed.unknown } : {}),
+      },
+      201,
+    )
   })
 
   /**

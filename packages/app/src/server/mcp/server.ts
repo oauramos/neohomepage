@@ -6,6 +6,7 @@ import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.t
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { probe } from '../fetcher/probe.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
+import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
 
 /**
  * The MCP surface.
@@ -212,12 +213,22 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         scheme: z.enum(['http', 'https']).optional(),
         basePath: z.string().max(120).optional(),
         secrets: z.record(z.string().max(32), z.string().max(4096)).optional(),
+        /** Non-secret values. Sorted from `secrets` by the manifest, not by which key you used. */
+        fields: z
+          .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
+          .optional(),
         baseRevision: z.string().max(64).optional(),
       },
     },
     async (input) => {
       const id = newId('t')
-      const secretNames = Object.keys(input.secrets ?? {})
+      // Routed by the manifest, like the HTTP path: an agent that puts a credential under the
+      // wrong name still gets it stored in the vault rather than in a git-tracked file.
+      const routed = routeValues(targetShapeFields(context.catalog(), input.type), {
+        ...(input.fields === undefined ? {} : { fields: input.fields }),
+        ...(input.secrets === undefined ? {} : { secrets: input.secrets }),
+      })
+      const secretNames = Object.keys(routed.secrets)
       try {
         const result = await context.store.transaction(
           deps.actor,
@@ -234,6 +245,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
                   port: input.port,
                   basePath: input.basePath ?? '',
                 },
+                fields: routed.fields,
                 secrets: Object.fromEntries(
                   secretNames.map((name) => [name, { $secret: `${id}.${name}` }]),
                 ),
@@ -245,15 +257,16 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         if (secretNames.length > 0) {
           await context.writeSecrets(
             Object.fromEntries(
-              secretNames.map((name) => [
-                `${id}.${name}`,
-                (input.secrets as Record<string, string>)[name] as string,
-              ]),
+              secretNames.map((name) => [`${id}.${name}`, routed.secrets[name] as string]),
             ),
           )
         }
         await context.reload()
-        return ok({ id, revision: result.revision })
+        return ok({
+          id,
+          revision: result.revision,
+          ...(routed.unknown.length > 0 ? { ignored: routed.unknown } : {}),
+        })
       } catch (error) {
         return fail(error instanceof Error ? error.message : String(error))
       }

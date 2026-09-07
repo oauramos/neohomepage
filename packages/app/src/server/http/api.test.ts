@@ -619,3 +619,100 @@ describe('a composite widget, end to end', () => {
     expect(Object.keys(secrets)).toEqual([])
   })
 })
+
+describe('no credential reaches config/, whatever the caller sends', () => {
+  it('stores an API key as a secret even when it arrives in the plain-fields bucket', async () => {
+    // The regression this exists for: the browser used to decide which values were credentials,
+    // and a form bug spread a whole draft object into `base`. The API key landed in
+    // config/targets/*.json in plaintext — in the directory whose purpose is being committed.
+    const { status, body } = await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { scheme: 'http', host: '10.0.0.20', port: 8989 },
+      fields: { apiKey: 'LEAKED-KEY-9999' },
+    })
+    expect(status).toBe(201)
+    const id = (body as { id: string }).id
+
+    const onDisk = await readFile(join(dataDir, 'config', 'targets', `${id}.json`), 'utf8')
+    expect(onDisk).not.toContain('LEAKED-KEY-9999')
+    expect(JSON.parse(onDisk)).toMatchObject({
+      secrets: { apiKey: { $secret: `${id}.apiKey` } },
+    })
+
+    const vault = JSON.parse(
+      await readFile(join(dataDir, 'secrets', 'secrets.json'), 'utf8'),
+    ) as Record<string, string>
+    expect(vault[`${id}.apiKey`]).toBe('LEAKED-KEY-9999')
+  })
+
+  it('refuses unknown keys inside base rather than persisting them', async () => {
+    const { status } = await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { host: '10.0.0.20', port: 8989, values: { apiKey: 'SMUGGLED' } },
+    })
+    // Either refused outright or silently stripped — never written. Both are acceptable; the
+    // assertion below is the one that matters.
+    expect([201, 422]).toContain(status)
+    const targets = await readdir(join(dataDir, 'config', 'targets'))
+    for (const file of targets) {
+      expect(await readFile(join(dataDir, 'config', 'targets', file), 'utf8')).not.toContain(
+        'SMUGGLED',
+      )
+    }
+  })
+
+  it('ignores a value the shape does not declare and says so', async () => {
+    const { body } = await request('POST', '/api/targets', {
+      label: 'Bins',
+      widgetType: 'ics-feed',
+      base: { host: '10.0.0.9', port: 5232, basePath: '/bins.ics' },
+      values: { uid: 's0', apiKey: 'NOT-DECLARED-HERE' },
+    })
+    expect((body as { ignored?: string[] }).ignored?.sort()).toEqual(['apiKey', 'uid'])
+    const id = (body as { id: string }).id
+    expect(await readFile(join(dataDir, 'config', 'targets', `${id}.json`), 'utf8')).not.toContain(
+      'NOT-DECLARED-HERE',
+    )
+  })
+
+  it('leaves nothing credential-shaped anywhere in the config tree', async () => {
+    // The whole-tree grep the plan calls for, run against a config built the way the UI builds it.
+    await request('POST', '/api/targets', {
+      label: 'Sonarr',
+      widgetType: 'sonarr-queue',
+      base: { host: '10.0.0.20', port: 8989 },
+      secrets: { apiKey: 'aaaa-bbbb-cccc-dddd' },
+    })
+    await request('POST', '/api/targets', {
+      label: 'qBittorrent',
+      widgetType: 'qbittorrent-transfer',
+      base: { host: '10.0.0.21', port: 8080 },
+      values: { username: 'admin', password: 'correct-horse-battery' },
+    })
+
+    const files: string[] = []
+    const walk = async (dir: string) => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) await walk(path)
+        else files.push(path)
+      }
+    }
+    await walk(join(dataDir, 'config'))
+    expect(files.length).toBeGreaterThan(3)
+    for (const file of files) {
+      const text = await readFile(file, 'utf8')
+      expect(text, file).not.toContain('aaaa-bbbb-cccc-dddd')
+      expect(text, file).not.toContain('correct-horse-battery')
+    }
+
+    // ...and the username, which is NOT a secret, is still there where it belongs.
+    const targets = await readdir(join(dataDir, 'config', 'targets'))
+    const all = await Promise.all(
+      targets.map((file) => readFile(join(dataDir, 'config', 'targets', file), 'utf8')),
+    )
+    expect(all.join('')).toContain('admin')
+  })
+})

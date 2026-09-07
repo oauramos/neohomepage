@@ -159,7 +159,11 @@ export const targetSchema = z
           )
           .refine((value) => !value.split('/').includes('..'), 'must not contain ".."'),
       })
-      .catchall(z.unknown()),
+      // Strict, unlike every other object here. The document-level catchall exists so a rollback
+      // does not silently drop fields a newer release added; `base` is a closed shape of four
+      // keys, and an unknown key in it has only ever meant a caller spread something it should
+      // not have. Once that something was a plaintext API key.
+      .strict(),
     /** Field name to secret reference. Values live in secrets/, never here. */
     secrets: z.record(z.string().max(32), secretRefSchema).default({}),
     /** Non-secret target fields the manifest declares. */

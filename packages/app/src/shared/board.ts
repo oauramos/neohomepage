@@ -39,7 +39,7 @@ function statsBlock(envelope: ProjectionEnvelope, template: string): ReactNode {
   if (stats === undefined || stats.length === 0) return null
   return h(
     'dl',
-    { className: 'nh-stats', 'data-neo-template': template },
+    { className: 'nh-stats', 'data-neo-template': template, key: 'stats' },
     stats.map((stat) =>
       h('div', { className: 'nh-stat', key: stat.label }, [
         h('dt', { key: 'label' }, stat.label),
@@ -58,7 +58,7 @@ function itemsBlock(envelope: ProjectionEnvelope): ReactNode {
   if (items === undefined || items.length === 0) return null
   return h(
     'ul',
-    { className: 'nh-items' },
+    { className: 'nh-items', key: 'items' },
     items.map((item, index) =>
       h('li', { className: 'nh-item', key: `${item.title}-${index}` }, [
         h('span', { className: 'nh-item-title', key: 't' }, item.title),
@@ -78,7 +78,7 @@ function gaugesBlock(envelope: ProjectionEnvelope): ReactNode {
   if (gauges === undefined || gauges.length === 0) return null
   return h(
     'div',
-    { className: 'nh-gauges' },
+    { className: 'nh-gauges', key: 'gauges' },
     gauges.map((gauge) => {
       const fraction = gauge.total > 0 ? Math.min(1, Math.max(0, gauge.used / gauge.total)) : 0
       return h('div', { className: 'nh-gauge', key: gauge.label }, [
@@ -108,7 +108,7 @@ function gaugesBlock(envelope: ProjectionEnvelope): ReactNode {
 function statusBlock(envelope: ProjectionEnvelope): ReactNode {
   const status = envelope.projection?.status ?? 'unknown'
   const label = status === 'ok' ? 'up' : status === 'down' ? 'down' : status
-  return h('div', { className: 'nh-status', 'data-neo-status': status }, [
+  return h('div', { className: 'nh-status', 'data-neo-status': status, key: 'status' }, [
     h('span', { className: 'nh-status-dot', key: 'dot', 'aria-hidden': 'true' }),
     h('span', { className: 'nh-status-label', key: 'label' }, label),
   ])
@@ -161,6 +161,9 @@ function renderTemplate(
         statsBlock(envelope, template) ?? h('p', { className: 'nh-placeholder' }, 'No readings')
       )
     case 'list':
+      // A keyed array, not a bare one: React cannot reconcile unkeyed siblings, so a tile that
+      // gains or loses its stats block would reuse the wrong DOM node for the list. Each block
+      // carries a key fixed to its own kind, which is stable because they are only ever siblings.
       return [statsBlock(envelope, template), itemsBlock(envelope)]
     case 'gauge-set':
       return gaugesBlock(envelope) ?? h('p', { className: 'nh-placeholder' }, 'No gauges')

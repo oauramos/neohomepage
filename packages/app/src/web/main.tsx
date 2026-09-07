@@ -1,5 +1,5 @@
 import { StrictMode, useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
 import { dashboard } from '../shared/board.ts'
 import type { Resolved } from '../shared/resolved.ts'
 import { AddWidget } from './fab/AddWidget.tsx'
@@ -176,10 +176,7 @@ function App({ client }: { client: DashboardClient }) {
   )
 }
 
-async function boot(): Promise<void> {
-  const root = document.getElementById('neo-root')
-  if (root === null) throw new Error('#neo-root missing from the document')
-
+async function boot(container: HTMLElement, root: Root): Promise<void> {
   const embedded = readEmbeddedState()
   const initial: DashboardState = {
     resolved: (embedded?.resolved ?? {
@@ -206,7 +203,7 @@ async function boot(): Promise<void> {
   }
 
   const client = new DashboardClient(initial)
-  createRoot(root).render(
+  root.render(
     <StrictMode>
       <App client={client} />
     </StrictMode>,
@@ -215,12 +212,21 @@ async function boot(): Promise<void> {
   // Always refresh: the baked state is as fresh as the last publish, and something may have
   // changed since. On the shell fallback this is what produces the first render at all.
   await client.refresh().catch(() => {
-    if (embedded === null) root.innerHTML = ''
+    if (embedded === null) container.innerHTML = ''
   })
 }
 
-const placeholder = document.getElementById('neo-root')
-if (placeholder !== null && placeholder.childElementCount === 0) {
-  createRoot(placeholder).render(<EmptyState />)
-}
-void boot()
+/**
+ * One React root for the container, for the life of the page.
+ *
+ * The empty state used to get a root of its own and `boot` created a second one on the same
+ * element — React warns, and the first root is never unmounted, so it keeps its subscriptions and
+ * its slice of memory for as long as the tab is open. On a wall display that stays open for weeks,
+ * "never unmounted" is not a warning.
+ */
+const container = document.getElementById('neo-root')
+if (container === null) throw new Error('#neo-root missing from the document')
+
+const root = createRoot(container)
+if (container.childElementCount === 0) root.render(<EmptyState />)
+void boot(container, root)

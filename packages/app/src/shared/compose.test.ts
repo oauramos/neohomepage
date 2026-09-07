@@ -68,17 +68,31 @@ describe('merging', () => {
     expect(composed.projection?.items?.map((i) => i.title)).toEqual(['a', 'b'])
   })
 
-  it('drops duplicates by a chosen key, keeping the first', () => {
+  it('drops duplicates by the chosen keys, keeping the first', () => {
     // Two *arr instances that both track the same show would otherwise show every episode twice.
-    const composed = composeSources(compose({ distinctBy: 'title' }), [
+    const composed = composeSources(compose({ distinctBy: ['title'] }), [
       part({ key: 'a', items: [{ title: 'S02E03', subtitle: 'from sonarr-a' }] }),
       part({ key: 'b', items: [{ title: 'S02E03', subtitle: 'from sonarr-b' }] }),
     ])
     expect(composed.projection?.items).toEqual([{ title: 'S02E03', subtitle: 'from sonarr-a' }])
   })
 
-  it('never treats two missing keys as duplicates of each other', () => {
-    const composed = composeSources(compose({ distinctBy: 'href' }), [
+  it('keeps two items that share one key but differ on another', () => {
+    // The bug this fixes: the calendar deduped on `title` alone, and every episode of a series
+    // after the first vanished — they all carry the series name and differ only by their instant.
+    const composed = composeSources(compose({ distinctBy: ['title', 'badge.iso'] }), [
+      part({
+        items: [
+          at('2026-09-09T01:00:00.000Z', 'A Good Show'),
+          at('2026-09-16T01:00:00.000Z', 'A Good Show'),
+        ],
+      }),
+    ])
+    expect(composed.projection?.items).toHaveLength(2)
+  })
+
+  it('never treats two items missing a key as duplicates of each other', () => {
+    const composed = composeSources(compose({ distinctBy: ['href'] }), [
       part({ items: [{ title: 'one' }, { title: 'two' }] }),
     ])
     expect(composed.projection?.items).toHaveLength(2)

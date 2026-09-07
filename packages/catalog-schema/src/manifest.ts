@@ -209,10 +209,22 @@ export const composeSchema = z
       )
       .max(3)
       .default([]),
+    /**
+     * Keys that together identify one item, for dropping duplicates across sources.
+     *
+     * An array, not a single path, because one path is almost always the wrong granularity. The
+     * calendar shipped with `distinctBy: "title"` and every episode of a series after the first
+     * vanished — they share a title, and only the instant tells them apart.
+     */
     distinctBy: z
-      .string()
-      .max(64)
-      .regex(/^[A-Za-z][A-Za-z0-9.]{0,62}$/)
+      .array(
+        z
+          .string()
+          .max(64)
+          .regex(/^[A-Za-z][A-Za-z0-9.]{0,62}$/),
+      )
+      .min(1)
+      .max(3)
       .optional(),
     limit: z.int().min(1).max(50).default(20),
     partial: z.boolean().default(true),
@@ -488,12 +500,13 @@ function auditComposite(manifest: CompositeManifest, problems: ManifestProblem[]
       })
     }
   }
-  const distinct = manifest.compose.distinctBy
-  if (distinct !== undefined && !ITEM_FIELDS.has(distinct.split('.')[0] as string)) {
-    problems.push({
-      path: 'compose.distinctBy',
-      message: `"${distinct}" does not address an item field`,
-    })
+  for (const path of manifest.compose.distinctBy ?? []) {
+    if (!ITEM_FIELDS.has(path.split('.')[0] as string)) {
+      problems.push({
+        path: 'compose.distinctBy',
+        message: `"${path}" does not address an item field`,
+      })
+    }
   }
 }
 
