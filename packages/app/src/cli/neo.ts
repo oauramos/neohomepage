@@ -15,6 +15,7 @@ type Command = {
 const COMMANDS: readonly Command[] = [
   { name: 'serve', summary: 'Run the server in the foreground', phase: 'F0', run: runServe },
   { name: 'env', summary: 'Print the resolved data directories', phase: 'F0', run: runEnv },
+  { name: 'runtime', summary: 'Print the memory limits this process can see', phase: 'F1', run: runRuntime },
   { name: 'validate', summary: 'Validate the config tree against the schema', phase: 'F4' },
   { name: 'resolve', summary: 'Compile the sparse config into resolved.json', phase: 'F4' },
   { name: 'publish', summary: 'Render a new generation and flip the pointer', phase: 'F7' },
@@ -48,6 +49,14 @@ function runEnv(): number {
     ].join('\n'),
   )
   return 0
+}
+
+async function runRuntime(): Promise<number> {
+  const { describeMemoryEnvironment, formatMemoryEnvironment } = await import('../server/runtime.ts')
+  const environment = describeMemoryEnvironment()
+  console.log(formatMemoryEnvironment(environment))
+  // Non-zero when V8 would outgrow the cgroup: this doubles as a check in `neo doctor`.
+  return environment.heapLimitExceedsMemoryLimit ? 1 : 0
 }
 
 async function runServe(): Promise<number> {

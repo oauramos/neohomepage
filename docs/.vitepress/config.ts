@@ -23,6 +23,7 @@ export default defineConfig({
         ],
       },
       { text: 'Guide', items: [{ text: 'Backup and restore', link: '/guide/backup' }] },
+      { text: 'Architecture', items: [{ text: 'Memory', link: '/architecture/memory' }] },
     ],
     socialLinks: [{ icon: 'github', link: 'https://github.com/oauramos/neohomepage' }],
     footer: { message: 'Released under the MIT License.' },
