@@ -47,11 +47,14 @@ jobs:
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/data"
           # Deliberately as the image ships it: no extra env, no writable root, no capabilities.
+          # Exactly as compose.yaml runs it, including the three capabilities the entrypoint
+          # needs to make a bind-mounted /data writable and then give up root.
           docker run -d --name neo \
             -p 7575:7575 \
             -v "${RUNNER_TEMP}/data:/data" \
             --memory 320m --read-only --tmpfs /tmp:size=16m \
-            --security-opt no-new-privileges:true --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
             neohomepage:smoke
 
           for i in $(seq 1 60); do
@@ -73,8 +76,31 @@ jobs:
           grep -q 'secrets/' "${RUNNER_TEMP}/data/.gitignore" || { echo "::error::secrets/ is not ignored"; exit 1; }
           grep -q 'state/' "${RUNNER_TEMP}/data/.gitignore" || { echo "::error::state/ is not ignored"; exit 1; }
 
-          # Non-root, because a container that quietly runs as root is one nobody notices.
-          test "$(docker exec neo id -u)" != "0" || { echo "::error::the image runs as root"; exit 1; }
+          # The SERVER must be unprivileged, and it must be PID 1.
+          #
+          # Checked on the process, not with `docker exec id -u`: the entrypoint starts as root to
+          # fix the bind mount's ownership and then execs to uid 1000, so `docker exec` reports
+          # root and would pass this for entirely the wrong reason.
+          # BusyBox ps has no -p, so pick PID 1 out of the table rather than asking for it.
+          owner="$(docker exec neo sh -c "ps -o pid,user | awk '\$1==1{print \$2}'" | tr -d ' ')"
+          test "$owner" = "node" || {
+            echo "::error::the server runs as ${owner}, not the unprivileged user"; exit 1; }
+
+          # A bind mount whose host directory is owned by someone else is the first thing every
+          # new user hits, and it used to kill the container on boot.
+          test -d "${RUNNER_TEMP}/data/config" || {
+            echo "::error::the bind-mounted data directory was never written to"; exit 1; }
+
+          # Development dependencies must not be in a production image. This shipped TypeScript,
+          # Playwright and Prettier once, because `pnpm install --prod` over a full install prunes
+          # nothing.
+          packages="$(docker exec neo sh -c 'ls /app/node_modules/.pnpm | wc -l' | tr -d ' ')"
+          echo "production packages: ${packages}"
+          test "$packages" -lt 60 || {
+            echo "::error::${packages} packages in the runtime image — development dependencies leaked in"
+            docker exec neo sh -c 'du -sh /app/node_modules/.pnpm/* | sort -rh | head -20'
+            exit 1
+          }
 
           # Health, as the image itself defines it.
           for i in $(seq 1 40); do
