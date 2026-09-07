@@ -491,12 +491,23 @@ export function createApiRoutes(options: ApiOptions): Hono {
   api.get('/secrets', async (c) => {
     // Names and whether each is set. Never a value, never a length — a length is a meaningful
     // clue about a credential and there is no reason for a browser to have it.
+    //
+    // Asked name by name, from the names config declares. The obvious version — listing what the
+    // vault has resolved — returns nothing in a fresh process, which showed up as every saved
+    // credential looking unset after a restart.
     const vault = await loadSecrets(env.secretsDir)
     const { resolved } = await context.state()
-    const names = new Set<string>()
-    for (const target of resolved.targets) void target
-    for (const name of vault.names()) names.add(name)
-    return c.json({ secrets: [...names].sort().map((name) => ({ name, set: true })) })
+    const secrets = resolved.targets
+      .flatMap((target) =>
+        Object.entries(target.secretRefs).map(([field, name]) => ({
+          name,
+          field,
+          targetId: target.id,
+          set: vault.has(name),
+        })),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, 'en-US'))
+    return c.json({ secrets })
   })
 
   return api

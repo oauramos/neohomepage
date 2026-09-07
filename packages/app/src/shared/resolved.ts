@@ -38,6 +38,14 @@ export type ResolvedTarget = {
   readonly label: string
   /** Origin only — never a full URL, and never anything a manifest supplied. */
   readonly origin: string
+  /**
+   * Field name to secret NAME. Never a value, and never a length.
+   *
+   * Carried here so a client can be told "this target needs a credential called X and it is not
+   * set" without another round trip, and so the editor can show a saved secret as saved. A name
+   * is not a secret; a length would be, which is why one is here and the other never is.
+   */
+  readonly secretRefs: Readonly<Record<string, string>>
   readonly minIntervalMs: number
 }
 

@@ -109,6 +109,9 @@ function resolveTarget(target: Target, overrides: Overrides): ResolvedTarget {
     id: target.id,
     label: target.label,
     origin: `${base.scheme}://${base.host}:${base.port}`,
+    secretRefs: Object.fromEntries(
+      Object.entries(target.secrets).map(([field, ref]) => [field, ref.$secret]),
+    ),
     minIntervalMs: target.minIntervalMs,
   }
 }

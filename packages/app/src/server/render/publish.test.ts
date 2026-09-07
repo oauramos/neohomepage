@@ -47,7 +47,13 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
       },
     ],
     targets: [
-      { id: 'tSonarr', label: 'Sonarr', origin: 'http://10.0.0.20:8989', minIntervalMs: 15_000 },
+      {
+        id: 'tSonarr',
+        label: 'Sonarr',
+        origin: 'http://10.0.0.20:8989',
+        secretRefs: {},
+        minIntervalMs: 15_000,
+      },
     ],
     theme: themeSchema.parse({}),
     diagnostics: [],

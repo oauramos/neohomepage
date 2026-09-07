@@ -54,7 +54,12 @@ const COMMANDS: readonly Command[] = [
     phase: 'F5',
     run: runFetch,
   },
-  { name: 'doctor', summary: 'Report problems with the install', phase: 'F12' },
+  {
+    name: 'doctor',
+    summary: 'Report problems with the install',
+    phase: 'F12',
+    run: runDoctorCommand,
+  },
   { name: 'catalog', summary: 'sync | verify | test | record | snapshot', phase: 'F11' },
   { name: 'mcp', summary: 'Serve the MCP tools over stdio', phase: 'F10', run: runMcp },
   { name: 'import', summary: 'Report gethomepage config coverage', phase: 'post-1.0' },
@@ -362,6 +367,77 @@ async function runFetch(argv: readonly string[]): Promise<number> {
     }
   }
   return failures === 0 ? 0 : 1
+}
+
+/**
+ * `neo doctor`.
+ *
+ * Exit code is the contract: 0 means nothing is wrong, 1 means something needs attention. That is
+ * what lets it go in a cron job or a health check, and it is the clause in the beta definition
+ * that has to print `0 problems`.
+ *
+ * Warnings alone do not fail. A spare target and a large wallpaper are worth saying and not worth
+ * paging anyone about; conflating them with a missing credential would train people to ignore
+ * the exit code.
+ */
+async function runDoctorCommand(argv: readonly string[]): Promise<number> {
+  const { ConfigStore } = await import('../server/store/configstore.ts')
+  const { loadCatalogDirectory } = await import('../server/catalog/load.ts')
+  const { loadSecrets } = await import('../server/secrets/vault.ts')
+  const { resolve: resolveTree } = await import('../server/resolve/resolve.ts')
+  const { runDoctor, unknownKeys } = await import('../server/doctor.ts')
+  const { storedSecretNames } = await import('../server/secrets/vault.ts')
+  const { resolve: resolvePath } = await import('node:path')
+
+  const quiet = argv.includes('--quiet')
+  const asJson = argv.includes('--json')
+
+  const store = new ConfigStore(env.configDir)
+  const { tree } = await store.load()
+  const { manifests } = await loadCatalogDirectory(
+    process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
+  )
+  const vault = await loadSecrets(env.secretsDir)
+  const resolved = resolveTree({
+    tree,
+    catalog: manifests,
+    generatedAt: new Date().toISOString(),
+  })
+
+  const findings = [
+    ...(await runDoctor({
+      env,
+      tree,
+      catalog: manifests,
+      hasSecret: (name) => vault.has(name),
+      storedNames: new Set(await storedSecretNames(env.secretsDir)),
+      diagnostics: resolved.diagnostics,
+    })),
+    ...(await unknownKeys(env.configDir)),
+  ]
+
+  const errors = findings.filter((one) => one.severity === 'error').length
+  const warnings = findings.filter((one) => one.severity === 'warning').length
+
+  if (asJson) {
+    console.log(JSON.stringify({ findings, errors, warnings }, null, 2))
+    return errors === 0 ? 0 : 1
+  }
+
+  const mark = { error: '✗', warning: '!', note: '·' } as const
+  for (const finding of findings) {
+    if (quiet && finding.severity !== 'error') continue
+    console.log(`${mark[finding.severity]} ${finding.code}: ${finding.message}`)
+    if (finding.fix !== undefined) console.log(`    → ${finding.fix}`)
+  }
+
+  if (findings.length > 0) console.log('')
+  console.log(
+    errors === 0 && warnings === 0
+      ? '0 problems'
+      : `${errors} error(s), ${warnings} warning(s), ${findings.length - errors - warnings} note(s)`,
+  )
+  return errors === 0 ? 0 : 1
 }
 
 async function runMcp(argv: readonly string[]): Promise<number> {
