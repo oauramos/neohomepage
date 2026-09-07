@@ -38,6 +38,15 @@
 - The board had no maximum width, so a four-column tile on an ultrawide became a metre of button.
 - `pnpm dev` resolved the catalog against `packages/app`, where no catalog exists, so the editor
   reported that the catalog could not be read.
+- The font control never showed which stack was active on six of the seven presets. It compared
+  whole stacks for exact equality, and a preset may append families and write its list with spaces;
+  it now compares the first family, which is what identifies the choice.
+- A nudge made just before picking a preset landed after the switch and wrote itself into the new
+  theme — radius 6px inside Terminal, whose own radius is 0. Choosing a preset or a scheme now
+  discards anything still queued, because it was aimed at the theme you just left.
+- Custom values outlive the preset they were made under, which is right and was invisible: the board
+  stopped matching the card you clicked with nothing to explain it. The panel now counts them and
+  offers one Clear.
 - Every control in the design panel was dead to a drag. They were controlled by the theme returned
   from the server, so each frame re-rendered the input with the previous round trip's value and
   pulled the thumb back under the cursor. The panel now holds its own draft, paints it immediately

@@ -206,3 +206,107 @@ test('a design control follows the pointer instead of the last round trip', asyn
     )
     .toBe('28px')
 })
+
+/** Put the theme back to stock, so a test's claim is about what it did rather than what ran before. */
+async function clearTheme(page: Page) {
+  const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+    resolved: { theme: { cssVars: Record<'theme' | 'light' | 'dark', Record<string, string>> } }
+  }
+  const cssVars = Object.fromEntries(
+    (['theme', 'light', 'dark'] as const).map((bucket) => [
+      bucket,
+      Object.fromEntries(Object.keys(state.resolved.theme.cssVars[bucket]).map((k) => [k, null])),
+    ]),
+  )
+  await page.request.patch(`${harness.baseURL}/api/theme`, {
+    data: { preset: 'default', mode: 'system', cssVars, surface: { background: null } },
+  })
+}
+
+test('the type control shows which stack every preset is on', async ({ page }) => {
+  // Exact string equality against a whole font stack marked nothing as active on six of the seven
+  // presets, because a preset may append families and write its list with spaces. The control was
+  // not broken so much as permanently blank, which looks the same from the outside.
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+
+  for (const [preset, expected] of [
+    ['Default', 'Sans'],
+    ['Nord', 'Sans'],
+    ['Terminal', 'Mono'],
+    ['Brutalist', 'Grotesque'],
+    ['Amber', 'Serif'],
+  ] as const) {
+    await page.getByRole('button', { name: 'Themes', exact: true }).click()
+    await page.locator('.nh-preset', { hasText: preset }).first().click()
+    await page.getByRole('button', { name: 'Type', exact: true }).click()
+    await expect(
+      page.locator('.nh-seg-item[aria-pressed="true"]', { hasText: expected }),
+      `${preset} should show ${expected} as the active stack`,
+    ).toHaveCount(1)
+  }
+})
+
+test('switching preset discards a nudge that was aimed at the old one', async ({ page }) => {
+  // The debounce made this reachable: move a slider, immediately pick a preset, and the pending
+  // write lands AFTER the switch and writes itself into the theme you just chose. Measured once as
+  // radius 6px inside Terminal, whose own radius is 0.
+  // Earlier tests in this file leave overrides on the shared server, so start from a known theme
+  // rather than from whatever ran last: the claim here is about ONE nudge, not about the store.
+  await clearTheme(page)
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+  await page.getByRole('button', { name: 'Shape', exact: true }).click()
+  await page.locator('input[type=range]').first().fill('7')
+
+  // No wait: the point is to switch while the write is still queued.
+  await page.getByRole('button', { name: 'Themes', exact: true }).click()
+  await page.locator('.nh-preset', { hasText: 'Terminal' }).first().click()
+
+  await expect
+    .poll(
+      async () => {
+        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+          resolved: { theme: { preset: string; cssVars: { theme: Record<string, string> } } }
+        }
+        return `${state.resolved.theme.preset}:${Object.keys(state.resolved.theme.cssVars.theme).length}`
+      },
+      { timeout: 5000 },
+    )
+    .toBe('terminal:0')
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--nh-radius').trim(),
+      ),
+    )
+    .toBe('0px')
+})
+
+test('custom values are counted and clearable', async ({ page }) => {
+  // An override outlives the preset it was made under, which is right and invisible: the board
+  // stops matching the card you clicked and nothing explains it.
+  await clearTheme(page)
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+  await expect(page.locator('.nh-overrides')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Shape', exact: true }).click()
+  await page.locator('input[type=range]').first().fill('19')
+  await expect(page.locator('.nh-overrides')).toContainText('custom')
+
+  await page.locator('.nh-overrides button').click()
+  await expect(page.locator('.nh-overrides')).toHaveCount(0)
+  await expect
+    .poll(
+      async () => {
+        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+          resolved: { theme: { cssVars: { theme: Record<string, string> } } }
+        }
+        return Object.keys(state.resolved.theme.cssVars.theme).length
+      },
+      { timeout: 5000 },
+    )
+    .toBe(0)
+})

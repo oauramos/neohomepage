@@ -100,6 +100,23 @@ const COLOUR_GROUPS: { title: string; tokens: { name: string; label: string }[] 
   },
 ]
 
+/**
+ * The first family in a font stack, normalised.
+ *
+ * The segmented control cannot compare whole stacks: a preset is free to append families ("Nord"
+ * adds Helvetica Neue and Arial) and to write its list with spaces after the commas, so exact
+ * equality marked NOTHING as active on six of the seven presets — the control looked broken because
+ * it never showed which option you were on. The first family is what actually identifies the choice.
+ */
+function firstFamily(stack: string | undefined): string {
+  return (stack ?? '')
+    .split(',')[0]
+    ?.trim()
+    .replaceAll('"', '')
+    .replaceAll("'", '')
+    .toLowerCase() as string
+}
+
 function Ratio({ value, floor, label }: { value: number | null; floor: number; label: string }) {
   const ok = value !== null && value >= floor
   return (
@@ -258,6 +275,24 @@ export function DesignPanel({
     [],
   )
 
+  /**
+   * Send now, throwing away anything still queued.
+   *
+   * Picking a preset or a scheme is a wholesale change, and any token nudge still sitting in the
+   * debounce was aimed at the preset you just left. Letting it fly would land AFTER the switch and
+   * write itself into the new one — nudge the radius, immediately pick Terminal, and Terminal comes
+   * out with rounded corners it does not have. Measured: radius 6px leaked into a preset whose own
+   * radius is 0.
+   */
+  const commitNow = (patch: ThemePatch) => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+    pending.current = {}
+    setDraft({})
+    setDraftSurface({})
+    onCommit(patch)
+  }
+
   const setColour = (token: string, value: string | null) => {
     setDraft((current) => {
       const next = { ...current }
@@ -288,6 +323,28 @@ export function DesignPanel({
     onPreview(draftTheme)
   }, [draftTheme, onPreview])
 
+  /**
+   * Overrides outlive the preset that was active when they were made — which is right (a colour you
+   * chose should not be undone by trying another theme) and invisible (you pick Terminal, the board
+   * keeps your radius, and nothing says why it does not match the card). Counting them here is what
+   * makes that legible, and the clear is the way back.
+   */
+  const overrideTokens = useMemo(
+    () => [
+      ...Object.keys(theme.cssVars.theme).map((token) => ['theme', token] as const),
+      ...Object.keys(theme.cssVars[scheme]).map((token) => [scheme, token] as const),
+    ],
+    [theme.cssVars, scheme],
+  )
+
+  const clearOverrides = () => {
+    const cssVars: ThemePatch['cssVars'] = {}
+    for (const [bucket, token] of overrideTokens) {
+      cssVars[bucket] = { ...cssVars[bucket], [token]: null }
+    }
+    commitNow({ cssVars })
+  }
+
   const overridden = (token: string) =>
     draft[token] !== undefined ||
     theme.cssVars[scheme][token] !== undefined ||
@@ -302,6 +359,17 @@ export function DesignPanel({
 
   return (
     <div className="nh-design">
+      {overrideTokens.length > 0 ? (
+        <div className="nh-overrides">
+          <span>
+            {overrideTokens.length} custom {overrideTokens.length === 1 ? 'value' : 'values'} on top
+            of <strong>{theme.preset}</strong>
+          </span>
+          <button type="button" className="nh-button-quiet" onClick={clearOverrides}>
+            Clear
+          </button>
+        </div>
+      ) : null}
       <nav className="nh-design-nav" aria-label="Design sections">
         {(['theme', 'colour', 'shape', 'type', 'background'] as const).map((id) => (
           <button
@@ -325,7 +393,7 @@ export function DesignPanel({
                 type="button"
                 className="nh-seg-item"
                 aria-pressed={theme.mode === mode.id}
-                onClick={() => onCommit({ mode: mode.id })}
+                onClick={() => commitNow({ mode: mode.id })}
               >
                 {mode.label}
               </button>
@@ -340,7 +408,7 @@ export function DesignPanel({
                     type="button"
                     className="nh-preset"
                     aria-current={theme.preset === preset.id}
-                    onClick={() => onCommit({ preset: preset.id })}
+                    onClick={() => commitNow({ preset: preset.id })}
                   >
                     <span
                       className="nh-preset-swatch"
@@ -488,7 +556,7 @@ export function DesignPanel({
                 key={stack.id}
                 type="button"
                 className="nh-seg-item"
-                aria-pressed={tokens['font-sans'] === stack.value}
+                aria-pressed={firstFamily(tokens['font-sans']) === firstFamily(stack.value)}
                 style={{ fontFamily: stack.value }}
                 onClick={() => setShape('font-sans', stack.value)}
               >
