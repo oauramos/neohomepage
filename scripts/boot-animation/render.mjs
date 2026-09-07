@@ -29,7 +29,6 @@ const OUT = resolve(ROOT, 'media')
 const FRAMES = resolve(ROOT, 'media/.frames')
 
 const FPS = 25
-const DURATION = 8.15
 const WIDTH = 640
 const HEIGHT = 480
 
@@ -54,6 +53,9 @@ await page.goto(`file://${resolve(HERE, 'boot.html')}${query ? `?${query}` : ''}
 // The fit-to-width pass runs on load and needs the fonts to have arrived first.
 await page.waitForTimeout(400)
 
+// The page owns the timeline — `--hold=` and friends change its length — so ask it rather than
+// keeping a second copy here that drifts and pads the loop with a frozen tail.
+const DURATION = await page.evaluate(() => window.DURATION)
 const total = Math.round(DURATION * FPS)
 for (let i = 0; i < total; i++) {
   await page.evaluate((t) => window.renderAt(t), i / FPS)

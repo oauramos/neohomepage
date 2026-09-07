@@ -134,6 +134,7 @@
    * screenshot per frame and a CSS timeline advances by wall clock between them, which under
    * headless capture spaces the frames unevenly and shows at the loop seam.
    */
+  window.DURATION = DURATION
   window.renderAt = function (t) {
     // The opening hold. The reference cuts from black to white rather than fading, so this does
     // too — everything below simply stays at its t=0 state until the cut.
