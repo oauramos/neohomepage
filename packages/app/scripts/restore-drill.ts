@@ -153,7 +153,13 @@ async function main(): Promise<number> {
 
     // ---- 2. commit /data, and prove what is NOT in it ------------------------------------
     console.log('committing the data directory')
-    await exec('git', ['init', '-q', '--bare'], { cwd: bare })
+    // `-b main` explicitly. `git init --bare` takes its default branch from the machine's
+    // `init.defaultBranch`, so a bare repo created on a host that still defaults to `master` gets
+    // a HEAD pointing at a branch this drill never pushes — and `git clone` then checks out
+    // NOTHING. The drill passed locally and failed in CI for exactly that reason, and it failed
+    // in the worst way: the empty clone booted, seeded a fresh config, and every later assertion
+    // compared that against the original.
+    await exec('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare })
     await exec('git', ['init', '-q'], { cwd: original })
     await exec('git', ['config', 'user.email', 'drill@example.invalid'], { cwd: original })
     await exec('git', ['config', 'user.name', 'Restore Drill'], { cwd: original })
@@ -193,12 +199,29 @@ async function main(): Promise<number> {
     await exec('git', ['clone', '-q', bare, restored])
 
     // ---- 4. boot with the credential supplied ONLY by environment ------------------------
+    /**
+     * The credentials, exactly as the documented restore supplies them: environment variables and
+     * nothing else. Derived from every secret the config declares rather than from `targets[0]`,
+     * which is whichever id sorts first — the ICS feed here, which has no credential at all. That
+     * mistake was invisible while the clone was coming up empty.
+     */
+    const secretEnv = Object.fromEntries(
+      (originalResolved.targets as { secretRefs?: Record<string, string> }[]).flatMap((target) =>
+        Object.values(target.secretRefs ?? {}).map((name) => [
+          `NEOHOMEPAGE_SECRET_${name.replace(/[.-]/g, '_').toUpperCase()}`,
+          API_KEY,
+        ]),
+      ),
+    )
+    if (Object.keys(secretEnv).length === 0) {
+      throw new Error('the fixture declared no secrets, so this drill would prove nothing')
+    }
+
     console.log('booting the restore')
     server = await start(restored, RESTORED_PORT, {
       // The recommended path: the key lives in the compose file or the systemd unit, and the
-      // repository never sees it. `${targetId}.apiKey` -> NEOHOMEPAGE_SECRET_<ID>_APIKEY.
-      [`NEOHOMEPAGE_SECRET_${String(originalResolved.targets && (originalResolved.targets as { id: string }[])[0]?.id).toUpperCase()}_APIKEY`]:
-        API_KEY,
+      // repository never sees it.
+      ...secretEnv,
     })
     try {
       const state = (await (await fetch(`${server.base}/api/state`)).json()) as {
@@ -257,13 +280,22 @@ async function main(): Promise<number> {
           ...process.env,
           NEOHOMEPAGE_DATA_DIR: restored,
           NEOHOMEPAGE_CATALOG_DIR: CATALOG,
-          [`NEOHOMEPAGE_SECRET_${String((originalResolved.targets as { id: string }[])[0]?.id).toUpperCase()}_APIKEY`]:
-            API_KEY,
+          ...secretEnv,
         },
       }).catch((error: unknown) => ({
         stdout: String((error as { stdout?: string }).stdout ?? error),
       }))
+
       check('doctor reports no errors', doctor.stdout.includes('0 problems'), doctor.stdout.trim())
+
+      // Doctor is happy about an EMPTY install too, so on its own it proves nothing here. This is
+      // the assertion that would have caught the empty clone immediately.
+      const widgets = (state.resolved as { widgets?: unknown[] }).widgets ?? []
+      check(
+        'the restored dashboard actually has the widgets',
+        widgets.length === 2,
+        `${widgets.length} widget(s)`,
+      )
     } finally {
       await stop(server)
     }
