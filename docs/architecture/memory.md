@@ -45,6 +45,22 @@ until the last phase.
 
 Every configuration passed, with zero failed requests out of ~6,000 per run.
 
+### The one-hour acceptance run
+
+The winning configuration (musl, `--max-old-space-size=192`) then ran for a full hour under the
+same 1 GiB cgroup:
+
+| Metric | Value |
+| --- | --- |
+| Duration | 3600 s, 3623 samples |
+| Requests | 89,937 ok, **0 failed** |
+| RSS steady p95 | **87.1 MiB** |
+| RSS peak | 91.8 MiB |
+| Drift (first vs last quarter of the plateau) | **0.4 %** |
+
+Flat for an hour under continuous load, with no failed requests. That is the phase's acceptance
+criterion met on the target architecture rather than estimated on a laptop.
+
 ### What this settles
 
 **V8 reads the cgroup.** In a 1 GiB container V8 sized its heap ceiling at 560 MiB, not from the
