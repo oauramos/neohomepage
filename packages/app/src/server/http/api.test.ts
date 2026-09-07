@@ -390,3 +390,53 @@ describe('deleting a widget', () => {
     expect(context.scheduler.registered).toBe(0)
   })
 })
+
+describe('every mutating route is behind the write gate', () => {
+  /**
+   * Enumerating the routes rather than listing them by hand: a route added later must be
+   * protected by default, and a test that names them one by one would silently not cover the
+   * next one. The gate is `app.use('*')`, so this asserts the wiring rather than the list.
+   */
+  it('refuses a cross-site write on every non-GET route', async () => {
+    const routes: [string, string][] = [
+      ['POST', '/api/widgets'],
+      ['PATCH', '/api/widgets/w1'],
+      ['DELETE', '/api/widgets/w1'],
+      ['PUT', '/api/pages/home/layout'],
+      ['POST', '/api/targets'],
+      ['POST', '/api/targets/test'],
+      ['POST', '/api/publish'],
+      ['POST', '/api/widgets/w1/refresh'],
+    ]
+
+    for (const [method, path] of routes) {
+      const response = await app.request(path, {
+        method,
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' },
+        body: '{}',
+      })
+      expect(response.status, `${method} ${path}`).toBe(403)
+    }
+  })
+
+  it('refuses a form-encoded write, which is the simplest cross-site POST', async () => {
+    for (const [method, path] of [
+      ['POST', '/api/widgets'],
+      ['POST', '/api/publish'],
+    ] as [string, string][]) {
+      const response = await app.request(path, {
+        method,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'type=sonarr-queue',
+      })
+      expect(response.status, `${method} ${path}`).toBe(403)
+    }
+  })
+
+  it('leaves reads open, which is the whole point of the posture', async () => {
+    for (const path of ['/api/state', '/api/catalog', '/api/health', '/api/auth']) {
+      const response = await app.request(path, { headers: { 'sec-fetch-site': 'cross-site' } })
+      expect(response.status, path).toBe(200)
+    }
+  })
+})

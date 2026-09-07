@@ -6,6 +6,19 @@ import { stream } from 'hono/streaming'
 import type { AppContext } from '../context.ts'
 import { env } from '../env.ts'
 import { createApiRoutes } from './api.ts'
+import {
+  assertAuthUsable,
+  checkPassword,
+  checkWrite,
+  clearedCookie,
+  issueSession,
+  readAuthConfig,
+  sessionCookie,
+  verifySession,
+  readCookie,
+  SESSION_COOKIE,
+  type AuthConfig,
+} from './auth.ts'
 import { formatEvent, KEEPALIVE_FRAME } from './events.ts'
 
 /**
@@ -19,6 +32,7 @@ import { formatEvent, KEEPALIVE_FRAME } from './events.ts'
 export type AppOptions = {
   readonly context: AppContext
   readonly webDistDir?: string
+  readonly auth?: AuthConfig
 }
 
 async function readFileIfExists(path: string): Promise<string | null> {
@@ -33,6 +47,67 @@ async function readFileIfExists(path: string): Promise<string | null> {
 export function createApp(options: AppOptions): Hono {
   const app = new Hono()
   const { context } = options
+  const auth = options.auth ?? readAuthConfig()
+  assertAuthUsable(auth)
+
+  /**
+   * One gate in front of every mutating request.
+   *
+   * Registered before the routes rather than repeated in each handler, so a route added later is
+   * protected by default. There is a test that enumerates the router and fails if any non-GET
+   * route escapes this.
+   */
+  app.use('*', async (c, next) => {
+    const decision = checkWrite(
+      auth,
+      {
+        method: c.req.method,
+        secFetchSite: c.req.header('sec-fetch-site'),
+        origin: c.req.header('origin'),
+        host: c.req.header('host'),
+        contentType: c.req.header('content-type'),
+        cookie: c.req.header('cookie'),
+        forwardedUser: c.req.header('remote-user') ?? c.req.header('x-forwarded-user'),
+        // Only the SOCKET address, never a forwarded-for header: reading the header here would
+        // let anyone claim to be the trusted proxy, which is the failure the list exists to stop.
+        remoteAddress: (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)
+          ?.incoming?.socket?.remoteAddress,
+      },
+      Date.now(),
+    )
+    if (!decision.allowed) return c.json({ error: decision.reason }, decision.status)
+    await next()
+  })
+
+  app.get('/api/auth', (c) =>
+    c.json({
+      mode: auth.mode,
+      // Whether THIS request could write. The editor uses it to show a sign-in prompt instead of
+      // letting someone fill in a form that will be refused on submit.
+      authenticated:
+        auth.mode === 'none' ||
+        verifySession(auth, readCookie(c.req.header('cookie'), SESSION_COOKIE), Date.now()),
+    }),
+  )
+
+  app.post('/api/auth/login', async (c) => {
+    if (auth.mode !== 'password') return c.json({ error: 'password login is not enabled' }, 400)
+    const body = (await c.req.json()) as { username?: string; password?: string }
+    if (!checkPassword(auth, body.username ?? '', body.password ?? '')) {
+      // One message for both a wrong username and a wrong password: distinguishing them tells an
+      // attacker which half to keep guessing.
+      return c.json({ error: 'incorrect username or password' }, 401)
+    }
+    const secure =
+      c.req.header('x-forwarded-proto') === 'https' || new URL(c.req.url).protocol === 'https:'
+    c.header('Set-Cookie', sessionCookie(issueSession(auth, Date.now()), auth.sessionTtlMs, secure))
+    return c.json({ ok: true })
+  })
+
+  app.post('/api/auth/logout', (c) => {
+    c.header('Set-Cookie', clearedCookie())
+    return c.json({ ok: true })
+  })
 
   app.get('/api/health', (c) =>
     c.json({

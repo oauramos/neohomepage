@@ -13,6 +13,7 @@ export default defineConfig({
       { text: 'Install', link: '/install' },
       { text: 'Guide', link: '/guide/' },
       { text: 'Widgets', link: '/widgets/' },
+      { text: 'MCP', link: '/mcp/' },
     ],
     sidebar: [
       {
@@ -22,7 +23,14 @@ export default defineConfig({
           { text: 'Install', link: '/install' },
         ],
       },
-      { text: 'Guide', items: [{ text: 'Backup and restore', link: '/guide/backup' }] },
+      {
+        text: 'Guide',
+        items: [
+          { text: 'Backup and restore', link: '/guide/backup' },
+          { text: 'Signing in', link: '/guide/auth' },
+          { text: 'Configuring with an AI', link: '/mcp/' },
+        ],
+      },
       { text: 'Architecture', items: [{ text: 'Memory', link: '/architecture/memory' }] },
     ],
     socialLinks: [{ icon: 'github', link: 'https://github.com/oauramos/neohomepage' }],

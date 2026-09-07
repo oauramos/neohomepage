@@ -56,7 +56,7 @@ const COMMANDS: readonly Command[] = [
   },
   { name: 'doctor', summary: 'Report problems with the install', phase: 'F12' },
   { name: 'catalog', summary: 'sync | verify | test | record | snapshot', phase: 'F11' },
-  { name: 'mcp', summary: 'Serve the MCP tools over stdio', phase: 'F10' },
+  { name: 'mcp', summary: 'Serve the MCP tools over stdio', phase: 'F10', run: runMcp },
   { name: 'import', summary: 'Report gethomepage config coverage', phase: 'post-1.0' },
 ]
 
@@ -313,6 +313,28 @@ async function runFetch(argv: readonly string[]): Promise<number> {
     }
   }
   return failures === 0 ? 0 : 1
+}
+
+async function runMcp(argv: readonly string[]): Promise<number> {
+  const { createContext } = await import('../server/context.ts')
+  const { buildDashboardServer, TOOL_NAMES } = await import('../server/mcp/server.ts')
+  const { resolve: resolvePath } = await import('node:path')
+
+  const context = await createContext({
+    catalogDir: process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
+  })
+  await context.reload()
+  if (argv.includes('--print-tools')) {
+    console.log(JSON.stringify({ tools: TOOL_NAMES }, null, 2))
+    await context.shutdown()
+    return 0
+  }
+
+  const { serveStdio } = await import('@modelcontextprotocol/server/stdio')
+  // A FACTORY, not an instance: the SDK builds a server per connection, and passing the instance
+  // typechecks as an error rather than failing at runtime, which is the good outcome.
+  await serveStdio(() => buildDashboardServer({ context, actor: 'mcp:stdio' }))
+  return 0
 }
 
 async function runBackup(argv: readonly string[]): Promise<number> {
