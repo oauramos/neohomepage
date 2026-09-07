@@ -31,6 +31,15 @@ export type ThemePreset = {
   readonly dark: PresetTokens
   /** Scheme-independent: shape, elevation and type. */
   readonly shape: PresetTokens
+  /**
+   * A generated background this preset asks for, as a `theme-backgrounds` id.
+   *
+   * Applied when someone PICKS the preset, not resolved into it: a background lives on
+   * `theme.surface` rather than in the token merge, and someone who then chooses a different one
+   * has to keep it. So this is a starting point the panel honours once, not a property of the
+   * theme — which is why it is an id here and not CSS.
+   */
+  readonly background?: string
 }
 
 /**
@@ -423,6 +432,237 @@ const SYNTHWAVE_PRESET: ThemePreset = {
   },
 }
 
+const ERA_8BIT_PRESET: ThemePreset = {
+  id: '8bit',
+  label: '8-bit',
+  blurb:
+    'A 1989 DMG in one hue \u2014 four shades of olive on a pea-soup LCD, sprites offset on a hard shadow.',
+  background: 'dmg-matrix',
+  light: {
+    background: 'oklch(0.84 0.12 122)',
+    foreground: 'oklch(0.27 0.06 145)',
+    surface: 'oklch(0.88 0.11 122)',
+    'surface-foreground': 'oklch(0.27 0.06 145)',
+    muted: 'oklch(0.92 0.085 120)',
+    'muted-foreground': 'oklch(0.42 0.075 143)',
+    border: 'oklch(0.45 0.08 143)',
+    'control-border': 'oklch(0.40 0.075 145)',
+    accent: 'oklch(0.38 0.09 145)',
+    'accent-foreground': 'oklch(0.92 0.085 120)',
+    ok: 'oklch(0.42 0.095 155)',
+    warn: 'oklch(0.44 0.10 100)',
+    bad: 'oklch(0.42 0.11 60)',
+  },
+  dark: {
+    background: 'oklch(0.20 0.035 145)',
+    foreground: 'oklch(0.88 0.11 122)',
+    surface: 'oklch(0.25 0.04 145)',
+    'surface-foreground': 'oklch(0.88 0.11 122)',
+    muted: 'oklch(0.31 0.045 145)',
+    'muted-foreground': 'oklch(0.75 0.12 125)',
+    border: 'oklch(0.45 0.07 143)',
+    'control-border': 'oklch(0.58 0.09 140)',
+    accent: 'oklch(0.82 0.145 122)',
+    'accent-foreground': 'oklch(0.20 0.035 145)',
+    ok: 'oklch(0.80 0.13 152)',
+    warn: 'oklch(0.86 0.15 105)',
+    bad: 'oklch(0.72 0.13 55)',
+  },
+  shape: {
+    radius: '0px',
+    'radius-control': '0px',
+    'border-width': '2px',
+    shadow: '4px 4px 0 0 var(--nh-border)',
+    'font-sans': 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace',
+    'font-mono': 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace',
+    'title-transform': 'uppercase',
+    'title-tracking': '0.18em',
+    'title-size': '0.72rem',
+    'link-bg': 'var(--nh-accent)',
+    'link-color': 'var(--nh-accent-foreground)',
+    'link-bg-hover': 'color-mix(in oklch, var(--nh-accent) 80%, var(--nh-foreground))',
+    'link-border': '2px solid var(--nh-border)',
+    'link-shadow': '3px 3px 0 0 var(--nh-border)',
+    'link-weight': '700',
+    'max-width': '1400px',
+  },
+}
+
+const ERA_16BIT_PRESET: ThemePreset = {
+  id: '16bit',
+  label: '16-bit',
+  blurb:
+    'The 16-bit console years \u2014 a lavender-grey deck, purple accents and the four coloured buttons as status.',
+  background: 'snes-weave',
+  light: {
+    background: 'oklch(0.94 0.012 300)',
+    foreground: 'oklch(0.25 0.03 300)',
+    surface: 'oklch(0.985 0.004 300)',
+    'surface-foreground': 'oklch(0.25 0.03 300)',
+    muted: 'oklch(0.90 0.02 300)',
+    'muted-foreground': 'oklch(0.44 0.03 300)',
+    border: 'oklch(0.80 0.02 300)',
+    'control-border': 'oklch(0.55 0.03 300)',
+    accent: 'oklch(0.48 0.16 300)',
+    'accent-foreground': 'oklch(0.99 0.002 300)',
+    ok: 'oklch(0.48 0.13 150)',
+    warn: 'oklch(0.49 0.115 72)',
+    bad: 'oklch(0.50 0.19 27)',
+  },
+  dark: {
+    background: 'oklch(0.19 0.04 295)',
+    foreground: 'oklch(0.94 0.015 295)',
+    surface: 'oklch(0.25 0.04 295)',
+    'surface-foreground': 'oklch(0.94 0.015 295)',
+    muted: 'oklch(0.32 0.045 295)',
+    'muted-foreground': 'oklch(0.76 0.03 295)',
+    border: 'oklch(0.40 0.04 295)',
+    'control-border': 'oklch(0.62 0.05 295)',
+    accent: 'oklch(0.72 0.14 300)',
+    'accent-foreground': 'oklch(0.18 0.04 295)',
+    ok: 'oklch(0.80 0.16 150)',
+    warn: 'oklch(0.85 0.14 90)',
+    bad: 'oklch(0.74 0.15 25)',
+  },
+  shape: {
+    radius: '4px',
+    'radius-control': '3px',
+    'border-width': '2px',
+    shadow:
+      'inset 0 1px 0 0 oklch(1 0 0 / 0.35), 0 2px 0 0 oklch(0.55 0.05 300 / 0.28), 0 6px 14px -8px oklch(0.30 0.08 300 / 0.40)',
+    'font-sans':
+      'ui-sans-serif,"Helvetica Neue",Helvetica,system-ui,-apple-system,"Segoe UI",Arial,sans-serif',
+    'font-mono': 'ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace',
+    'title-transform': 'uppercase',
+    'title-tracking': '0.1em',
+    'title-size': '0.72rem',
+    'link-bg': 'var(--nh-accent)',
+    'link-color': 'var(--nh-accent-foreground)',
+    'link-bg-hover': 'color-mix(in oklch,var(--nh-accent) 86%,var(--nh-accent-foreground))',
+    'link-border': '2px solid color-mix(in oklch,var(--nh-accent) 66%,black)',
+    'link-shadow':
+      'inset 0 1px 0 0 oklch(1 0 0 / 0.38), inset 0 -1px 0 0 oklch(0 0 0 / 0.22), 0 2px 0 0 color-mix(in oklch,var(--nh-accent) 55%,black)',
+    'link-weight': '700',
+    'max-width': '1500px',
+  },
+}
+
+const ERA_32BIT_PRESET: ThemePreset = {
+  id: '32bit',
+  label: '32-bit',
+  blurb:
+    'Neo Geo arcade cabinet: near-black ground, identity red burning against it, logo yellow for warnings, marquee lettering in Impact.',
+  background: 'neogeo-scan',
+  light: {
+    background: 'oklch(0.945 0.014 85)',
+    foreground: 'oklch(0.17 0.012 40)',
+    surface: 'oklch(0.975 0.010 88)',
+    'surface-foreground': 'oklch(0.17 0.012 40)',
+    muted: 'oklch(0.895 0.018 82)',
+    'muted-foreground': 'oklch(0.40 0.020 45)',
+    border: 'oklch(0.20 0.012 40)',
+    'control-border': 'oklch(0.35 0.015 40)',
+    accent: 'oklch(0.45 0.195 28)',
+    'accent-foreground': 'oklch(0.975 0.014 88)',
+    ok: 'oklch(0.45 0.13 150)',
+    warn: 'oklch(0.46 0.13 70)',
+    bad: 'oklch(0.45 0.195 28)',
+  },
+  dark: {
+    background: 'oklch(0.155 0.010 40)',
+    foreground: 'oklch(0.94 0.012 85)',
+    surface: 'oklch(0.205 0.012 40)',
+    'surface-foreground': 'oklch(0.94 0.012 85)',
+    muted: 'oklch(0.255 0.014 40)',
+    'muted-foreground': 'oklch(0.74 0.020 70)',
+    border: 'oklch(0.42 0.020 40)',
+    'control-border': 'oklch(0.60 0.030 45)',
+    accent: 'oklch(0.675 0.205 28)',
+    'accent-foreground': 'oklch(0.14 0.010 40)',
+    ok: 'oklch(0.80 0.19 145)',
+    warn: 'oklch(0.86 0.18 95)',
+    bad: 'oklch(0.675 0.205 28)',
+  },
+  shape: {
+    radius: '0px',
+    'radius-control': '0px',
+    'border-width': '3px',
+    shadow: '5px 5px 0 0 var(--nh-border)',
+    'font-sans':
+      'Impact, "Arial Black", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif',
+    'font-mono': 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace',
+    'title-transform': 'uppercase',
+    'title-tracking': '0.04em',
+    'title-size': '0.88rem',
+    'link-bg': 'var(--nh-accent)',
+    'link-color': 'var(--nh-accent-foreground)',
+    'link-bg-hover': 'color-mix(in oklch, var(--nh-accent) 78%, var(--nh-warn))',
+    'link-border': '3px solid var(--nh-border)',
+    'link-shadow': '4px 4px 0 0 var(--nh-border)',
+    'link-weight': '700',
+    'max-width': '1400px',
+  },
+}
+
+const ERA_64BIT_PRESET: ThemePreset = {
+  id: '64bit',
+  label: '64-bit',
+  blurb:
+    'The first 3D generation \u2014 translucent teal plastic and fogged charcoal-blue, where the hard edges finally started to blur.',
+  background: 'ps1-haze',
+  light: {
+    background: 'oklch(0.94 0.008 300)',
+    foreground: 'oklch(0.28 0.02 290)',
+    surface: 'oklch(0.975 0.006 300)',
+    'surface-foreground': 'oklch(0.28 0.02 290)',
+    muted: 'oklch(0.90 0.012 300)',
+    'muted-foreground': 'oklch(0.44 0.02 290)',
+    border: 'oklch(0.85 0.015 300)',
+    'control-border': 'oklch(0.55 0.03 290)',
+    accent: 'oklch(0.47 0.095 200)',
+    'accent-foreground': 'oklch(0.99 0.005 200)',
+    ok: 'oklch(0.47 0.095 165)',
+    warn: 'oklch(0.49 0.105 65)',
+    bad: 'oklch(0.48 0.16 355)',
+  },
+  dark: {
+    background: 'oklch(0.22 0.02 265)',
+    foreground: 'oklch(0.93 0.01 265)',
+    surface: 'oklch(0.27 0.022 265)',
+    'surface-foreground': 'oklch(0.93 0.01 265)',
+    muted: 'oklch(0.33 0.025 265)',
+    'muted-foreground': 'oklch(0.76 0.02 265)',
+    border: 'oklch(0.38 0.025 265)',
+    'control-border': 'oklch(0.62 0.03 265)',
+    accent: 'oklch(0.80 0.12 195)',
+    'accent-foreground': 'oklch(0.20 0.03 220)',
+    ok: 'oklch(0.80 0.13 160)',
+    warn: 'oklch(0.85 0.13 80)',
+    bad: 'oklch(0.75 0.14 5)',
+  },
+  shape: {
+    radius: '12px',
+    'radius-control': '10px',
+    'border-width': '1px',
+    shadow:
+      '0 1px 2px 0 color-mix(in oklab, var(--nh-border) 55%, transparent), 0 10px 28px -12px color-mix(in oklab, var(--nh-accent) 30%, transparent)',
+    'font-sans':
+      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif',
+    'font-mono': 'ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace',
+    'title-transform': 'none',
+    'title-tracking': '0.02em',
+    'title-size': '0.82rem',
+    'link-bg': 'color-mix(in oklab, var(--nh-accent) 16%, transparent)',
+    'link-color': 'var(--nh-accent)',
+    'link-bg-hover': 'color-mix(in oklab, var(--nh-accent) 30%, transparent)',
+    'link-border': '1px solid color-mix(in oklab, var(--nh-accent) 45%, transparent)',
+    'link-shadow':
+      '0 0 0 1px color-mix(in oklab, var(--nh-accent) 12%, transparent), 0 6px 18px -8px color-mix(in oklab, var(--nh-accent) 60%, transparent)',
+    'link-weight': '600',
+    'max-width': '1600px',
+  },
+}
+
 export const THEME_PRESETS: readonly ThemePreset[] = [
   DEFAULT_PRESET,
   NORD_PRESET,
@@ -431,6 +671,10 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
   BRUTALIST_PRESET,
   AMBER_PRESET,
   SYNTHWAVE_PRESET,
+  ERA_8BIT_PRESET,
+  ERA_16BIT_PRESET,
+  ERA_32BIT_PRESET,
+  ERA_64BIT_PRESET,
 ]
 
 export function presetById(id: string): ThemePreset | undefined {

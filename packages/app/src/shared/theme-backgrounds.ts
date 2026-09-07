@@ -86,6 +86,53 @@ export const BACKGROUNDS: readonly Background[] = [
       'radial-gradient(100% 70% at 50% 50%,color-mix(in oklch,var(--nh-accent) 14%,transparent),transparent 75%),' +
       'var(--nh-background)',
   },
+  /**
+   * The four era backgrounds.
+   *
+   * Each is still written in terms of the theme's tokens rather than in fixed colours, so it works
+   * under any preset — but each was shaped for one, and the console presets ask for theirs by name.
+   */
+  {
+    id: 'dmg-matrix',
+    label: 'DMG matrix',
+    // A reflective LCD is a grid of square cells with a visible gap. Two hard repeating gradients
+    // give the cell edges; no blur, because that screen had none.
+    css:
+      'repeating-linear-gradient(0deg,color-mix(in oklch,var(--nh-foreground) 9%,transparent) 0 1px,transparent 1px 4px),' +
+      'repeating-linear-gradient(90deg,color-mix(in oklch,var(--nh-foreground) 9%,transparent) 0 1px,transparent 1px 4px),' +
+      'radial-gradient(120% 100% at 50% 0%,color-mix(in oklch,var(--nh-accent) 10%,transparent),transparent 70%),' +
+      'var(--nh-background)',
+  },
+  {
+    id: 'snes-weave',
+    label: 'SNES weave',
+    // The console's moulded plastic had a fine diagonal texture; a 16-bit sky had banded gradients.
+    css:
+      'repeating-linear-gradient(45deg,color-mix(in oklch,var(--nh-accent) 5%,transparent) 0 2px,transparent 2px 6px),' +
+      'linear-gradient(180deg,color-mix(in oklch,var(--nh-accent) 22%,transparent) 0%,transparent 55%),' +
+      'radial-gradient(80% 60% at 80% 100%,color-mix(in oklch,var(--nh-ok) 16%,transparent),transparent 70%),' +
+      'var(--nh-background)',
+  },
+  {
+    id: 'neogeo-scan',
+    label: 'Arcade scan',
+    // A CRT cabinet: hard scanlines, a hot centre where the tube is brightest, and a dark surround.
+    css:
+      'repeating-linear-gradient(0deg,color-mix(in oklch,var(--nh-foreground) 16%,transparent) 0 2px,transparent 2px 5px),' +
+      'radial-gradient(90% 70% at 50% 40%,color-mix(in oklch,var(--nh-accent) 22%,transparent),transparent 75%),' +
+      'radial-gradient(140% 110% at 50% 50%,transparent 45%,color-mix(in oklch,var(--nh-foreground) 30%,transparent) 100%),' +
+      'var(--nh-background)',
+  },
+  {
+    id: 'ps1-haze',
+    label: '3D haze',
+    // Early 3D fogged the far plane to hide the draw distance. Broad, soft, overlapping washes.
+    css:
+      'radial-gradient(90% 70% at 20% 10%,color-mix(in oklch,var(--nh-accent) 30%,transparent),transparent 70%),' +
+      'radial-gradient(80% 70% at 85% 25%,color-mix(in oklch,var(--nh-bad) 20%,transparent),transparent 72%),' +
+      'linear-gradient(180deg,transparent 40%,color-mix(in oklch,var(--nh-ok) 16%,transparent) 100%),' +
+      'var(--nh-background)',
+  },
   {
     id: 'vignette',
     label: 'Vignette',

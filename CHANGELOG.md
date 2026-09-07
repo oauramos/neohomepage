@@ -24,6 +24,20 @@
 - **`PATCH /api/theme`**, the first write path for the theme. Merges per bucket and treats a `null`
   token as a delete, so one slider can move one token and "reset to the preset" is expressible.
 
+### Four console eras
+
+- **8-bit, 16-bit, 32-bit and 64-bit** — the Game Boy DMG, the Super Nintendo, the Neo Geo and the
+  N64/PS1 generation. Each carries its era in shape as much as in colour: the DMG is one hue with a
+  hard sprite shadow and zero radius, the SNES has moulded-plastic buttons with an inner highlight,
+  the Neo Geo is a black cabinet with marquee lettering in Impact, and the 64-bit theme is the one
+  where the edges finally soften — a translucent teal plastic with a diffuse glow.
+- **A preset may now nominate a background**, applied when it is picked. Four era backgrounds came
+  with them: a Game Boy LCD dot grid, a 16-bit diagonal weave, hard arcade scanlines and the fogged
+  gradient early 3D used to hide its draw distance. All still written in the theme's own tokens.
+- Eleven presets are now checked in both schemes by the contrast maths, and scanned by axe on a
+  board carrying a bookmark tile. No pixel font ships: there is no system one, and a webfont is a
+  request the offline mode cannot make, so the eras are carried by weight, tracking and case.
+
 ### Fixes this surfaced
 
 - `gauge-set` and `status-badge` emitted markup that no stylesheet matched, so two of the five

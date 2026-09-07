@@ -408,7 +408,16 @@ export function DesignPanel({
                     type="button"
                     className="nh-preset"
                     aria-current={theme.preset === preset.id}
-                    onClick={() => commitNow({ preset: preset.id })}
+                    onClick={() =>
+                      commitNow({
+                        preset: preset.id,
+                        // A preset may nominate a background. Applied only when it asks for one, so
+                        // choosing a plain theme does not silently strip the one you picked.
+                        ...(preset.background === undefined
+                          ? {}
+                          : { surface: { background: `${GRADIENT_PREFIX}${preset.background}` } }),
+                      })
+                    }
                   >
                     <span
                       className="nh-preset-swatch"

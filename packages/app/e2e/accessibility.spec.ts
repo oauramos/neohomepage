@@ -142,7 +142,19 @@ test('every form control the generated form emits has a label', async ({ page })
  * still colours the label with `accent`. That is red-on-red, and only a real render catches it,
  * because the failing pair is a rule's choice of token rather than a value in the palette.
  */
-for (const preset of ['default', 'nord', 'terminal', 'glass', 'brutalist', 'amber', 'synthwave']) {
+for (const preset of [
+  'default',
+  'nord',
+  'terminal',
+  'glass',
+  'brutalist',
+  'amber',
+  'synthwave',
+  '8bit',
+  '16bit',
+  '32bit',
+  '64bit',
+]) {
   for (const mode of ['light', 'dark'] as const) {
     test(`the ${preset} preset reads in ${mode}`, async ({ page }) => {
       await fetch(`${harness.baseURL}/api/theme`, {
