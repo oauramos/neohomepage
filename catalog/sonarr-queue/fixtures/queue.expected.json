@@ -1,0 +1,32 @@
+{
+  "stats": [
+    {
+      "label": "Queue",
+      "value": 3
+    },
+    {
+      "label": "Remaining",
+      "value": "3.5 GiB"
+    }
+  ],
+  "items": [
+    {
+      "title": "Severance",
+      "subtitle": "import pending",
+      "badge": "0 B",
+      "progress": 1
+    },
+    {
+      "title": "Andor",
+      "subtitle": "downloading",
+      "badge": "512 MiB",
+      "progress": 0.75
+    },
+    {
+      "title": "Foundation",
+      "subtitle": "downloading",
+      "badge": "3 GiB",
+      "progress": 0.25
+    }
+  ]
+}

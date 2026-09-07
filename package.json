@@ -16,7 +16,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs"
+    "docs:build": "vitepress build docs",
+    "catalog:validate": "pnpm --filter @neohomepage/app catalog validate",
+    "catalog:test": "pnpm --filter @neohomepage/app catalog test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

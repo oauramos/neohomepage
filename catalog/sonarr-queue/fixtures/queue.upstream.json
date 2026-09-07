@@ -1,0 +1,37 @@
+{
+  "page": 1,
+  "pageSize": 20,
+  "totalRecords": 3,
+  "records": [
+    {
+      "id": 101,
+      "seriesId": 7,
+      "size": 2147483648,
+      "sizeleft": 536870912,
+      "title": "Andor.S02E05.1080p.WEB-DL",
+      "trackedDownloadState": "downloading",
+      "series": { "id": 7, "title": "Andor", "titleSlug": "andor" },
+      "episode": { "id": 4501, "title": "The Axe Forgets", "seasonNumber": 2, "episodeNumber": 5 }
+    },
+    {
+      "id": 102,
+      "seriesId": 12,
+      "size": 1073741824,
+      "sizeleft": 0,
+      "title": "Severance.S02E01.2160p.WEB-DL",
+      "trackedDownloadState": "importPending",
+      "series": { "id": 12, "title": "Severance", "titleSlug": "severance" },
+      "episode": { "id": 8801, "title": "Hello, Ms. Cobel", "seasonNumber": 2, "episodeNumber": 1 }
+    },
+    {
+      "id": 103,
+      "seriesId": 3,
+      "size": 4294967296,
+      "sizeleft": 3221225472,
+      "title": "Foundation.S03E02.1080p.WEB-DL",
+      "trackedDownloadState": "downloading",
+      "series": { "id": 3, "title": "Foundation", "titleSlug": "foundation" },
+      "episode": { "id": 2201, "title": "In Seldon's Shadow", "seasonNumber": 3, "episodeNumber": 2 }
+    }
+  ]
+}

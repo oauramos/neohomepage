@@ -1,0 +1,219 @@
+{
+  "manifestVersion": 1,
+  "id": "sonarr-queue",
+  "version": "1.0.0",
+  "displayName": "Sonarr queue",
+  "category": "media-automation",
+  "icon": "sonarr",
+  "docs": "https://neohomepage.dev/widgets/sonarr-queue",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "help": "Sonarr \u2192 Settings \u2192 General \u2192 API Key",
+        "required": true
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "X-Api-Key",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [
+    {
+      "name": "maxItems",
+      "kind": "integer",
+      "label": "Items to show",
+      "required": false,
+      "default": 5,
+      "min": 1,
+      "max": 20
+    }
+  ],
+  "operations": {
+    "queue": {
+      "method": "GET",
+      "path": "/api/v3/queue",
+      "decode": "json",
+      "query": {
+        "pageSize": "{{config.maxItems}}",
+        "includeSeries": "true"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Queue"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.records"
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Remaining"
+              },
+              "value": {
+                "op": "format",
+                "as": "bytes",
+                "of": {
+                  "op": "sum",
+                  "of": {
+                    "op": "get",
+                    "path": "$.records"
+                  },
+                  "path": "sizeleft"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "map",
+        "as": "e",
+        "over": {
+          "op": "limit",
+          "n": 20,
+          "over": {
+            "op": "sort",
+            "over": {
+              "op": "get",
+              "path": "$.records"
+            },
+            "by": [
+              {
+                "path": "sizeleft",
+                "dir": "asc",
+                "type": "numeric"
+              }
+            ]
+          }
+        },
+        "body": {
+          "op": "pick",
+          "fields": {
+            "title": {
+              "op": "coalesce",
+              "of": [
+                {
+                  "op": "get",
+                  "path": "e.series.title"
+                },
+                {
+                  "op": "get",
+                  "path": "e.title"
+                }
+              ]
+            },
+            "subtitle": {
+              "op": "mapValue",
+              "of": {
+                "op": "get",
+                "path": "e.trackedDownloadState"
+              },
+              "cases": {
+                "downloading": "downloading",
+                "importPending": "import pending",
+                "importBlocked": "import blocked",
+                "failedPending": "failed"
+              },
+              "fallback": "queued"
+            },
+            "badge": {
+              "op": "format",
+              "as": "bytes",
+              "of": {
+                "op": "get",
+                "path": "e.sizeleft"
+              }
+            },
+            "progress": {
+              "op": "clamp",
+              "min": 0,
+              "max": 1,
+              "of": {
+                "op": "arith",
+                "fn": "sub",
+                "of": [
+                  {
+                    "op": "const",
+                    "value": 1
+                  },
+                  {
+                    "op": "arith",
+                    "fn": "div",
+                    "of": [
+                      {
+                        "op": "get",
+                        "path": "e.sizeleft"
+                      },
+                      {
+                        "op": "get",
+                        "path": "e.size"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "arith",
+      "clamp",
+      "coalesce",
+      "concat",
+      "const",
+      "count",
+      "format",
+      "get",
+      "limit",
+      "map",
+      "mapValue",
+      "pick",
+      "sort",
+      "sum"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

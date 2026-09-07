@@ -37,7 +37,13 @@ describe('paths', () => {
   })
 
   it('returns null for anything missing rather than throwing', () => {
-    for (const path of ['$.nope', '$.records.99.size', '$.total.deeper', 'opt.absent', 'unbound.x']) {
+    for (const path of [
+      '$.nope',
+      '$.records.99.size',
+      '$.total.deeper',
+      'opt.absent',
+      'unbound.x',
+    ]) {
       expect(value(get(path), source)).toBeNull()
     }
   })
@@ -98,7 +104,14 @@ describe('structure operators', () => {
       as: 'e',
       body: { op: 'pick', fields: { title: get('e.name'), n: get('e.count') } },
     }
-    expect(value(node, { items: [{ name: 'a', count: 1 }, { name: 'b', count: 2 }] })).toEqual([
+    expect(
+      value(node, {
+        items: [
+          { name: 'a', count: 1 },
+          { name: 'b', count: 2 },
+        ],
+      }),
+    ).toEqual([
       { title: 'a', n: 1 },
       { title: 'b', n: 2 },
     ])
@@ -152,10 +165,9 @@ describe('structure operators', () => {
 
   it('sorts dates chronologically, not lexicographically', () => {
     const source = [{ d: '2026-01-10T00:00:00Z' }, { d: '2026-01-02T00:00:00Z' }]
-    expect(value({ op: 'sort', over: get('$'), by: [{ path: 'd', type: 'date' }] }, source)).toEqual([
-      { d: '2026-01-02T00:00:00Z' },
-      { d: '2026-01-10T00:00:00Z' },
-    ])
+    expect(
+      value({ op: 'sort', over: get('$'), by: [{ path: 'd', type: 'date' }] }, source),
+    ).toEqual([{ d: '2026-01-02T00:00:00Z' }, { d: '2026-01-10T00:00:00Z' }])
   })
 
   it('joins two arrays by key without going quadratic', () => {
@@ -170,7 +182,10 @@ describe('structure operators', () => {
       body: { op: 'pick', fields: { show: get('s.title'), ep: get('q.title') } },
     }
     const source = {
-      queue: [{ seriesId: 7, title: 'Ep 1' }, { seriesId: 99, title: 'Orphan' }],
+      queue: [
+        { seriesId: 7, title: 'Ep 1' },
+        { seriesId: 99, title: 'Orphan' },
+      ],
       series: [{ id: 7, title: 'Andor' }],
     }
     expect(value(node, source)).toEqual([
@@ -180,7 +195,11 @@ describe('structure operators', () => {
   })
 
   it('deduplicates on a key, keeping the first occurrence', () => {
-    const source = [{ k: 'a', n: 1 }, { k: 'b', n: 2 }, { k: 'a', n: 3 }]
+    const source = [
+      { k: 'a', n: 1 },
+      { k: 'b', n: 2 },
+      { k: 'a', n: 3 },
+    ]
     expect(value({ op: 'distinctBy', over: get('$'), by: 'k' }, source)).toEqual([
       { k: 'a', n: 1 },
       { k: 'b', n: 2 },
@@ -203,7 +222,9 @@ describe('comparison', () => {
   })
 
   it('compares objects and arrays structurally for equality', () => {
-    expect(value({ op: 'compare', cmp: 'eq', left: lit({ a: 1 }), right: lit({ a: 1 }) })).toBe(true)
+    expect(value({ op: 'compare', cmp: 'eq', left: lit({ a: 1 }), right: lit({ a: 1 }) })).toBe(
+      true,
+    )
     expect(value({ op: 'compare', cmp: 'ne', left: lit([1]), right: lit([2]) })).toBe(true)
   })
 })
@@ -261,7 +282,11 @@ describe('formatting', () => {
   })
 
   it('carries the raw instant alongside relative time, so a static page can rehydrate', () => {
-    const rendered = value({ op: 'format', of: lit('2026-09-06T11:30:00.000Z'), as: 'relativeTime' })
+    const rendered = value({
+      op: 'format',
+      of: lit('2026-09-06T11:30:00.000Z'),
+      as: 'relativeTime',
+    })
     expect(rendered).toEqual({ v: '30 minutes ago', iso: '2026-09-06T11:30:00.000Z', rel: true })
   })
 
@@ -299,5 +324,58 @@ describe('limits', () => {
     )
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.reason).toMatch(/byte cap/)
+  })
+})
+
+describe('composition patterns manifests rely on', () => {
+  it('sorts by a computed value without a sort-by-expression operator', () => {
+    /**
+     * `sort` deliberately takes a path, not an expression — keeping the language small is worth
+     * more than saving a node. The documented pattern for a computed ordering is therefore:
+     * map to attach the key, sort by its path, then map again to drop it. Two extra nodes, no
+     * extra operator, and the helper key never reaches the render contract.
+     */
+    const source = [
+      { name: 'a', size: 100, left: 90 },
+      { name: 'b', size: 100, left: 10 },
+      { name: 'c', size: 100, left: 50 },
+    ]
+    const withKey: Node = {
+      op: 'map',
+      over: get('$'),
+      as: 'e',
+      body: {
+        op: 'pick',
+        fields: {
+          title: get('e.name'),
+          _done: { op: 'arith', fn: 'div', of: [get('e.left'), get('e.size')] },
+        },
+      },
+    }
+    const sorted: Node = { op: 'sort', over: withKey, by: [{ path: '_done', type: 'numeric' }] }
+    const cleaned: Node = {
+      op: 'map',
+      over: sorted,
+      as: 'r',
+      body: { op: 'pick', fields: { title: get('r.title') } },
+    }
+
+    expect(value(cleaned, source)).toEqual([{ title: 'b' }, { title: 'c' }, { title: 'a' }])
+  })
+
+  it('builds a fixed array of computed objects with concat', () => {
+    // There is no array-literal operator: `concat` pushes a non-array value as one element, which
+    // is exactly what a `stats: [...]` block needs.
+    const node: Node = {
+      op: 'concat',
+      of: [
+        { op: 'pick', fields: { label: lit('Queue'), value: { op: 'count', of: get('$') } } },
+        { op: 'pick', fields: { label: lit('First'), value: { op: 'first', of: get('$') } } },
+      ],
+    }
+    expect(value(node, [5, 6])).toEqual([
+      { label: 'Queue', value: 2 },
+      { label: 'First', value: 5 },
+    ])
   })
 })

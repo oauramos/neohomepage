@@ -57,7 +57,10 @@ describe('the operator set is closed and fully covered', () => {
   it('parses every operator through the schema', () => {
     for (const [name, node] of Object.entries(EXAMPLES)) {
       const parsed = nodeSchema.safeParse(node)
-      expect(parsed.success, `${name}: ${parsed.success ? '' : JSON.stringify(parsed.error.issues)}`).toBe(true)
+      expect(
+        parsed.success,
+        `${name}: ${parsed.success ? '' : JSON.stringify(parsed.error.issues)}`,
+      ).toBe(true)
     }
   })
 
