@@ -1,0 +1,62 @@
+name: A widget for a service
+description: Request an integration, or tell us an existing one is wrong.
+labels: [widget]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A widget is a JSON manifest and two fixtures — no code. If you can read your service's API
+        documentation, you can write one, and the
+        [widget reference](https://oauramos.github.io/neohomepage/widgets/) walks through it.
+        Requests are welcome either way.
+
+  - type: input
+    id: service
+    attributes:
+      label: Which service
+      placeholder: Immich
+    validations:
+      required: true
+
+  - type: input
+    id: docs
+    attributes:
+      label: Link to its API documentation
+      description: |
+        Required. Manifests here are written clean-room from the vendor's own documentation — never
+        from another dashboard's source — so a widget cannot be added without one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: show
+    attributes:
+      label: What should the widget show
+      description: Two or three readings, or a short list. A widget that shows everything shows nothing.
+      placeholder: |
+        Photos, videos, storage used — and the most recent upload.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth
+    attributes:
+      label: How does it authenticate
+      options:
+        - Nothing, it is open on the LAN
+        - An API key in a header
+        - An API key in the query string
+        - Username and password (basic auth)
+        - Log in first, then a session cookie or token
+        - I do not know
+    validations:
+      required: true
+
+  - type: textarea
+    id: response
+    attributes:
+      label: A sample response, if you have one
+      description: |
+        Trimmed to the fields above. **Remove anything identifying** — this becomes a public test
+        fixture. Paths, real filenames and account names do not need to be here.
+      render: json

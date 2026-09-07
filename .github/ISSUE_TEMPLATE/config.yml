@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How do I do X?
+    url: https://github.com/oauramos/neohomepage/wiki
+    about: The wiki covers setup per service, backup, and the things that go wrong most often.
+  - name: Reference documentation
+    url: https://oauramos.github.io/neohomepage/
+    about: Install, the widget list, the architecture and why it is shaped this way.
+  - name: A security problem
+    url: https://github.com/oauramos/neohomepage/security/advisories/new
+    about: Please report privately rather than in a public issue.

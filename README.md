@@ -1,105 +1,175 @@
+<div align="center">
+
 # neohomepage
 
-A self-hosted start page for your homelab that you configure **in the browser** — not by editing
-YAML and restarting a container.
+**A self-hosted start page for your homelab that you configure in the browser — not by editing YAML and restarting a container.**
 
-> Beta. Everything below works; there is no published container tag yet, so install from source
-> or build the image yourself. See [the roadmap](#roadmap).
+[![CI](https://github.com/oauramos/neohomepage/actions/workflows/ci.yml/badge.svg)](https://github.com/oauramos/neohomepage/actions/workflows/ci.yml)
+[![Docs](https://github.com/oauramos/neohomepage/actions/workflows/pages.yml/badge.svg)](https://oauramos.github.io/neohomepage/)
+[![License: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Node 24](https://img.shields.io/badge/node-24%20LTS-5FA04E?logo=node.js&logoColor=white)](.nvmrc)
 
-## Why
+[Documentation](https://oauramos.github.io/neohomepage/) ·
+[Install](https://oauramos.github.io/neohomepage/install) ·
+[Widgets](https://oauramos.github.io/neohomepage/widgets/) ·
+[Wiki](https://github.com/oauramos/neohomepage/wiki) ·
+[Report a problem](https://github.com/oauramos/neohomepage/issues/new/choose)
 
-[gethomepage](https://gethomepage.dev) has ~160 service integrations and no way to add one without
-editing a YAML file. [Homarr](https://homarr.dev) has a real visual editor and ~40 integrations,
-and wants Redis, SQLite and roughly 500 MB of RAM. Nobody combines the integration breadth of the
-first with the editing experience of the second, in something that fits a 1 GB box.
+</div>
+
+---
+
+## The gap this fills
+
+[gethomepage](https://gethomepage.dev) has around 160 service integrations and no way to add one
+without editing a YAML file. [Homarr](https://homarr.dev) has a real visual editor and around 40
+integrations, and wants Redis, SQLite and roughly 500 MB of RAM.
+
+Nobody combines the integration breadth of the first with the editing experience of the second, in
+something that fits a 1 GB box. That is the whole idea.
 
 ## What it does
 
-- **Edit everything from the UI.** A button in the bottom-left corner opens the editor: drag
-  widgets around, change the theme, set a background, add a service by filling in a form.
-- **Your data is a folder of JSON.** `git init` it, push it, and restoring is `git clone`.
-- **Small.** One Node process, no database, no bundler on the box. The dashboard is rendered to
-  static HTML and served from disk.
-- **Widgets are data, not code.** Each integration is a JSON manifest — the edit form, the MCP
-  tool schema, the proxy allowlist and the docs are all derived from it, so they cannot drift.
-- **Configurable by an AI.** A built-in MCP server lets Claude, Codex or any MCP client add
-  widgets and targets for you.
+- **Everything is editable in the browser.** A button in the bottom-left corner opens the editor:
+  drag widgets around, change the theme, set a background, add a service by filling in a form.
+  There is no configuration file you are expected to edit.
+- **Your data is a folder of JSON.** `git init` it, push it, and restoring on a new machine is
+  `git clone` plus your credentials in the environment. That claim is executed in CI, not asserted.
+- **It is small.** One Node process. No database, no Redis, no bundler on the box. The dashboard is
+  rendered to static HTML and served from disk — 46 MB resident, 61 MB of image.
+- **It works with JavaScript disabled.** The published page is a document. The editor is the only
+  part that needs a script, and it is loaded only when you open it.
+- **Widgets are data, not code.** Each integration is a JSON manifest. The edit form, the MCP tool
+  schema, the egress allowlist and the documentation are all derived from it, so they cannot drift.
+- **An AI can configure it.** A built-in MCP server lets Claude, Codex or any MCP client add
+  widgets and services for you — without ever being able to read a credential or name a URL.
 
-## Security posture
-
-The browser and the MCP server **never name a URL, path, header or HTTP method**. The client asks
-to refresh a widget by id; the server resolves instance → target → manifest → a literal path
-template, then asserts the resulting origin and pathname match exactly. Only the fields a manifest
-declares are ever returned — the raw upstream response is discarded before it reaches a cache.
-
-Secrets live in their own directory, `0600`, and never enter the git-synced config — the writer has
-no code path that would put one there.
-
-## Getting started
-
-Requires Node >= 24.15 and pnpm (installed automatically via the `packageManager` field).
+## Quick start
 
 ```sh
-pnpm install
-pnpm dev
-```
-
-Open <http://localhost:5173> and add a service from the button in the bottom-left corner. Or with
-Docker, once a release is tagged:
-
-```sh
+mkdir neohomepage && cd neohomepage
 curl -O https://raw.githubusercontent.com/oauramos/neohomepage/main/compose.yaml
 docker compose up -d
 ```
 
-See [docs/install.md](docs/install.md) for the full guide and
-[docs/guide/backup.md](docs/guide/backup.md) for how backup and restore work.
+Open `http://<this-host>:7575`. Add a service from the button in the bottom-left corner.
+
+> **Note**
+> No release is tagged yet, so `ghcr.io/oauramos/neohomepage:latest` does not exist. Until it does,
+> either build it — `docker build -t neohomepage:local .` — or run from source below.
+
+<details>
+<summary><b>From source</b></summary>
+
+Requires Node ≥ 24.15 and pnpm.
+
+```sh
+git clone https://github.com/oauramos/neohomepage
+cd neohomepage
+pnpm install
+pnpm dev
+```
+
+Open <http://localhost:5173>. This is the same code the container runs: the image ships the
+sources, not a compiled bundle.
+
+</details>
+
+## The security posture
+
+> **The browser and the MCP server never name a URL, a path, a header or an HTTP method.**
+
+A client asks to refresh a widget _by id_. The server resolves instance → service → manifest → a
+literal path template with typed, encoded parameters, and then asserts that the URL it is about to
+dial has exactly the origin and pathname it just computed. That equality check — not a character
+blocklist — is what defeats forward-slash traversal, the backslash bypass, the `%23` fragment
+trick, and the omitted-parameter early return that produced
+[GHSA-669x-4pg4-w24r](https://github.com/gethomepage/homepage/security/advisories/GHSA-669x-4pg4-w24r).
+
+Only projections are cached and sent. The raw upstream response is discarded before it reaches a
+cache, so a hypothetical SSRF against a service's settings endpoint returns the three fields a
+manifest declared and nothing else.
+
+Credentials never enter the git-synced configuration. The server decides what is a credential from
+the manifest — not from what the client called it — so there is no code path that writes one into
+`config/`. There is a test that tries.
+
+## What is checked, and how
+
+Claims about self-hosted software are cheap, so the ones here are executable.
+
+| Claim                                 | The check                                                                              |
+| ------------------------------------- | -------------------------------------------------------------------------------------- |
+| Widgets cannot drift from their forms | `requires` is derived from each manifest and compared against what the author declared |
+| A widget works offline                | `catalog:test` makes `fetch` **throw**, not merely go unused                           |
+| The catalog covers what it claims     | a coverage footer: templates 5/5, auth kinds 5/5, decoders 3/3                         |
+| Two builds are byte-identical         | CI builds the catalog twice and compares                                               |
+| The board works without JavaScript    | a Playwright profile with JS disabled                                                  |
+| The editor works without a mouse      | a fixture that makes `page.mouse` throw                                                |
+| The theme meets WCAG AA               | every text token against every surface, as colour maths                                |
+| It fits on a 1 GB box                 | an hour-long soak on real arm64 under a 1 GiB cgroup                                   |
+| Restore actually restores             | commit `/data`, clone it, boot with the key in the environment, compare hashes         |
+| Nothing needed changing for Docker    | `git diff f12..HEAD -- 'packages/*/src/'` prints nothing                               |
+
+## Architecture, briefly
+
+```
+config/*.json  ──resolve()──▶  state/resolved.json  ──publish()──▶  generations/000042/index.html
+  sparse, yours              dense, derived           renderToStaticMarkup      served by GET /
+```
+
+`resolve()` is a pure function: sparse declarations plus manifest defaults produce one dense
+evaluated tree. Publishing renders that to an immutable numbered generation and flips a pointer
+atomically — so a failed render cannot serve a broken page, an upgrade can be rolled back, and
+"undo what the AI did" is a pointer move.
+
+The full reasoning is in [the documentation](https://oauramos.github.io/neohomepage/), including
+[the memory budget](https://oauramos.github.io/neohomepage/architecture/memory) and
+[the container](https://oauramos.github.io/neohomepage/architecture/container).
+
+## Working on it
 
 ```sh
 pnpm lint            # eslint, including the client/server boundary rule
 pnpm typecheck
-pnpm test            # 469 unit tests
+pnpm test            # 470 unit tests
 pnpm e2e             # 28 browser tests: axe, keyboard-only editing, no-JS, tap targets
-pnpm catalog:test    # every widget's projection against its fixtures, with the network blocked
-pnpm budgets         # cold start and publish latency at 60 widgets
+pnpm catalog:test    # every widget's projection against its fixtures, network blocked
+pnpm budgets         # first boot, restart and publish latency at 60 widgets
 pnpm drill           # the restore claim, executed: commit, clone, boot, compare
-pnpm build
 pnpm docs:dev        # the documentation site
 ```
 
-`pnpm --filter @neohomepage/app neo --help` lists the command line surface. Every capability the UI
-gets must be reachable there first — that is what keeps each phase testable without a browser.
-`neo doctor` explains anything that is wrong with an install and exits non-zero if it matters.
+`pnpm --filter @neohomepage/app neo --help` lists the command line. Every capability the UI has must
+be reachable there first — that is what keeps each phase testable without a browser. `neo doctor`
+explains anything wrong with an install and exits non-zero when it matters.
 
-## What is checked, and how
+## Contributing a widget
 
-Claims about this kind of software are cheap, so the ones this project makes are executable:
+Three files and no code:
 
-| Claim | The check |
-| --- | --- |
-| Widgets cannot drift from their forms | `requires` is derived from each manifest and compared to what the author declared |
-| A widget works offline | `catalog:test` makes `fetch` **throw**, not merely go unused |
-| The catalog covers what it claims | a coverage footer: templates 5/5, auth kinds 5/5, decoders 3/3 |
-| Two builds are identical | CI builds the catalog twice and compares the bytes |
-| The board works without JavaScript | a Playwright profile with JS disabled |
-| The editor works without a mouse | a fixture that makes `page.mouse` throw |
-| The theme meets WCAG AA | every text token against every surface, as colour maths |
-| It fits on a 1 GB box | an hour-long soak on real arm64 under a 1 GiB cgroup |
-| Restore actually restores | commit `/data`, clone it, boot with the key in the environment, compare hashes |
-| Nothing needed changing for Docker | `git diff f12..HEAD -- 'packages/*/src/'` prints nothing |
+```
+catalog/<slug>/manifest.json                  # the whole integration
+catalog/<slug>/fixtures/<name>.upstream.json  # a recorded real response
+catalog/<slug>/fixtures/<name>.expected.json  # the projection it must produce
+catalog/<slug>/README.md                      # which vendor documentation you worked from
+```
 
-## Roadmap
+One service per pull request. A thirty-widget PR cannot have been written from thirty sets of
+vendor documentation, and it cannot be reviewed. See
+[the widget reference](https://oauramos.github.io/neohomepage/widgets/) for the full process.
 
-F0–F13 are done: the workspace, the arm64 memory experiment, the layout engine, the projection
-DSL, the config kernel, the SSRF-safe fetcher, the poll scheduler, publishing, the SPA and
-templates, the editor, auth and MCP, the catalog and its sixteen widgets, accessibility and
-hardening, and — last, on purpose — the container.
+## Status
 
-Next: run the widgets against real hardware, publish a release, and the deliberately post-1.0
-list — a gethomepage compatibility report, Docker label discovery, multiple pages, OIDC, and write
-actions, which turn the egress posture from read-only to mutating and need their own threat model.
+F0–F13 are complete: the workspace, the arm64 memory experiment, the layout engine, the projection
+DSL, the config kernel, the SSRF-safe fetcher, the poll scheduler, publishing, the SPA and its five
+templates, the editor, authentication and MCP, the catalog and its sixteen widgets, accessibility
+and hardening, and — last, on purpose — the container.
+
+Next: the widgets against real hardware, and a tagged release.
 
 ## Licence and attribution
 
-MIT. neohomepage is a clean-room implementation — gethomepage is GPL-3.0 and no code from it is
-used here. Widget manifests are written from each vendor's own API documentation.
+MIT. neohomepage is a clean-room implementation: gethomepage is GPL-3.0 and no code from it is used
+here. Widget manifests are written from each vendor's own API documentation, with the source cited
+in each widget's README.

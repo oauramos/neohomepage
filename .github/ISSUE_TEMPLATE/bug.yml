@@ -1,0 +1,89 @@
+name: Something is broken
+description: A widget will not load, the editor misbehaves, the container will not start.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else, please run **`neo doctor`** and paste its output below. It reports
+        missing credentials by name, widgets bound to services that no longer exist, permissions,
+        and whether anything that must never be committed has been. It answers most of these.
+
+        ```sh
+        docker exec neohomepage node packages/app/src/cli/neo.ts doctor
+        # or, from source:
+        pnpm --filter @neohomepage/app neo doctor
+        ```
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: '`neo doctor` output'
+      render: text
+      placeholder: 0 problems
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it running
+      options:
+        - Docker (compose.yaml as published)
+        - Docker (my own compose or docker run)
+        - From source (pnpm dev)
+        - From source (neo serve)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options: [linux/amd64, linux/arm64, macOS (development), other]
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Where
+      description: The box and its OS — a NAS model, a Proxmox LXC, a VPS. Memory limit if you set one.
+      placeholder: Synology DS923+, DSM 7.2, mem_limit 320m
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag, or `git rev-parse --short HEAD` from a source install.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        `docker logs neohomepage`, and the browser console if this is a UI problem.
+        **Check for credentials before pasting.** Log lines redact known credential headers, but a
+        URL you typed by hand or an upstream error message may not be redacted.
+      render: shell
+
+  - type: textarea
+    id: widget
+    attributes:
+      label: If a widget is involved
+      description: |
+        Which one, and what `neo fetch <widget-id>` prints. That runs the exact request the poller
+        would and shows the projection or the error code, with no browser in the way.
+      render: text
