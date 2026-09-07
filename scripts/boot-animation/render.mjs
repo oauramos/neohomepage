@@ -29,7 +29,7 @@ const OUT = resolve(ROOT, 'media')
 const FRAMES = resolve(ROOT, 'media/.frames')
 
 const FPS = 25
-const DURATION = 7.0
+const DURATION = 7.5
 const WIDTH = 640
 const HEIGHT = 480
 
@@ -64,14 +64,20 @@ console.log(`rendered ${total} frames`)
 
 const scale = `scale=${WIDTH}:${HEIGHT}:flags=lanczos`
 
-// One palette for the whole clip. Per-frame palettes shimmer on a mark this thin — the hairlines
-// get quantised differently frame to frame and the letters crawl.
+// One 256-colour palette for the whole clip, and no dithering.
+//
+// Both matter for the crossing. At 128 colours the grey ramp cannot be represented, so the ground
+// and the mark quantise to adjacent-but-different greys and the mirrored mark stays visible
+// through the moment that is meant to hide it. Dithering is worse still: this animation is one
+// large flat field for most of its length, and dithering a flat field is visible noise.
+// Per-frame palettes shimmer on a Didone too — the hairlines quantise differently frame to frame
+// and the letters crawl.
 await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(FPS), '-i', `${FRAMES}/f%04d.png`,
-  '-vf', `${scale},palettegen=max_colors=128:stats_mode=full`, `${FRAMES}/palette.png`])
+  '-vf', `${scale},palettegen=max_colors=256:stats_mode=full`, `${FRAMES}/palette.png`])
 
 await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(FPS), '-i', `${FRAMES}/f%04d.png`,
   '-i', `${FRAMES}/palette.png`,
-  '-lavfi', `${scale}[x];[x][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle`,
+  '-lavfi', `${scale}[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle`,
   '-loop', '0', `${OUT}/boot.gif`])
 
 await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(FPS), '-i', `${FRAMES}/f%04d.png`,

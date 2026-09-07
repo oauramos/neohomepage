@@ -1,46 +1,34 @@
 <!doctype html>
 <meta charset="utf-8" />
 <style>
-  /* Timing is driven by a single --t (seconds) that the capture script sets per frame, so every
-     frame is deterministic — no reliance on the browser's animation clock, which drifts under
-     headless screenshotting and would produce a stuttering loop. */
-  :root {
-    --w: 640px;
-    --h: 480px;
-  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { background: #000; }
-  body { width: var(--w); height: var(--h); overflow: hidden; }
+  body { width: 640px; height: 480px; overflow: hidden; }
 
   .stage {
     position: relative;
-    width: var(--w);
-    height: var(--h);
-    background: #000;
+    width: 640px;
+    height: 480px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    perspective: 900px;
     overflow: hidden;
   }
 
-  /* The wordmark. Didot is a Didone — heavy stems, hairline thins, unbracketed serifs — which is
-     what the Neo Geo mark is set in. Bodoni 72 is the fallback and reads nearly the same. */
+  /* A Didone — heavy stems, hairline thins, unbracketed serifs — which is what the reference mark
+     is set in. Bodoni 72 falls back to nearly the same shapes. */
   .mark {
     font-family: 'Didot', 'Bodoni 72', 'Playfair Display', serif;
     font-weight: 700;
-    color: #efefef;
     letter-spacing: 0.005em;
     white-space: nowrap;
     line-height: 1;
-    transform-style: preserve-3d;
   }
 
   .tag {
     font-family: 'DIN Condensed', 'Avenir Next Condensed', 'Helvetica Neue', sans-serif;
     font-weight: 700;
-    color: #efefef;
     text-align: center;
     letter-spacing: 0.14em;
     line-height: 1.15;
@@ -51,49 +39,26 @@
   .maker {
     font-family: 'DIN Condensed', 'Avenir Next Condensed', 'Helvetica Neue', sans-serif;
     font-weight: 700;
-    /* The project's own accent token, which lands within a few points of the SNK blue. */
     color: #1069da;
     letter-spacing: 0.1em;
     white-space: nowrap;
   }
 
-  /* A CRT is part of the aesthetic: the reference is a capture off a real cabinet, so it carries
-     scanlines and a little bloom. Kept faint — enough to read as arcade, not as a filter. */
-  /* The silver frame. The reference passes through a full-screen metallic wash at the moment the
-     mark is edge-on — brightening the glyphs alone reads as nothing, because they are already
-     white. */
-  .flash {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0;
-    background: linear-gradient(
-      to bottom,
-      #6b7076 0%,
-      #c9ced4 34%,
-      #f2f4f6 50%,
-      #a8aeb5 66%,
-      #5c6167 100%
-    );
-    mix-blend-mode: screen;
-  }
+  /* Scanlines only, and no vignette.
+     A vignette seemed like the obvious CRT touch and it is wrong here: it darkens the corners, so
+     the frame at the crossing is no longer one flat tone and the mirrored mark stays faintly
+     legible right through the moment that is supposed to hide it. Measured against the reference
+     at the same instant, the reference is flat and this was not. Tied to darkness so the white
+     opening carries none, as the reference's does not. */
   .scan {
     position: absolute;
     inset: 0;
     pointer-events: none;
     background: repeating-linear-gradient(
       to bottom,
-      rgba(0, 0, 0, 0) 0px,
-      rgba(0, 0, 0, 0) 2px,
-      rgba(0, 0, 0, 0.11) 3px,
-      rgba(0, 0, 0, 0.11) 4px
+      rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.13) 3px, rgba(0,0,0,0.13) 4px
     );
-  }
-  .vignette {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
   }
 </style>
 
@@ -102,39 +67,28 @@
   <div class="tag" id="tag1">MAX 46 MEGA</div>
   <div class="tag" id="tag2">NO&#8211;YAML SPEC</div>
   <div class="maker" id="maker">SELF&middot;HOSTED</div>
-  <div class="flash" id="flash"></div>
-  <div class="scan"></div>
-  <div class="vignette"></div>
+  <div class="scan" id="scan"></div>
 </div>
 
 <script>
   const P = new URLSearchParams(location.search)
   const W = 640
-  if (P.get('mark')) document.getElementById('mark').innerHTML = P.get('mark')
-  if (P.get('t1')) document.getElementById('tag1').innerHTML = P.get('t1')
-  if (P.get('t2')) document.getElementById('tag2').innerHTML = P.get('t2')
-  if (P.get('maker')) document.getElementById('maker').innerHTML = P.get('maker')
-
-  const mark = document.getElementById('mark')
-  const tag1 = document.getElementById('tag1')
-  const tag2 = document.getElementById('tag2')
-  const maker = document.getElementById('maker')
-
-  /* Fit the wordmark to the canvas once, rather than guessing a size. NEO·HOMEPAGE is nearly
-     twice the character count of NEO·GEO, so a fixed size that suits one ruins the other. */
-  function fitMark() {
-    let size = 96
-    mark.style.fontSize = size + 'px'
-    while (mark.getBoundingClientRect().width > W - 72 && size > 20) {
-      size -= 1
-      mark.style.fontSize = size + 'px'
-    }
-    return size
+  const $ = (id) => document.getElementById(id)
+  for (const [key, el] of [['mark','mark'],['t1','tag1'],['t2','tag2'],['maker','maker']]) {
+    if (P.get(key)) $(el).innerHTML = P.get(key)
   }
-  const markSize = fitMark()
-  // From the canvas, not the wordmark. Tying it to the mark meant a longer name shrank the mark,
-  // which shrank the tagline with it — and NEO·HOMEPAGE is nearly twice NEO·GEO's length, so the
-  // tagline came out almost unreadable while the reference's is comfortably legible.
+
+  const stage = $('stage'), mark = $('mark'), tag1 = $('tag1'), tag2 = $('tag2')
+  const maker = $('maker'), scan = $('scan')
+
+  /* Fit the wordmark once. NEO·HOMEPAGE is nearly twice NEO·GEO's character count, so a size that
+     suits one overflows or under-fills the other. */
+  mark.style.color = '#000'
+  let size = 96
+  mark.style.fontSize = size + 'px'
+  while (mark.getBoundingClientRect().width > W - 72 && size > 20) {
+    mark.style.fontSize = --size + 'px'
+  }
   const tagSize = Math.round(W * 0.038)
   tag1.style.fontSize = tagSize + 'px'
   tag2.style.fontSize = tagSize + 'px'
@@ -142,51 +96,63 @@
   tag1.style.marginTop = Math.round(W * 0.055) + 'px'
   maker.style.marginTop = Math.round(W * 0.045) + 'px'
 
-  const ease = (x) => 1 - Math.pow(1 - x, 3)
   const clamp01 = (x) => Math.min(1, Math.max(0, x))
-  // A window of time mapped to 0..1.
   const span = (t, from, to) => clamp01((t - from) / (to - from))
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3)
+  const grey = (v) => `rgb(${v},${v},${v})`
+
+  const ZOOM_END = 1.55
+  const CROSS_END = 2.45
+  const DURATION = 7.5
 
   /**
-   * The whole animation as a pure function of time.
+   * The whole sequence as a pure function of time.
    *
-   * Driven by an explicit clock rather than CSS animations, because the capture takes one
-   * screenshot per frame and a CSS timeline advances by wall-clock between them — which produces
-   * uneven spacing and a loop that visibly stutters at the seam.
+   * The transition at its centre is the thing worth getting right, and it is not a flip. The
+   * screen opens WHITE with the wordmark in BLACK and mirrored, growing. Then the background
+   * ramps white to black while the mark ramps black to white — two opposite ramps that cross at
+   * mid-grey, where the frame is briefly one flat tone and nothing is visible at all. The
+   * mirroring resolves inside that blind moment, so the mark simply is the right way round when
+   * it comes back out.
+   *
+   * The first attempt at this read the crossing as a specular flash and did a 3D rotation through
+   * it. Extracting the reference frame by frame is what showed it: at the midpoint the image's
+   * min/max collapses to 138/255 — the black text rising to meet a darkening ground, not a
+   * highlight passing over it.
+   *
+   * Driven by an explicit clock rather than CSS animation, because the renderer takes one
+   * screenshot per frame and a CSS timeline advances by wall clock between them, which under
+   * headless capture spaces the frames unevenly and shows at the loop seam.
    */
   window.renderAt = function (t) {
-    const DUR = 7.0
+    // Two opposite ramps. Before the crossing: white ground, black mark. After: the reverse.
+    const cross = span(t, ZOOM_END, CROSS_END)
+    const ground = Math.round(255 * (1 - cross))
+    const ink = Math.round(255 * cross)
 
-    // 0.00-0.95  the mark spins in from mirrored, growing, with a metallic flash at the halfway
-    //            point — the reference does exactly this, passing through a silver frame.
-    const spin = ease(span(t, 0.0, 0.95))
-    const angle = 180 * (1 - spin)
-    const scale = 0.55 + 0.45 * spin
-    mark.style.transform = `rotateY(${angle}deg) scale(${scale})`
+    stage.style.background = grey(ground)
+    mark.style.color = grey(ink)
+    tag1.style.color = grey(ink)
+    tag2.style.color = grey(ink)
 
-    // Edge-on is where the flash lives: |cos(angle)| goes to zero exactly as the mark turns
-    // through 90 degrees, so this peaks once, on the way round, and is gone by the time it faces
-    // front. Squared, so it is a strike rather than a swell.
-    const edgeOn = 1 - Math.abs(Math.cos((angle * Math.PI) / 180))
-    const silver = t < 0.95 ? Math.pow(edgeOn, 2.2) : 0
-    document.getElementById('flash').style.opacity = String(silver * 0.85)
-    mark.style.filter = `brightness(${1 + silver * 0.5})`
-    mark.style.opacity = String(clamp01(span(t, 0.0, 0.18)))
+    // Mirrored until the ramps cross, correct after. The swap happens on the frame where ground
+    // and ink are the same value, so there is nothing on screen to see it happen.
+    const mirrored = cross < 0.5
+    // Growing from almost nothing, and it keeps the size it reaches.
+    const zoom = 0.07 + 0.93 * easeOut(span(t, 0.0, ZOOM_END))
+    mark.style.transform = `scaleX(${mirrored ? -zoom : zoom}) scaleY(${zoom})`
 
-    // 1.15-2.25  first tagline line wipes in from the left
-    // 2.10-3.20  second line follows, overlapping slightly so it reads as one gesture
-    const w1 = ease(span(t, 1.15, 2.25))
-    const w2 = ease(span(t, 2.1, 3.2))
-    tag1.style.clipPath = `inset(0 ${100 - w1 * 100}% 0 0)`
-    tag2.style.clipPath = `inset(0 ${100 - w2 * 100}% 0 0)`
+    // Scanlines belong to the dark field; on the white opening the reference shows none.
+    scan.style.opacity = String(1 - ground / 255)
 
-    // 3.35-4.05  the maker mark fades up
-    maker.style.opacity = String(ease(span(t, 3.35, 4.05)))
+    // The spec lines wipe in from the left, the second overlapping the first so the pair reads as
+    // one gesture rather than two events.
+    tag1.style.clipPath = `inset(0 ${100 - easeOut(span(t, 2.6, 3.6)) * 100}% 0 0)`
+    tag2.style.clipPath = `inset(0 ${100 - easeOut(span(t, 3.45, 4.45)) * 100}% 0 0)`
+    maker.style.opacity = String(easeOut(span(t, 4.6, 5.2)))
 
-    // 6.55-7.00  fade to black so the loop closes on itself instead of cutting
-    const out = 1 - span(t, DUR - 0.45, DUR)
-    document.getElementById('stage').style.opacity = String(out)
-    return DUR
+    // Fade to black at the end so the loop closes on itself instead of cutting.
+    stage.style.opacity = String(1 - span(t, DURATION - 0.4, DURATION))
   }
   window.renderAt(0)
 </script>
