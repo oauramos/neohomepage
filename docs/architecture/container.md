@@ -54,6 +54,41 @@ light on a broken dashboard.
 **No shell in front of the entrypoint**, so the server is PID 1 and receives `SIGTERM` directly. A
 container that misses it gets `SIGKILL`ed mid-write.
 
+## Measured
+
+On linux/arm64, which is the target this project exists for:
+
+| | |
+| --- | --- |
+| Compressed image | 61.4 MB (ceiling 90) |
+| Production packages | 31 |
+| `node_modules` | 33 MB |
+| Resident memory, idle | 46 MB of a 320 MB limit |
+| Stop on `SIGTERM` | 1 s, exit 0 |
+
+## Three things only building it found
+
+Every one of these would have shipped, and none of them is visible from reading the source.
+
+**A bind-mounted `/data` was not writable.** The image ran as `node` (uid 1000) and the container
+died on first boot with `EACCES: permission denied, mkdir '/data/config'`. A *named* volume
+inherits the ownership of the image's empty `/data` and works; a *bind* mount carries the host
+directory's ownership, which no build-time `chown` can reach. Bind mounts are not an edge case
+here — the whole backup story is "git init your data directory", which means a real path on the
+host. The entrypoint fixes ownership once and then `exec`s to an unprivileged user, and it needs
+exactly three capabilities to do it: `CHOWN` to take ownership, `SETUID` and `SETGID` to give it
+up again.
+
+**`pnpm install --prod` did not prune anything.** Run over a completed full install it rewrites
+the top-level links and leaves `node_modules/.pnpm` alone, so the production image contained
+TypeScript, Playwright, Prettier, esbuild and Shiki: 310 packages where there should be 31, and
+115 MB compressed against a 90 MB ceiling. The production install now starts from an empty tree.
+
+**`pnpm deploy` produced an image that could not start at all.** It flattens the workspace, which
+copies `@neohomepage/catalog-schema` into `node_modules` — and Node refuses to strip types from a
+file whose real path is inside `node_modules`. `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`, on
+boot, in the container only, never in development.
+
 ## What CI checks before publishing
 
 The image is built for the runner's own architecture first and actually run: it must serve a

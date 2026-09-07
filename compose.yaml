@@ -53,7 +53,7 @@ services:
     # Two vCPUs is the target box. This is a ceiling, not a reservation.
     cpus: 2.0
 
-    # Nothing in this image needs to write outside /data, escalate, or keep a capability.
+    # Nothing in this image writes outside /data or escalates.
     read_only: true
     tmpfs:
       - /tmp:size=16m
@@ -61,6 +61,20 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Three capabilities, each for one job, all of them used once at startup and then gone.
+    #
+    # `./data` above is a BIND mount, and a bind mount carries the ownership of the host directory
+    # — which is whoever ran `mkdir`, or root if Docker created it. No chown at image build time
+    # can reach that, so the entrypoint fixes it on first boot and drops to an unprivileged user.
+    # CHOWN to take ownership, SETUID and SETGID to give it up again.
+    #
+    # If you would rather have no root in the picture at all: create the directory yourself with
+    # `mkdir -p data && sudo chown -R 1000:1000 data`, then remove this whole `cap_add` block and
+    # add `user: "1000:1000"`. The entrypoint detects that and does nothing but start the server.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
 
     healthcheck:
       test:

@@ -22,20 +22,27 @@ ARG NODE_IMAGE=node:24-alpine3.24
 ARG PNPM_VERSION=12.3.4
 
 # ---------------------------------------------------------------------------------------------
-# deps — every dependency, for building the browser bundle.
+# base — pnpm and the manifests. Shared, so the two installs below do not each copy them.
 # ---------------------------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS deps
+FROM ${NODE_IMAGE} AS base
 ARG PNPM_VERSION
 RUN npm install -g pnpm@${PNPM_VERSION}
 WORKDIR /src
+ENV PNPM_HOME=/pnpm
 
-# Manifests first, so a source-only change reuses the install layer.
+# Manifests only, so a source-only change reuses every install layer below.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/app/package.json packages/app/
 COPY packages/catalog-schema/package.json packages/catalog-schema/
+
+# ---------------------------------------------------------------------------------------------
+# deps — every dependency, for building the browser bundle.
+#
 # `--ignore-scripts`: nothing this image builds needs a lifecycle script. The workspace allows
-# exactly one (esbuild, for the Vite 5 bundled inside VitePress, which builds the docs site and not
-# this), so skipping them is both faster and one fewer way for a dependency to run code at build.
+# exactly one (esbuild, for the Vite 5 inside VitePress, which builds the docs site and not this),
+# so skipping them is faster and one fewer way for a dependency to run code at build time.
+# ---------------------------------------------------------------------------------------------
+FROM base AS deps
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store && \
     pnpm install --frozen-lockfile --ignore-scripts
@@ -48,24 +55,35 @@ COPY . .
 RUN pnpm --filter @neohomepage/app build
 
 # ---------------------------------------------------------------------------------------------
-# prod-deps — the same workspace, with development dependencies removed.
+# prod-deps — production dependencies, installed into an EMPTY tree.
 #
-# Deliberately NOT `pnpm deploy`, which flattens the workspace into one directory. Flattening
+# `FROM base`, emphatically not `FROM deps`. Running `pnpm install --prod` over a completed full
+# install does not prune `node_modules/.pnpm`; it only rewrites the top-level links. The first
+# version of this file did exactly that and shipped TypeScript, Playwright, Prettier, esbuild and
+# Shiki inside the production image — 310 packages where there should be 30, and 115 MB
+# compressed against a 90 MB ceiling. Nothing but building the image would have found it.
+#
+# Also deliberately not `pnpm deploy`, which flattens the workspace into one directory. Flattening
 # COPIES @neohomepage/catalog-schema into node_modules, and Node refuses to strip types from a
-# file whose real path is inside node_modules — the container built that way starts and
-# immediately dies with ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. In the workspace layout the
-# package is a symlink, Node resolves the real path outside node_modules, and stripping is
-# allowed. Which is to say: the image runs the sources the same way a developer does, and that is
-# what "no code change was needed to containerise" is supposed to mean.
+# file whose real path is inside node_modules — a container built that way starts and immediately
+# dies with ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. In the workspace layout the package is a
+# symlink, Node resolves the real path outside node_modules, and stripping is allowed. Which is to
+# say: the image runs the sources the same way a developer does, and that is what "no code change
+# was needed to containerise" is supposed to mean.
 # ---------------------------------------------------------------------------------------------
-FROM deps AS prod-deps
+FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
+    pnpm config set store-dir /pnpm-store && \
     pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # ---------------------------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
+
+# su-exec is 20 KB and is the whole reason this image can both fix a bind mount's ownership and
+# still run the server unprivileged.
+RUN apk add --no-cache su-exec
 
 LABEL org.opencontainers.image.title="neohomepage" \
       org.opencontainers.image.description="A self-hosted homepage dashboard you edit in the browser, not in YAML" \
@@ -110,10 +128,16 @@ COPY --from=build --chown=node:node /src/packages/catalog-schema/src ./packages/
 COPY --from=build --chown=node:node /src/packages/app/dist ./packages/app/dist
 COPY --from=build --chown=node:node /src/catalog ./catalog
 
-# A volume mounted over an empty directory inherits that directory's ownership, so getting this
-# wrong presents as "permission denied on first boot" for everyone using a named volume.
-RUN mkdir -p /data && chown node:node /data
-USER node
+COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+# A NAMED volume inherits the ownership of this directory, so setting it here is what makes that
+# case work with no entrypoint logic at all. A BIND mount carries the host's ownership instead,
+# which no build-time chown can reach — the entrypoint handles that one, and explains itself.
+RUN mkdir -p /data && chown node:node /data && chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
+# Deliberately NOT `USER node`. The entrypoint starts as root only long enough to make a
+# bind-mounted /data writable, then `exec`s to an unprivileged user — so the server still runs as
+# uid 1000 and is still PID 1. Running the image with `--user` skips that entirely.
 VOLUME ["/data"]
 EXPOSE 7575
 
@@ -123,6 +147,7 @@ EXPOSE 7575
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.NEOHOMEPAGE_PORT||7575)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# No shell in front of it, so the process is PID 1 and receives SIGTERM directly — the server
-# handles it, and a container that misses it gets SIGKILLed mid-write.
-ENTRYPOINT ["node", "packages/app/src/server/main.ts"]
+# The entrypoint `exec`s, so the shell replaces itself and the server is PID 1 receiving SIGTERM
+# directly — a container that misses it gets SIGKILLed mid-write.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["node", "packages/app/src/server/main.ts"]
