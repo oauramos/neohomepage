@@ -1,0 +1,35 @@
+@import 'tailwindcss';
+
+/*
+ * Runtime theming contract: every colour the app paints is a CSS custom property on :root, so a
+ * theme the user picks in the FAB modal is a property write, never a rebuild. The full token set
+ * (and its baked-into-the-generation twin) lands in F8.
+ */
+:root {
+  --nh-background: oklch(0.985 0 0);
+  --nh-foreground: oklch(0.21 0.006 285);
+}
+
+:root:not([data-theme='light']) {
+  @media (prefers-color-scheme: dark) {
+    --nh-background: oklch(0.16 0.004 285);
+    --nh-foreground: oklch(0.96 0.001 286);
+  }
+}
+
+:root[data-theme='dark'] {
+  --nh-background: oklch(0.16 0.004 285);
+  --nh-foreground: oklch(0.96 0.001 286);
+}
+
+body {
+  margin: 0;
+  background: var(--nh-background);
+  color: var(--nh-foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}

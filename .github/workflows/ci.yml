@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Never `corepack enable`: corepack is not distributed with Node >= 25, so that line becomes
+      # a time bomb the day the base image moves. pnpm/action-setup reads packageManager instead.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm docs:build
+
+  boundary:
+    # The client/server boundary is load-bearing: src/web is bundled for the browser. Prove the
+    # lint rule actually fails rather than trusting that it is configured.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: A node: import in src/web must fail lint
+        run: |
+          echo "import { readFileSync } from 'node:fs'" > packages/app/src/web/__boundary_probe.ts
+          echo "export const probe = readFileSync" >> packages/app/src/web/__boundary_probe.ts
+          if pnpm exec eslint packages/app/src/web/__boundary_probe.ts; then
+            echo "::error::the client/server boundary rule did not fire"
+            exit 1
+          fi
+          rm packages/app/src/web/__boundary_probe.ts

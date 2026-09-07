@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+
+# react-grid-layout depends on react-draggable ^4.4.6, and 4.6.0 crashes on import under Vite
+# (unguarded `process` access in its debug logger, fixed in 4.7.1). A stale lockfile could
+# otherwise resolve to it and all dragging would break with no change on our side.
+overrides:
+  react-draggable: '>=4.7.1'
+
+# pnpm 12 blocks lifecycle scripts by default. esbuild's postinstall fetches its platform binary;
+# vitepress still bundles Vite 5, which needs it. Every entry here is a deliberate decision.
+allowBuilds:
+  esbuild: true

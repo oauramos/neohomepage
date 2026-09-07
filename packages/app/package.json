@@ -1,0 +1,39 @@
+{
+  "name": "@neohomepage/app",
+  "version": "0.0.1",
+  "description": "Self-hosted, UI-editable homepage dashboard",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "neo": "./src/cli/neo.ts"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.ts",
+    "dev:server": "node --watch --watch-preserve-output src/server/main.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node src/server/main.ts",
+    "neo": "node src/cli/neo.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@neohomepage/catalog-schema": "workspace:*",
+    "hono": "^4.13.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

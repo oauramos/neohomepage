@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# neohomepage
+data/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+.playwright-mcp/

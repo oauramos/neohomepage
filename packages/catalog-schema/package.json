@@ -1,0 +1,27 @@
+{
+  "name": "@neohomepage/catalog-schema",
+  "version": "0.0.1",
+  "description": "Widget manifest schema, projection DSL evaluator and capability deriver for neohomepage",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "^5.0.0"
+  }
+}
