@@ -165,6 +165,43 @@ const GalleryCard = memo(function GalleryCard({
   )
 })
 
+/**
+ * The board's width cap, drawn rather than named.
+ *
+ * A dropdown hides four options behind a click and asks you to translate "Comfortable" into a
+ * picture of a page. The thing being chosen IS a picture — how much margin the board leaves — so
+ * the control shows it: an outer frame for the viewport and an inner block for the board, with the
+ * margin closing as the cap widens. `inset` is that margin in viewBox units, which is what makes
+ * the four icons a scale instead of four unrelated glyphs.
+ */
+const WIDTHS: { id: string; label: string; value: string; inset: number }[] = [
+  { id: 'narrow', label: 'Narrow', value: '1200px', inset: 6 },
+  { id: 'comfortable', label: 'Comfortable', value: '1600px', inset: 4 },
+  { id: 'wide', label: 'Wide', value: '2000px', inset: 2 },
+  { id: 'full', label: 'Full bleed', value: 'none', inset: 0 },
+]
+
+function WidthIcon({ inset }: { inset: number }) {
+  return (
+    <svg viewBox="0 0 24 18" width="26" height="20" aria-hidden="true" focusable="false">
+      <rect
+        x="0.75"
+        y="0.75"
+        width="22.5"
+        height="16.5"
+        rx="2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        opacity="0.45"
+      />
+      {/* Two stacked bars read as content rather than as a second frame. */}
+      <rect x={2 + inset} y="4" width={20 - inset * 2} height="4" rx="1" fill="currentColor" />
+      <rect x={2 + inset} y="10" width={20 - inset * 2} height="4" rx="1" fill="currentColor" />
+    </svg>
+  )
+}
+
 function Ratio({ value, floor, label }: { value: number | null; floor: number; label: string }) {
   const ok = value !== null && value >= floor
   return (
@@ -692,15 +729,21 @@ export function DesignPanel({
           </label>
           <label className="nh-field">
             <span>Board width</span>
-            <select
-              value={tokens['max-width'] ?? '1600px'}
-              onChange={(event) => setShape('max-width', event.target.value)}
-            >
-              <option value="1200px">Narrow</option>
-              <option value="1600px">Comfortable</option>
-              <option value="2000px">Wide</option>
-              <option value="none">Full bleed</option>
-            </select>
+            <div className="nh-widths" role="group" aria-label="Board width">
+              {WIDTHS.map((width) => (
+                <button
+                  key={width.id}
+                  type="button"
+                  className="nh-width"
+                  aria-pressed={(tokens['max-width'] ?? '1600px') === width.value}
+                  title={width.label}
+                  onClick={() => setShape('max-width', width.value)}
+                >
+                  <WidthIcon inset={width.inset} />
+                  <span className="nh-sr-only">{width.label}</span>
+                </button>
+              ))}
+            </div>
           </label>
           <button
             type="button"

@@ -322,3 +322,37 @@ test('custom values are counted and clearable', async ({ page }) => {
     )
     .toBe(0)
 })
+
+test('board width is a scale of icons, and exactly one is on', async ({ page }) => {
+  // It used to be a dropdown, which hid four options behind a click and asked the reader to
+  // translate "Comfortable" into a picture of a page. The thing being chosen is a picture.
+  await clearTheme(page)
+  await page.goto(`${harness.baseURL}/`)
+  await page.locator('button.nh-fab-design').click()
+  await page.getByRole('button', { name: 'Shape', exact: true }).click()
+
+  const widths = page.locator('.nh-width')
+  await expect(widths).toHaveCount(4)
+  await expect(page.locator('.nh-width[aria-pressed="true"]')).toHaveCount(1)
+
+  for (const [label, expected] of [
+    ['Narrow', '1200px'],
+    ['Full bleed', 'none'],
+    ['Wide', '2000px'],
+  ] as const) {
+    await page.locator(`.nh-width[title="${label}"]`).click()
+    await expect(page.locator(`.nh-width[title="${label}"]`)).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    // Never two: the pressed state IS the answer to "which one am I on".
+    await expect(page.locator('.nh-width[aria-pressed="true"]')).toHaveCount(1)
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          getComputedStyle(document.documentElement).getPropertyValue('--nh-max-width').trim(),
+        ),
+      )
+      .toBe(expected)
+  }
+})
