@@ -144,6 +144,16 @@ pnpm docs:dev        # the documentation site
 be reachable there first — that is what keeps each phase testable without a browser. `neo doctor`
 explains anything wrong with an install and exits non-zero when it matters.
 
+## The wiki
+
+The [wiki](https://github.com/oauramos/neohomepage/wiki) is the operational half: symptoms and
+their causes, where each service hides its API key, and the platform-specific things — NAS file
+ownership, why `free -h` lies inside an LXC. Its pages live in [`wiki/`](wiki/) and are published
+with `pnpm wiki:publish`, so a correction goes through review and cannot be lost with the wiki.
+
+The [documentation site](https://oauramos.github.io/neohomepage/) is the reference half: install,
+every widget, and why the thing is shaped this way. Two places, two jobs, and no paragraph in both.
+
 ## Contributing a widget
 
 Three files and no code:
