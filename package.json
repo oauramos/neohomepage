@@ -24,11 +24,13 @@
     "e2e": "pnpm --filter @neohomepage/app e2e",
     "budgets": "pnpm --filter @neohomepage/app budgets",
     "drill": "pnpm --filter @neohomepage/app drill",
-    "wiki:publish": "sh scripts/publish-wiki.sh"
+    "wiki:publish": "sh scripts/publish-wiki.sh",
+    "boot:render": "node scripts/boot-animation/render.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.10.0",
+    "playwright": "1.63.0",
     "prettier": "^3.9.6",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.69.0",

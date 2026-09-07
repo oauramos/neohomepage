@@ -26,3 +26,7 @@ packages/app/e2e
 .env.*
 *.pem
 *.key
+
+# Not needed to build or run the image.
+media
+scripts/boot-animation

@@ -150,3 +150,6 @@ docs/.vitepress/dist/
 catalog-dist/
 packages/app/test-results/
 packages/app/playwright-report/
+
+# Rendered animation frames — the GIF and MP4 beside them are committed, these are not.
+media/.frames/

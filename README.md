@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="media/boot.gif" alt="NEO·HOMEPAGE — MAX 46 MEGA, NO-YAML SPEC" width="480">
+
 # neohomepage
 
 **A self-hosted start page for your homelab that you configure in the browser — not by editing YAML and restarting a container.**
