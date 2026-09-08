@@ -450,8 +450,15 @@ async function runMcp(argv: readonly string[]): Promise<number> {
   const { buildDashboardServer, TOOL_NAMES } = await import('../server/mcp/server.ts')
   const { resolve: resolvePath } = await import('node:path')
 
+  // `NEOHOMEPAGE_PUBLISH_MODE` is read here as well as in `main.ts`, and it has to be: this is a
+  // SECOND process holding its own store and its own publish mutex, so an install that turned
+  // auto-publish off to keep one process in charge of the generation directory was still getting
+  // a render — and a generation number — from whichever of the two got there first.
   const context = await createContext({
     catalogDir: process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
+    ...(process.env.NEOHOMEPAGE_PUBLISH_MODE === 'manual'
+      ? { publishMode: 'manual' as const }
+      : {}),
   })
   await context.reload()
   if (argv.includes('--print-tools')) {

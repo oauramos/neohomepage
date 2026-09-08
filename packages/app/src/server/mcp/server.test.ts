@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { InMemoryTransport } from '@modelcontextprotocol/server'
@@ -76,16 +76,28 @@ describe('the tool surface', () => {
       'add_target',
       'add_widget',
       'describe_dashboard',
+      'describe_theme',
       'get_widget_schema',
       'list_targets',
       'list_widgets',
       'publish',
       'remove_widget',
       'search_catalog',
+      'search_presets',
       'set_layout',
+      'set_theme',
       'test_target',
       'update_widget',
     ])
+  })
+
+  it('exports that same list, so --print-tools cannot go stale', async () => {
+    // `TOOL_NAMES` is what `neo mcp --print-tools` reports and what the docs are written from,
+    // and nothing connected it to the tools actually registered: adding one and forgetting the
+    // array left the CLI confidently naming a surface that was three tools short.
+    const { TOOL_NAMES } = await import('./server.ts')
+    const { tools } = await client.listTools()
+    expect([...TOOL_NAMES].sort()).toEqual(tools.map((tool) => tool.name).sort())
   })
 
   it('gives every tool an OBJECT input schema with no root-level combinator', async () => {
@@ -308,5 +320,367 @@ describe('composite widget types', () => {
     const listed = await callJson('list_widgets')
     const widgets = (listed as { value: { widgets: { id: string; type: string }[] } }).value.widgets
     expect(widgets.find((one) => one.id === widgetId)?.type).toBe('unified-calendar')
+  })
+})
+
+/**
+ * The design surface.
+ *
+ * These tools exist so "make it look like that site" is a thing an agent can do, which means a
+ * palette now arrives from outside the repository for the first time. Most of what follows is
+ * about that: what happens to a colour on the way in, what happens when the colours a brand
+ * publishes cannot be read on a dashboard, and what the tool says it did.
+ */
+
+const themeFile = async () =>
+  JSON.parse(
+    await readFile(
+      join(process.env.NEOHOMEPAGE_DATA_DIR as string, 'config', 'theme.json'),
+      'utf8',
+    ),
+  ) as {
+    mode?: string
+    preset?: string
+    cssVars?: {
+      theme?: Record<string, string>
+      light?: Record<string, string>
+      dark?: Record<string, string>
+    }
+    surface?: { background?: string | null; blur?: number; overlayOpacity?: number }
+  }
+
+/** The colours Apple publishes, which is the request this whole surface was built for. */
+const APPLE_LIGHT = {
+  background: '#ffffff',
+  foreground: '#1d1d1f',
+  surface: '#ffffff',
+  'surface-foreground': '#1d1d1f',
+  muted: '#f5f5f7',
+  'muted-foreground': '#86868b',
+  accent: '#0071e3',
+  'accent-foreground': '#ffffff',
+}
+
+describe('reading the look', () => {
+  it('describes a stock board without inventing a scheme it cannot know', async () => {
+    const result = await callJson('describe_theme')
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect(result.value.mode).toBe('system')
+    // Under "system" the page carries both palettes and the viewer's OS chooses. A server that
+    // reported one "effective scheme" would be guessing, and an agent would then write into it.
+    expect(result.value.modeNote).toMatch(/both palettes/)
+    expect((result.value.palette as Record<string, Record<string, string>>).light?.accent).toMatch(
+      /^#[0-9a-f]{6}$/,
+    )
+    expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
+    expect((result.value.contrast as Record<string, { passes: boolean }>).dark?.passes).toBe(true)
+    // The labels are what stop an agent putting a brand's page grey on `muted`, which is an inset.
+    expect(JSON.stringify(result.value.colorTokens)).toMatch(/muted — Inset/)
+  })
+
+  it('searches seventy-five presets by name and by finish', async () => {
+    const all = await callJson('search_presets')
+    expect(all.isError === false && all.value.total).toBe(75)
+    const soft = await callJson('search_presets', { finish: 'soft', limit: 5 })
+    expect(soft.isError).toBe(false)
+    if (soft.isError) return
+    const matches = soft.value.matches as { id: string; swatch: Record<string, string> }[]
+    expect(matches).toHaveLength(5)
+    expect(matches.every((preset) => preset.id.endsWith('-soft'))).toBe(true)
+    expect(matches[0]?.swatch.accent).toMatch(/^#[0-9a-f]{6}$/)
+  })
+})
+
+describe('changing the look', () => {
+  it('stores a hex colour as OKLCH, in the scheme it was given for', async () => {
+    const result = await callJson('set_theme', { colors: { light: { accent: '#0071e3' } } })
+    expect(result.isError).toBe(false)
+
+    const theme = await themeFile()
+    // Hex would make every ratio in the panel and in the contrast suite come back null, so the
+    // conversion happens on the way in and the file only ever holds the checkable form.
+    expect(theme.cssVars?.light?.accent).toMatch(/^oklch\(/)
+    expect(JSON.stringify(theme)).not.toContain('#0071e3')
+    expect(theme.cssVars?.dark?.accent).toBeUndefined()
+  })
+
+  it('sets both palettes in one transaction, because the OS picks one', async () => {
+    const result = await callJson('set_theme', {
+      mode: 'system',
+      colors: { light: APPLE_LIGHT, dark: { accent: '#2997ff', background: '#000000' } },
+    })
+    expect(result.isError).toBe(false)
+    const theme = await themeFile()
+    expect(Object.keys(theme.cssVars?.light ?? {}).length).toBeGreaterThan(5)
+    expect(theme.cssVars?.dark?.accent).toMatch(/^oklch\(/)
+  })
+
+  it('keeps a brand palette readable and says which colours it moved', async () => {
+    const result = await callJson('set_theme', { colors: { light: APPLE_LIGHT } })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+
+    const adjusted = result.value.adjusted as {
+      token: string
+      from: string
+      to: string
+      why: string
+    }[]
+    // `#86868b` on `#f5f5f7` is 3.1:1. A brand picks it for a wordmark, not for a 4.5:1 floor on
+    // an inset grey, so the label darkens — and the report says by how much and why.
+    expect(adjusted.map((entry) => entry.token)).toContain('muted-foreground')
+    expect(adjusted.every((entry) => /:1, below/.test(entry.why))).toBe(true)
+    expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
+  })
+
+  it('writes the palette untouched when told not to fit it', async () => {
+    const result = await callJson('set_theme', { colors: { light: APPLE_LIGHT }, fit: 'off' })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect(result.value.adjusted).toEqual([])
+    // The verdict is still reported. "Off" means it does not repair, not that it stops looking.
+    expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(false)
+  })
+
+  it('refuses an unreadable palette outright when asked to', async () => {
+    const result = await callJson('set_theme', {
+      colors: { light: { ...APPLE_LIGHT, foreground: '#eeeeee' } },
+      fit: 'refuse',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.isError === true && result.text).toMatch(/does not read/)
+    const theme = await themeFile()
+    expect(theme.cssVars?.light?.foreground).toBeUndefined()
+  })
+
+  it('previews without writing anything', async () => {
+    const before = await themeFile()
+    const result = await callJson('set_theme', {
+      preset: 'nord',
+      colors: { light: APPLE_LIGHT },
+      dryRun: true,
+    })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect(result.value.dryRun).toBe(true)
+    expect(result.value.revision).toBeUndefined()
+    // Same code path as the write, so what it shows is what a write would do — and nothing landed.
+    expect(result.value.preset).toBe('nord')
+    expect(await themeFile()).toEqual(before)
+  })
+
+  it('unpins a colour from the shared bucket so the write is visible', async () => {
+    // `cssVars.theme` resolves LAST, above both schemes. A colour pinned there — which the theme
+    // import box can do — made every later colour write a silent no-op: the caller asked for blue,
+    // the board stayed red, and the tool reported success.
+    await callJson('set_theme', { colors: { light: { accent: '#ff0000' } } })
+    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
+    const path = join(dataDir, 'config', 'theme.json')
+    const pinned = JSON.parse(await readFile(path, 'utf8')) as Record<string, never>
+    const shared = {
+      ...pinned,
+      cssVars: { theme: { accent: 'oklch(0.5 0.2 27)' }, light: {}, dark: {} },
+    }
+    await writeFile(path, JSON.stringify(shared, null, 2))
+    await context.reload()
+
+    const result = await callJson('set_theme', { colors: { light: { accent: '#0071e3' } } })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect(result.value.applied).toMatchObject({ unpinned: ['accent'] })
+    const theme = await themeFile()
+    expect(theme.cssVars?.theme?.accent).toBeUndefined()
+  })
+
+  it('puts one token back without touching the others', async () => {
+    await callJson('set_theme', { colors: { light: { accent: '#0071e3', ok: '#00aa55' } } })
+    await callJson('set_theme', { colors: { light: { accent: null } } })
+    const theme = await themeFile()
+    expect(theme.cssVars?.light?.accent).toBeUndefined()
+    expect(theme.cssVars?.light?.ok).toMatch(/^oklch\(/)
+  })
+
+  it('resets a whole section, and never the preset or the mode', async () => {
+    await callJson('set_theme', {
+      preset: 'nord',
+      mode: 'dark',
+      colors: { dark: { accent: '#0071e3' } },
+      shape: { radius: 4 },
+    })
+    const result = await callJson('set_theme', { reset: ['colors'] })
+    expect(result.isError).toBe(false)
+    const theme = await themeFile()
+    expect(theme.cssVars?.dark?.accent).toBeUndefined()
+    expect(theme.cssVars?.theme?.radius).toBe('4px')
+    expect(theme.preset).toBe('nord')
+    expect(theme.mode).toBe('dark')
+  })
+
+  it('applies shape and type as the panel does, tracking the control radius', async () => {
+    await callJson('set_theme', {
+      shape: { radius: 20, borderWidth: 2, boardWidth: 'narrow' },
+      typography: { font: 'serif', titleCase: 'sentence' },
+    })
+    const theme = await themeFile()
+    expect(theme.cssVars?.theme).toMatchObject({
+      radius: '20px',
+      'radius-control': '14px',
+      'border-width': '2px',
+      'max-width': '1200px',
+      'title-transform': 'none',
+      'title-tracking': '0',
+    })
+    expect(theme.cssVars?.theme?.['font-sans']).toContain('ui-serif')
+  })
+
+  it('takes a backdrop by name and the preset brings its own', async () => {
+    await callJson('set_theme', { backdrop: 'aurora', backdropBlur: 8, backdropDim: 0.3 })
+    expect((await themeFile()).surface).toMatchObject({
+      background: 'gradient:aurora',
+      blur: 8,
+      overlayOpacity: 0.3,
+    })
+    // The console presets nominate their own, exactly as picking one in the panel does.
+    await callJson('set_theme', { preset: '32bit' })
+    expect((await themeFile()).surface?.background).toBe('gradient:neogeo-scan')
+  })
+
+  it('refuses a stale baseRevision here too', async () => {
+    const before = await callJson('describe_theme')
+    const stale = before.isError === false ? (before.value.revision as string) : ''
+    await callJson('set_theme', { preset: 'nord' })
+    const conflicted = await callJson('set_theme', { preset: 'terminal', baseRevision: stale })
+    expect(conflicted.isError).toBe(true)
+    expect(conflicted.isError === true && conflicted.text).toMatch(/changed underneath/)
+  })
+})
+
+describe('what a repair may not do', () => {
+  it('does not rewrite colours when the call only reset the shape', async () => {
+    await callJson('set_theme', { colors: { light: { accent: '#0071e3' } } })
+    const before = (await themeFile()).cssVars?.light ?? {}
+    await callJson('set_theme', { reset: ['shape'] })
+    // A request to put the corner radius back should not come out having pinned palette
+    // overrides: the repair pass runs on a colour change, not on any change at all.
+    expect((await themeFile()).cssVars?.light).toEqual(before)
+  })
+
+  it('answers a standalone fit call instead of calling it nothing', async () => {
+    // "Check the palette and repair it" is a request. Answering it with "nothing to change"
+    // made the same call succeed or fail depending on state the caller could not see.
+    const result = await callJson('set_theme', { fit: 'aa' })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
+  })
+
+  it('clears the shared-bucket pin as well, or "back to the preset" is not back', async () => {
+    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
+    const path = join(dataDir, 'config', 'theme.json')
+    await writeFile(
+      path,
+      JSON.stringify({ cssVars: { theme: { accent: 'oklch(0.5 0.2 27)' }, light: {}, dark: {} } }),
+    )
+    await context.reload()
+
+    await callJson('set_theme', { colors: { light: { accent: null } } })
+    const theme = await themeFile()
+    expect(theme.cssVars?.theme?.accent).toBeUndefined()
+  })
+
+  it('unpins what it repairs, or it reports a fix the board never shows', async () => {
+    // The fit is solved from the RESOLVED palette, so a token pinned in the shared bucket is what
+    // it measured. Writing the repair into the scheme bucket and leaving the pin would have
+    // printed a ratio for a colour that never reached the page.
+    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
+    await writeFile(
+      join(dataDir, 'config', 'theme.json'),
+      JSON.stringify({
+        cssVars: { theme: { 'muted-foreground': 'oklch(0.9 0 0)' }, light: {}, dark: {} },
+      }),
+    )
+    await context.reload()
+
+    const result = await callJson('set_theme', { fit: 'aa' })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    expect((result.value.applied as { unpinned?: string[] }).unpinned).toContain('muted-foreground')
+    expect((await themeFile()).cssVars?.theme?.['muted-foreground']).toBeUndefined()
+    expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
+  })
+
+  it('paints a preset that overrides nothing with the colours it actually gets', async () => {
+    // "Default" sets no colour of its own — it IS the defaults — so reading its own maps reported
+    // a palette of five nulls to anyone browsing the presets.
+    const result = await callJson('search_presets', { query: 'default' })
+    expect(result.isError).toBe(false)
+    if (result.isError) return
+    const swatch = (result.value.matches as { swatch: Record<string, string> }[])[0]?.swatch
+    expect(Object.values(swatch ?? {}).every((hex) => /^#[0-9a-f]{6}$/.test(hex))).toBe(true)
+  })
+
+  it('takes an image that exists and stores the path itself', async () => {
+    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
+    const { saveBackground } = await import('../assets/store.ts')
+    // A one-pixel PNG, so the store sniffs a real type from real magic bytes.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    )
+    const asset = await saveBackground(join(dataDir, 'assets'), png)
+
+    const result = await callJson('set_theme', { backdropImage: asset.id })
+    expect(result.isError).toBe(false)
+    // The caller names an id; the path is built here, so there is no input that reaches the
+    // filesystem or the url() in the published stylesheet.
+    expect((await themeFile()).surface?.background).toBe(`/assets/backgrounds/${asset.id}`)
+  })
+})
+
+describe('what the design tools refuse', () => {
+  it.each([
+    ['a CSS value', { colors: { light: { accent: 'red' } } }, /not a colour/],
+    [
+      'a smuggled declaration',
+      { colors: { light: { accent: '#fff;background:url(x)' } } },
+      /not a colour/,
+    ],
+    [
+      'a token that does not exist',
+      { colors: { light: { primary: '#0071e3' } } },
+      /not a colour token/,
+    ],
+    ['a preset nobody ships', { preset: 'apple' }, /no preset "apple"/],
+    ['a backdrop nobody ships', { backdrop: 'parallax' }, /Invalid option/],
+    [
+      'an image that was never uploaded',
+      { backdropImage: 'a'.repeat(32) + '.png' },
+      /design panel/,
+    ],
+    ['a reset of something it does not own', { reset: ['everything'] }, /cannot reset/],
+    // A plain object would have found Object.prototype.toString here and tried to iterate it.
+    ['a reset naming a property of every object', { reset: ['toString'] }, /cannot reset/],
+    ['a call that names nothing at all', {}, /nothing to change/],
+  ])('%s', async (_label, args, expected) => {
+    const result = await callJson('set_theme', args as Record<string, unknown>)
+    expect(result.isError).toBe(true)
+    expect(result.isError === true && result.text).toMatch(expected)
+  })
+
+  it('leaves the theme untouched when it refuses', async () => {
+    const before = await themeFile()
+    await callJson('set_theme', { colors: { light: { accent: 'red' } } })
+    expect(await themeFile()).toEqual(before)
+  })
+
+  it('has no way to add an image, only to choose one', async () => {
+    const { tools } = await client.listTools()
+    const design = tools.filter((tool) => /theme|preset/.test(tool.name))
+    expect(design).toHaveLength(3)
+    for (const tool of design) {
+      const schema = JSON.stringify(tool.inputSchema)
+      expect(schema, tool.name).not.toMatch(/"(url|path|href|src|data|bytes|content)"/)
+    }
   })
 })

@@ -1,6 +1,7 @@
 import type { Theme } from '../config/schema.ts'
 import { surfaceLayerCss } from '../../shared/theme-backgrounds.ts'
 import {
+  ALL_TOKENS,
   DARK_DEFAULTS,
   LIGHT_DEFAULTS,
   resolveTokens,
@@ -20,11 +21,80 @@ export type { ThemeToken }
  * they get one too: `THEME_TOKENS` is the single list both sides iterate.
  */
 
+/**
+ * One rule, and the last place a token value can be refused.
+ *
+ * This string is interpolated into an inline `<style>` in the published page, so a value that can
+ * end a declaration is not a broken declaration — it is the end of the stylesheet and the start of
+ * whatever comes next. `}` closes the rule, `<` closes the element, and the quiet ones are worse:
+ * an unclosed `"`, `'` or `(` swallows every declaration after it, and `/*` comments them out.
+ * Measured in Chromium, a single stray quote in one token took four rules with it, including the
+ * emitted grid CSS that positions every tile — the whole board unpositioned by one character.
+ *
+ * Nothing in the app writes such a value: the design panel converts colours itself, and the MCP
+ * design tools only emit members of closed tables. But `config/theme.json` is a file a person
+ * edits, `themeSchema` keeps whatever it finds, and the point of a guard at the sink is that it
+ * holds when the thing upstream of it changes.
+ *
+ * So this is a grammar rather than a blacklist, because a blacklist has to keep guessing what CSS
+ * treats as a terminator. The name must be a token the stylesheet consumes; the value must use
+ * only the characters the shipped values use, close every bracket and quote it opens, and not
+ * name a URL — a token value has never needed one, and a published page that fetches a remote
+ * image is a page that tells someone else who is looking at it. All 1514 values in this
+ * repository pass unchanged, so anything that does not is a mistake, and painting it is the bug.
+ */
+const KNOWN_TOKENS = new Set<string>(ALL_TOKENS)
+
+/** Every character the presets, the finishes and the defaults actually use, and nothing else. */
+const VALUE_GRAMMAR = /^[A-Za-z0-9 ,.%#()/"'_+-]+$/
+
+function balanced(value: string, open: string, close: string): boolean {
+  let depth = 0
+  for (const character of value) {
+    if (character === open) depth += 1
+    else if (character === close && (depth -= 1) < 0) return false
+  }
+  return depth === 0
+}
+
+function even(value: string, character: string): boolean {
+  return [...value].filter((each) => each === character).length % 2 === 0
+}
+
+const safe = (name: string, value: string) =>
+  KNOWN_TOKENS.has(name) &&
+  VALUE_GRAMMAR.test(value) &&
+  balanced(value, '(', ')') &&
+  even(value, '"') &&
+  even(value, "'") &&
+  !value.toLowerCase().includes('url(')
+
 function block(selector: string, tokens: Record<string, string>): string {
   const declarations = Object.entries(tokens)
+    .filter(([name, value]) => safe(name, value))
     .map(([name, value]) => `--nh-${name}:${value}`)
     .join(';')
   return `${selector}{${declarations}}`
+}
+
+/**
+ * Drop an unusable override BEFORE the merge, so the token falls back instead of vanishing.
+ *
+ * The filter in `block` is the guard that cannot be got past; this is the one that keeps the page
+ * whole. Refusing at the sink alone leaves `--nh-accent` undefined — every rule that reads it then
+ * paints nothing — where dropping the override here lets the preset's own accent stand, which is
+ * what someone whose hand-edited file has one bad line would expect to see.
+ */
+function withoutUnusableOverrides(theme: Theme): Theme {
+  const cssVars = Object.fromEntries(
+    (['theme', 'light', 'dark'] as const).map((bucket) => [
+      bucket,
+      Object.fromEntries(
+        Object.entries(theme.cssVars[bucket]).filter(([name, value]) => safe(name, value)),
+      ),
+    ]),
+  ) as Theme['cssVars']
+  return { ...theme, cssVars }
 }
 
 /**
@@ -38,8 +108,9 @@ function block(selector: string, tokens: Record<string, string>): string {
 export function themeVariables(theme: Theme): string {
   // Both emitted blocks come from resolveTokens, the same function the browser calls when the
   // editor changes a colour. That is what makes the parity test meaningful rather than decorative.
-  const light = resolveTokens(theme, 'light')
-  const dark = resolveTokens(theme, 'dark')
+  const usable = withoutUnusableOverrides(theme)
+  const light = resolveTokens(usable, 'light')
+  const dark = resolveTokens(usable, 'dark')
 
   const parts = [block(':root', light)]
   parts.push(

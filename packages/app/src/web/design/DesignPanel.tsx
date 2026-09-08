@@ -7,6 +7,16 @@ import {
   hexToOklch,
   toHex,
 } from '../../shared/contrast.ts'
+import {
+  BOARD_WIDTHS,
+  COLOUR_GROUPS,
+  FONT_STACKS,
+  SHAPE_RESET_TOKENS,
+  TITLE_CASES,
+  TYPE_RESET_TOKENS,
+  firstFamily,
+  titleCaseOf,
+} from '../../shared/design-options.ts'
 import { BACKGROUNDS, GRADIENT_PREFIX } from '../../shared/theme-backgrounds.ts'
 import { SHAPE_TOKENS, THEME_PRESETS } from '../../shared/theme-presets.ts'
 import { GALLERY_FINISHES, GALLERY_PRESETS, finishOf } from '../../shared/theme-gallery.ts'
@@ -42,81 +52,12 @@ const MODES: { id: Theme['mode']; label: string }[] = [
   { id: 'system', label: 'System' },
 ]
 
-const FONT_STACKS: { id: string; label: string; value: string }[] = [
-  {
-    id: 'sans',
-    label: 'Sans',
-    value: 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif',
-  },
-  {
-    id: 'grotesque',
-    label: 'Grotesque',
-    value: '"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif',
-  },
-  { id: 'mono', label: 'Mono', value: 'ui-monospace,"SF Mono",Menlo,Consolas,monospace' },
-  { id: 'serif', label: 'Serif', value: 'ui-serif,Georgia,"Iowan Old Style",Palatino,serif' },
-]
-
 /**
  * Tokens that are scheme-independent, so a draft edit belongs in the shared `theme` bucket rather
  * than in the current scheme's — a radius that changed when the OS went dark would be a bug.
  * Derived from the contract rather than restated, so a new shape token cannot be missed here.
  */
 const SHAPE_LIKE = new Set<string>(SHAPE_TOKENS)
-
-/** The colour tokens, grouped the way someone thinks about a dashboard rather than alphabetically. */
-const COLOUR_GROUPS: { title: string; tokens: { name: string; label: string }[] }[] = [
-  {
-    title: 'Brand',
-    tokens: [
-      { name: 'accent', label: 'Accent' },
-      { name: 'accent-foreground', label: 'On accent' },
-    ],
-  },
-  {
-    title: 'Page',
-    tokens: [
-      { name: 'background', label: 'Background' },
-      { name: 'foreground', label: 'Text' },
-    ],
-  },
-  {
-    title: 'Tiles',
-    tokens: [
-      { name: 'surface', label: 'Tile' },
-      { name: 'surface-foreground', label: 'Tile text' },
-      { name: 'muted', label: 'Inset' },
-      { name: 'muted-foreground', label: 'Label' },
-      { name: 'border', label: 'Edge' },
-      { name: 'control-border', label: 'Field edge' },
-    ],
-  },
-  {
-    title: 'Status',
-    tokens: [
-      { name: 'ok', label: 'Healthy' },
-      { name: 'warn', label: 'Warning' },
-      { name: 'bad', label: 'Failing' },
-    ],
-  },
-]
-
-/**
- * The first family in a font stack, normalised.
- *
- * The segmented control cannot compare whole stacks: a preset is free to append families ("Nord"
- * adds Helvetica Neue and Arial) and to write its list with spaces after the commas, so exact
- * equality marked NOTHING as active on six of the seven presets — the control looked broken because
- * it never showed which option you were on. The first family is what actually identifies the choice.
- */
-function firstFamily(stack: string | undefined): string {
-  return (stack ?? '')
-    .split(',')[0]
-    ?.trim()
-    .replaceAll('"', '')
-    .replaceAll("'", '')
-    .toLowerCase() as string
-}
 
 /**
  * One gallery swatch.
@@ -174,13 +115,6 @@ const GalleryCard = memo(function GalleryCard({
  * margin closing as the cap widens. `inset` is that margin in viewBox units, which is what makes
  * the four icons a scale instead of four unrelated glyphs.
  */
-const WIDTHS: { id: string; label: string; value: string; inset: number }[] = [
-  { id: 'narrow', label: 'Narrow', value: '1200px', inset: 6 },
-  { id: 'comfortable', label: 'Comfortable', value: '1600px', inset: 4 },
-  { id: 'wide', label: 'Wide', value: '2000px', inset: 2 },
-  { id: 'full', label: 'Full bleed', value: 'none', inset: 0 },
-]
-
 function WidthIcon({ inset }: { inset: number }) {
   return (
     <svg viewBox="0 0 24 18" width="26" height="20" aria-hidden="true" focusable="false">
@@ -749,7 +683,7 @@ export function DesignPanel({
           <label className="nh-field">
             <span>Board width</span>
             <div className="nh-widths" role="group" aria-label="Board width">
-              {WIDTHS.map((width) => (
+              {BOARD_WIDTHS.map((width) => (
                 <button
                   key={width.id}
                   type="button"
@@ -768,9 +702,10 @@ export function DesignPanel({
             type="button"
             className="nh-button-quiet"
             onClick={() => {
-              for (const token of ['radius', 'radius-control', 'border-width', 'max-width']) {
-                setShape(token, null)
-              }
+              // Every non-type shape token, not the four this tab has controls for: a finish
+              // picked over MCP also writes elevation and the link treatment, and a reset that
+              // left those behind would claim to undo more than it did.
+              for (const token of SHAPE_RESET_TOKENS) setShape(token, null)
             }}
           >
             Reset to the preset
@@ -799,36 +734,25 @@ export function DesignPanel({
             would be a request the offline mode cannot make.
           </p>
           <div className="nh-seg" role="group" aria-label="Tile titles">
-            <button
-              type="button"
-              className="nh-seg-item"
-              aria-pressed={tokens['title-transform'] === 'uppercase'}
-              onClick={() => {
-                setShape('title-transform', 'uppercase')
-                setShape('title-tracking', '0.08em')
-              }}
-            >
-              UPPERCASE
-            </button>
-            <button
-              type="button"
-              className="nh-seg-item"
-              aria-pressed={tokens['title-transform'] !== 'uppercase'}
-              onClick={() => {
-                setShape('title-transform', 'none')
-                setShape('title-tracking', '0')
-              }}
-            >
-              Sentence case
-            </button>
+            {TITLE_CASES.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className="nh-seg-item"
+                aria-pressed={titleCaseOf(tokens['title-transform']).id === entry.id}
+                onClick={() => {
+                  for (const [token, value] of Object.entries(entry.tokens)) setShape(token, value)
+                }}
+              >
+                {entry.label}
+              </button>
+            ))}
           </div>
           <button
             type="button"
             className="nh-button-quiet"
             onClick={() => {
-              for (const token of ['font-sans', 'title-transform', 'title-tracking']) {
-                setShape(token, null)
-              }
+              for (const token of TYPE_RESET_TOKENS) setShape(token, null)
             }}
           >
             Reset to the preset

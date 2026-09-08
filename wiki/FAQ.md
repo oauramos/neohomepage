@@ -82,10 +82,17 @@ but there is no UI for it.
 
 ## Can an AI really configure it?
 
-Yes, over MCP — `neo mcp --stdio`, or the same tools on the HTTP port. It can search the catalog,
-add services and widgets, place them, and publish. It cannot read a credential, write custom CSS
-or JavaScript, or name a URL; those three are permanently absent rather than merely unimplemented.
-The worst a prompt-injected agent can do is create a widget that fails to authenticate.
+Yes, over MCP — `neo mcp`, which serves the tools over stdio. It can search the catalog, add
+services and widgets, place them, change how the board looks, and publish. It cannot read a
+credential, author CSS or JavaScript, name a URL, or add an image; those absences are permanent
+rather than merely unimplemented. The worst a prompt-injected agent can do is create a widget that
+fails to authenticate, or a palette you can undo.
+
+Changing the look means all of it: the presets, the thirteen colour tokens in either scheme, corner
+radius, border weight, board width, font, tile titles and the backdrop. "Copy the colours from that
+site" works — the agent reads them with its own browser and hands over hex, and anything that would
+be unreadable on a dashboard is solved against the same contrast matrix the shipped palettes are
+tested with before it lands.
 
 Every change it makes goes through the same transaction the editor uses, lands in the audit log
 tagged with which token did it, and cuts a generation — so "the AI rewrote my dashboard" is a

@@ -161,9 +161,20 @@ export function gradientFor(background: string | null): Background | undefined {
 /**
  * An uploaded background is an asset path the app itself stored, but it still gets escaped: a
  * quote or a parenthesis would end the `url()` early and let the rest be read as CSS.
+ *
+ * `<` and `>` are in the class for a different reason, and they were missing: this string is
+ * baked into an inline `<style>`, where the HTML parser — not the CSS one — is what ends the
+ * element. A value containing `</style>` closes the sheet from inside a perfectly valid `url()`
+ * and everything after it is markup.
+ *
+ * The form feed is the third character CSS counts as a newline, alongside the two everyone
+ * remembers, and an unescaped one ends the quoted string it sits in just as a line break does.
  */
 function cssUrl(value: string): string {
-  return value.replace(/["'()\\\n\r]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `)
+  return value.replace(
+    /["'()<>\\\n\r\f]/g,
+    (character) => `\\${character.charCodeAt(0).toString(16)} `,
+  )
 }
 
 export type Surface = {

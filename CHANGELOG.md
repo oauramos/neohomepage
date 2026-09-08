@@ -80,7 +80,75 @@
   board carrying a bookmark tile. No pixel font ships: there is no system one, and a webfont is a
   request the offline mode cannot make, so the eras are carried by weight, tracking and case.
 
+### The design surface, over MCP
+
+- **An agent can change the look now**, not just the board. Three tools — `describe_theme`,
+  `search_presets`, `set_theme` — cover everything behind the Design button: mode, all 75 presets,
+  the thirteen colour tokens in either scheme, corner radius, border weight, board width, font,
+  tile-title case, backdrop, blur and dim. Fifteen tools in the surface, still fixed. So "copy the
+  colours from apple.com" works: the agent reads the palette with its own browser and hands over
+  hex, and nothing in the server fetches anything.
+- **A palette that arrives from outside is solved, not just stored.** Brand colours are picked to
+  look like a brand, not to clear 4.5:1 on an inset grey — Apple's `#86868b` on `#f5f5f7` is
+  3.33:1 — so a colour change is run against the same matrix `theme-contrast.test.ts` asserts, and
+  any token that fails has its OKLCH lightness walked until it passes. Hue is kept, chroma too
+  unless the colour would fall outside sRGB. This is the walk the sixty-four gallery palettes were
+  generated with, extracted into `palette-fit.ts` and made callable. Every token it moves is
+  reported with the pair and the ratio that moved it; `fit: "off"` writes the palette as given and
+  `fit: "refuse"` fails rather than write one nobody can read. A candidate is scored by how many of
+  its pairs FAIL before how close the worst one is: maximising the minimum alone is free to drag a
+  pair that was passing at 6.1:1 down to 2.3:1, which on a palette with incompatible surfaces
+  repaired nothing, broke something, and reported eight moves as fixes.
+- **`dryRun` returns the whole result and writes nothing** — palette, adjustments, contrast verdict
+  — through the same code path as the write, so trying five looks costs no generations.
+- **Colours are set per scheme in one transaction.** Light and dark are separate palettes and the
+  default mode is `system`, where the page carries both and the viewer's OS chooses; a tool that
+  guessed "light" would have reported success on a change half the viewers could not see.
+- **The absences hold, and one is new.** No tool authors CSS: every value written is a member of a
+  closed table this repository ships, a number in a range, or a colour parsed and re-emitted. There
+  is no import-a-theme tool, because `cssVars` there is free-form CSS. And an agent can choose a
+  background image by id but can never add one — uploading stays a browser action.
+- **`design-options.ts` is one table for two readers.** The fonts, board widths, title treatments
+  and colour groups lived inside the design panel, and `src/server` may not import `src/web`. A
+  test asserts the shape and type resets partition `SHAPE_TOKENS` exactly, which the old
+  four-token-by-hand Shape reset did not.
+
 ### Fixes this surfaced
+
+- `parseOklch` matched `[\d.]+` per component, so `oklch(0.5.5 0.1 200)` parsed to NaN rather than
+  failing. Ratios then read "NaN:1" instead of "—", `toHex` returned `#NaNNaNNaN`, and the contrast
+  solver — for which every candidate scored equally hopeless — certified the first one it tried as
+  a fix. The pattern is now `\d+(\.\d+)?` with ranges checked, and a value that is not a colour is
+  reported as one it cannot fit rather than silently repaired.
+- The solver skipped a rule whose surface could not be read, which was right for one unreadable
+  surface and wrong for all of them: a theme with a hex `muted` came back "nothing needed
+  adjusting" beside eight failures. Anything the matrix names that is not a colour is now listed.
+- Contrast was computed by clipping sRGB channels while a browser gamut-maps by reducing chroma, so
+  a vivid fitted colour could be certified at 4.5:1 and rendered at 3.7:1. Every colour these tools
+  write is brought inside sRGB first, which is what makes the number reported the number painted.
+- `cssVars.theme` resolves above both schemes, so a colour pinned there — which the theme-import box
+  can do — made every later colour write a silent no-op. Setting a colour now clears the pin and
+  says it did.
+- The contrast solver's near-miss branch scored a candidate by its worst pair alone, so on a palette
+  whose surfaces cannot both carry text it dragged a pair passing at 6.1:1 down to 2.3:1 to raise
+  that one number — repairing nothing and reporting eight moves as fixes. It now counts failing
+  pairs first, runs to a fixed point rather than once, and a test asserts over a sweep of random
+  palettes that a fit never leaves more pairs failing than it found.
+- `parseOklch` rejected a hue above 360. CSS hue is modular, so `oklch(0.5 0.1 400)` is a colour a
+  browser paints — and the panel read "—" for it while the board showed it fine.
+- The published stylesheet interpolated token names and values with no guard, and `cssUrl` escaped
+  quotes and parentheses but not `<` or `>`. Neither is reachable from the app's own writes, but a
+  hand-edited `theme.json` is a real thing and this is where an agent-writable path ends up. The
+  emitter now holds a value to a grammar rather than a blacklist — the characters the shipped
+  values use, every bracket and quote closed, and no `url(` — because the quiet escapes are the
+  dangerous ones: a single unclosed quote in one token swallowed four rules in Chromium, including
+  the grid CSS that positions every tile. An unusable override falls back to the preset rather than
+  leaving a hole.
+- `TOOL_NAMES` — what `neo mcp --print-tools` reports and the docs are written from — was checked
+  against nothing. Adding a tool and forgetting the array left the CLI naming a surface that did not
+  exist; the test suite now asserts the two agree.
+- `neo mcp` ignored `NEOHOMEPAGE_PUBLISH_MODE`, so an install that turned auto-publish off to keep
+  one process in charge of the generation directory still got renders from the second one.
 
 - `gauge-set` and `status-badge` emitted markup that no stylesheet matched, so two of the five
   presentation templates drew nothing — an empty status dot has no width. Both are styled now, and

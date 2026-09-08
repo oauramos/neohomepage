@@ -7,11 +7,12 @@ import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { probe } from '../fetcher/probe.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
 import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
+import { DESIGN_TOOL_NAMES, registerDesignTools } from './design.ts'
 
 /**
  * The MCP surface.
  *
- * Twelve semantic tools, fixed regardless of how large the catalog grows. One tool per widget type
+ * Fifteen semantic tools, fixed regardless of how large the catalog grows. One tool per widget type
  * was rejected for reasons that are measurable rather than aesthetic: every tool's schema is sent
  * on every request, so the surface is a permanent token tax, and Claude Code flattens root-level
  * anyOf/oneOf — which mangles the obvious discriminated-union-over-widget-types design. Every
@@ -24,8 +25,10 @@ import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
  *     shipped to a third-party API.
  *   - No tool accepts a URL, a path, a header or a method. An agent names a widget or a host and
  *     a port; the request is derived from a manifest, exactly as it is for the browser.
- *   - No tool writes custom CSS or JavaScript, because prompt injection reaching a write tool is
- *     a real amplifier and that is the one sink that turns it into code execution.
+ *   - No tool AUTHORS CSS or JavaScript, because prompt injection reaching a write tool is a real
+ *     amplifier and that is the one sink that turns it into code execution. The design tools in
+ *     `design.ts` change how the board looks, and every value they write is a member of a closed
+ *     table this repository ships, a number in a range, or a colour parsed and re-emitted here.
  *
  * Every write goes through the same ConfigStore.transaction() the UI uses, lands in the audit log
  * attributed to the token, and cuts a generation — so "the AI rewrote my dashboard" is a rollback,
@@ -61,7 +64,9 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
       title: 'Describe the dashboard',
       description:
         'Pages, widgets, targets, the current revision and whether anything is unpublished. ' +
-        'Start here: the revision it returns is what a later write should pass as baseRevision.',
+        'Start here: the revision it returns is what a later write should pass as baseRevision. ' +
+        'It says nothing about how the board LOOKS — describe_theme is where colour, shape and ' +
+        'background live.',
       annotations: { readOnlyHint: true },
       inputSchema: {},
     },
@@ -595,10 +600,12 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     },
   )
 
+  registerDesignTools(server, deps)
+
   return server
 }
 
-/** The tool names this build exposes, for the boot-time self-check and the docs. */
+/** The tool names this build exposes, asserted against the live listing by the test suite. */
 export const TOOL_NAMES = [
   'describe_dashboard',
   'search_catalog',
@@ -612,4 +619,5 @@ export const TOOL_NAMES = [
   'set_layout',
   'test_target',
   'publish',
+  ...DESIGN_TOOL_NAMES,
 ] as const
