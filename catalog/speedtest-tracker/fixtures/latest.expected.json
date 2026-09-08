@@ -10,8 +10,8 @@
       "value": "512 Mbps"
     },
     {
-      "label": "Ping",
-      "value": "8s",
+      "label": "Ping (ms)",
+      "value": "8.4",
       "tone": "ok"
     },
     {

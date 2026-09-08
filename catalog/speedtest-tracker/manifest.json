@@ -93,11 +93,11 @@
             "fields": {
               "label": {
                 "op": "const",
-                "value": "Ping"
+                "value": "Ping (ms)"
               },
               "value": {
                 "op": "format",
-                "as": "duration",
+                "as": "number",
                 "of": {
                   "op": "get",
                   "path": "$.data.ping"
