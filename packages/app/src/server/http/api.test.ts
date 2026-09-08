@@ -49,6 +49,22 @@ async function mockService(): Promise<number> {
  * targets that differ only in `widgetType` and base path — which is exactly the case that would
  * break if the source kind were chosen by anything other than the target's own shape.
  */
+const DAY_MS = 86_400_000
+
+/**
+ * Dates relative to the run, not to the day this was written.
+ *
+ * The ICS decoder's window is `pastDays: 1, futureDays: 90`, so an event pinned to a literal date
+ * is inside it for about a day and then quietly outside it. Both composite tests here went red on
+ * their own two days after the commit that added them, with nothing in the repo having changed —
+ * a failure that says "the calendar is broken" and means "the calendar is working".
+ *
+ * The Sonarr episode lands a day after the bin collection because one assertion is about ORDER:
+ * the merged tile is sorted by date, and two events on the same day would make it a coin toss.
+ */
+const inDays = (days: number): string => new Date(Date.now() + days * DAY_MS).toISOString()
+const icsStamp = (iso: string): string => iso.replaceAll(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+
 async function mockCalendarHost(): Promise<number> {
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/v3/calendar') === true) {
@@ -60,7 +76,7 @@ async function mockCalendarHost(): Promise<number> {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(
         JSON.stringify([
-          { title: 'The Episode', airDateUtc: '2026-09-08T01:00:00Z', series: { title: 'A Show' } },
+          { title: 'The Episode', airDateUtc: inDays(2), series: { title: 'A Show' } },
         ]),
       )
       return
@@ -75,8 +91,8 @@ async function mockCalendarHost(): Promise<number> {
           'BEGIN:VEVENT',
           'UID:bin@example.invalid',
           'SUMMARY:Bin collection',
-          'DTSTART:20260907T070000Z',
-          'DTEND:20260907T073000Z',
+          `DTSTART:${icsStamp(inDays(1))}`,
+          `DTEND:${icsStamp(inDays(1.02))}`,
           'END:VEVENT',
           'END:VCALENDAR',
           '',
