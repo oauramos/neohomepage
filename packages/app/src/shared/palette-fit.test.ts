@@ -214,7 +214,10 @@ describe('a palette with nowhere to go', () => {
 })
 
 describe('any palette at all', () => {
-  it('never comes back with more failing pairs than it went in with', () => {
+  // Deterministic and CPU-bound, so the only thing that varies between runs is the clock: 1.6s on
+  // a warm laptop, past the 5s default on a two-core runner sharing itself with 37 other vitest
+  // workers. The timeout is sized to lose to a solver that hangs, not to a runner that is busy.
+  it('never comes back with more failing pairs than it went in with', { timeout: 30_000 }, () => {
     // The property the solver actually promises, over palettes nobody would author: random ones,
     // including plenty whose surfaces cannot carry text at all. A hundred and fifty rather than
     // the thousands this was developed against — the failure it guards is systematic, not rare,
