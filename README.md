@@ -46,6 +46,40 @@ something that fits a 1 GB box. That is the whole idea.
 - **An AI can configure it.** A built-in MCP server lets Claude, Codex or any MCP client add
   widgets and services for you — without ever being able to read a credential or name a URL.
 
+## See it work
+
+**Changing how it looks.** Scheme, preset, then corner radius on a slider — the board repaints
+under the panel as you drag it. No reload, no restart, no file to edit.
+
+<img src="media/demo-design.gif" alt="The design panel open over a dashboard: switching to the dark
+scheme, then to the Nord and Terminal presets, then dragging the corner radius up from Terminal's
+square corners. The board behind the panel changes colour and shape as each control is used."
+width="840">
+
+**Moving things around.** Edit mode, one tile dragged by its handle, and the grid reflowing around
+it. The layout is written when you let go.
+
+<img src="media/demo-layout.gif" alt="A dashboard in edit mode with a drag handle on every tile.
+The Pi-hole tile is dragged from the right-hand column to the top left, and the tiles it displaces
+move down to make room." width="840">
+
+<details>
+<summary><b>Three of the seven presets, full size</b></summary>
+
+<img src="media/theme-default.png" alt="The demo board in the Default preset: light, neutral greys,
+a blue accent." width="840">
+<img src="media/theme-nord.png" alt="The same board in the Nord preset: cool blue-grey neutrals on
+a dark ground." width="840">
+<img src="media/theme-terminal.png" alt="The same board in the Terminal preset: green text on a
+near-black ground, square corners, monospace throughout." width="840">
+
+</details>
+
+Neither clip is a mockup. `pnpm demo:record` boots the real server on a throwaway data directory in
+front of one stub per widget, each answering with that widget's own recorded fixture — the same
+JSON the catalog tests assert against — so every number on screen arrived through the real fetcher,
+decoder and projection. The pointer is drawn in, because a screen recorder does not capture one.
+
 ## Quick start
 
 ```sh

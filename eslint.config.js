@@ -47,7 +47,7 @@ export default tseslint.config(
   {
     // Plain JS tooling scripts. They are not TypeScript, so the `no-undef: off` below does not
     // reach them and every Node global reads as undefined. Declared by hand rather than pulling
-    // in `globals` for five names — including `window`, which really is a browser global here:
+    // in `globals` for seven names — including `window`, which really is a browser global here:
     // the body of a `page.evaluate()` is serialised and run inside the page, where it exists.
     files: ['scripts/**/*.mjs'],
     languageOptions: {
@@ -55,7 +55,9 @@ export default tseslint.config(
       sourceType: 'module',
       globals: {
         console: 'readonly',
+        fetch: 'readonly',
         process: 'readonly',
+        setTimeout: 'readonly',
         URL: 'readonly',
         URLSearchParams: 'readonly',
         window: 'readonly',

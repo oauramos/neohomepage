@@ -25,7 +25,8 @@
     "budgets": "pnpm --filter @neohomepage/app budgets",
     "drill": "pnpm --filter @neohomepage/app drill",
     "wiki:publish": "sh scripts/publish-wiki.sh",
-    "boot:render": "node scripts/boot-animation/render.mjs"
+    "boot:render": "node scripts/boot-animation/render.mjs",
+    "demo:record": "node scripts/demo/record.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
