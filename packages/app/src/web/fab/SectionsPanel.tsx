@@ -52,7 +52,12 @@ function newId(prefix: string): string {
 function blankSection(kind: Section['kind']): Section {
   switch (kind) {
     case 'navbar':
-      return { id: newId('n'), kind, title: null, items: [{ id: newId('i'), kind: 'title' }] }
+      return {
+        id: newId('n'),
+        kind,
+        title: null,
+        items: [{ id: newId('i'), kind: 'title', boxed: false }],
+      }
     case 'grid':
       return { id: newId('g'), kind, title: null, cols: {}, maxRows: null }
     case 'bookmarks':
@@ -70,15 +75,16 @@ function blankSection(kind: Section['kind']): Section {
 function blankNavItem(kind: NavItem['kind']): NavItem {
   const id = newId('i')
   switch (kind) {
-    case 'title':
     case 'spacer':
       return { id, kind }
+    case 'title':
+      return { id, kind, boxed: false }
     case 'text':
-      return { id, kind, text: 'Text' }
+      return { id, kind, text: 'Text', boxed: false }
     case 'links':
-      return { id, kind, links: [] }
+      return { id, kind, links: [], boxed: false }
     case 'clock':
-      return { id, kind, showDate: true, hour12: false }
+      return { id, kind, showDate: true, hour12: false, boxed: false }
     case 'search':
       return { id, kind, engine: 'duckduckgo', placeholder: 'Search' }
   }
@@ -345,6 +351,16 @@ function NavbarFields({
                   12-hour
                 </label>
               </>
+            ) : null}
+            {item.kind !== 'spacer' && item.kind !== 'search' ? (
+              <label className="nh-check">
+                <input
+                  type="checkbox"
+                  checked={item.boxed}
+                  onChange={(event) => update(index, { ...item, boxed: event.target.checked })}
+                />
+                box
+              </label>
             ) : null}
             <RowActions
               label={item.kind}

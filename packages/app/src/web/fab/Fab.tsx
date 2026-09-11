@@ -171,20 +171,9 @@ export function Fab({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg
-          aria-hidden="true"
-          className="nh-fab-glyph"
-          viewBox="0 0 24 24"
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {ICONS.config}
-        </svg>
+        <span aria-hidden="true" className="nh-fab-glyph">
+          ⌘
+        </span>
         <span className="nh-sr-only">Open the dashboard editor</span>
         {pending ? (
           <span className="nh-fab-badge" title="unpublished changes">

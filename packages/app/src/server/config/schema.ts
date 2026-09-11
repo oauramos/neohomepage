@@ -158,15 +158,25 @@ export type SearchEngine = (typeof SEARCH_ENGINES)[number]
  * pushes what follows to the far edge.
  */
 export const navItemSchema = z.discriminatedUnion('kind', [
-  z.object({ id: idSchema, kind: z.literal('title') }).catchall(z.unknown()),
+  // `boxed` draws the item in a muted box, the way a boxed reading is drawn on a tile. Off by
+  // default, and absent from the search box (already a box) and the spacer (nothing to box).
   z
-    .object({ id: idSchema, kind: z.literal('text'), text: z.string().min(1).max(120) })
+    .object({ id: idSchema, kind: z.literal('title'), boxed: z.boolean().default(false) })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('text'),
+      text: z.string().min(1).max(120),
+      boxed: z.boolean().default(false),
+    })
     .catchall(z.unknown()),
   z
     .object({
       id: idSchema,
       kind: z.literal('links'),
       links: z.array(bookmarkLinkSchema).max(24).default([]),
+      boxed: z.boolean().default(false),
     })
     .catchall(z.unknown()),
   z
@@ -175,6 +185,7 @@ export const navItemSchema = z.discriminatedUnion('kind', [
       kind: z.literal('clock'),
       showDate: z.boolean().default(true),
       hour12: z.boolean().default(false),
+      boxed: z.boolean().default(false),
     })
     .catchall(z.unknown()),
   z

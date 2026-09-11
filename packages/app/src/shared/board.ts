@@ -333,15 +333,17 @@ function navbar(section: ResolvedNavbarSection, resolved: Resolved, now: Date): 
     'header',
     { className: 'nh-header', 'data-neo-section': section.id, key: section.id },
     section.items.map((item) => {
+      // A boxed item carries the attribute the stylesheet paints the muted box from.
+      const boxed = 'boxed' in item && item.boxed ? { 'data-neo-boxed': 'true' } : {}
       switch (item.kind) {
         case 'title':
-          return h('h1', { className: 'nh-title', key: item.id }, resolved.title)
+          return h('h1', { className: 'nh-title', ...boxed, key: item.id }, resolved.title)
         case 'text':
-          return h('span', { className: 'nh-nav-text', key: item.id }, item.text)
+          return h('span', { className: 'nh-nav-text', ...boxed, key: item.id }, item.text)
         case 'links':
           return h(
             'nav',
-            { className: 'nh-nav-links', 'aria-label': 'Links', key: item.id },
+            { className: 'nh-nav-links', 'aria-label': 'Links', ...boxed, key: item.id },
             item.links.map((link) => linkAnchor(link, 'nh-nav-link')),
           )
         case 'clock':
@@ -352,6 +354,7 @@ function navbar(section: ResolvedNavbarSection, resolved: Resolved, now: Date): 
               dateTime: now.toISOString(),
               'data-neo-clock': item.hour12 ? '12' : '24',
               'data-neo-date': item.showDate ? 'on' : 'off',
+              ...boxed,
               key: item.id,
             },
             clockText(now, item.hour12, item.showDate),

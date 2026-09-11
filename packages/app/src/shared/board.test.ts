@@ -416,6 +416,28 @@ describe('sections', () => {
     expect(rendered).not.toContain('src="/assets/icons/mdi-router-network"')
   })
 
+  it('boxes a header item only when asked', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          {
+            id: 'nav',
+            kind: 'navbar',
+            title: null,
+            items: [
+              { id: 'a', kind: 'title', boxed: false },
+              { id: 'b', kind: 'clock', showDate: false, hour12: false, boxed: true },
+            ],
+          },
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+        ]),
+        {},
+      ),
+    )
+    expect(rendered).toMatch(/<time class="nh-clock"[^>]*data-neo-boxed="true"/)
+    expect(rendered).not.toMatch(/<h1[^>]*data-neo-boxed/)
+  })
+
   it('keeps one header landmark and one main, with later navbars inside main', () => {
     const rendered = html(
       dashboard(

@@ -56,14 +56,20 @@ export type ResolvedLink = {
 }
 
 export type ResolvedNavItem =
-  | { readonly id: string; readonly kind: 'title' }
-  | { readonly id: string; readonly kind: 'text'; readonly text: string }
-  | { readonly id: string; readonly kind: 'links'; readonly links: readonly ResolvedLink[] }
+  | { readonly id: string; readonly kind: 'title'; readonly boxed: boolean }
+  | { readonly id: string; readonly kind: 'text'; readonly text: string; readonly boxed: boolean }
+  | {
+      readonly id: string
+      readonly kind: 'links'
+      readonly links: readonly ResolvedLink[]
+      readonly boxed: boolean
+    }
   | {
       readonly id: string
       readonly kind: 'clock'
       readonly showDate: boolean
       readonly hour12: boolean
+      readonly boxed: boolean
     }
   | {
       readonly id: string

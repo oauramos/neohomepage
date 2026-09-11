@@ -21,7 +21,7 @@ const page: ResolvedPage = {
   grid: GRID,
   widgetIds: ['w1', 'w2'],
   sections: [
-    { id: 'nav', kind: 'navbar', title: null, items: [{ id: 't', kind: 'title' }] },
+    { id: 'nav', kind: 'navbar', title: null, items: [{ id: 't', kind: 'title', boxed: false }] },
     {
       id: 'main',
       kind: 'grid',

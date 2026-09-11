@@ -161,6 +161,11 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-search-go:hover{background:var(--nh-link-bg-hover)}
 .nh-search-go:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
 .nh-spacer{flex:1 1 auto}
+/* A boxed header item: the same muted box a boxed reading gets, so the two read as one family. */
+.nh-header [data-neo-boxed="true"]{background:var(--nh-muted);border-radius:var(--nh-radius-control);
+  padding:6px 12px}
+.nh-nav-links[data-neo-boxed="true"]{padding:2px 4px}
+.nh-title[data-neo-boxed="true"]{padding:4px 12px}
 /* A section title is set like a tile title: small caps in the muted colour, so it labels a
    region without competing with the page title. */
 .nh-section-title{margin:20px 16px 4px;font-size:var(--nh-title-size);font-weight:600;

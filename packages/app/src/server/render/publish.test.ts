@@ -27,7 +27,12 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         title: 'Home',
         grid: page.grid,
         sections: [
-          { id: 'nav', kind: 'navbar', title: null, items: [{ id: 'title', kind: 'title' }] },
+          {
+            id: 'nav',
+            kind: 'navbar',
+            title: null,
+            items: [{ id: 'title', kind: 'title', boxed: false }],
+          },
           {
             id: 'main',
             kind: 'grid',

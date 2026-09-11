@@ -203,17 +203,24 @@ function resolveLink(link: BookmarkLink, icons: ReadonlySet<string> | undefined)
 function resolveNavItem(item: NavItem, icons: ReadonlySet<string> | undefined): ResolvedNavItem {
   switch (item.kind) {
     case 'title':
-      return { id: item.id, kind: 'title' }
+      return { id: item.id, kind: 'title', boxed: item.boxed }
     case 'text':
-      return { id: item.id, kind: 'text', text: item.text }
+      return { id: item.id, kind: 'text', text: item.text, boxed: item.boxed }
     case 'links':
       return {
         id: item.id,
         kind: 'links',
         links: item.links.map((link) => resolveLink(link, icons)),
+        boxed: item.boxed,
       }
     case 'clock':
-      return { id: item.id, kind: 'clock', showDate: item.showDate, hour12: item.hour12 }
+      return {
+        id: item.id,
+        kind: 'clock',
+        showDate: item.showDate,
+        hour12: item.hour12,
+        boxed: item.boxed,
+      }
     case 'search':
       return { id: item.id, kind: 'search', engine: item.engine, placeholder: item.placeholder }
     case 'spacer':
