@@ -299,7 +299,12 @@ function App({ client }: { client: DashboardClient }) {
   }
 
   const removeWidget = async (id: string) => {
-    await fetch(`/api/widgets/${id}`, { method: 'DELETE' })
+    // The write gate refuses anything a cross-site form could send, and a body-less DELETE with no
+    // content type looks like one — the header is the ticket, not the payload.
+    await fetch(`/api/widgets/${id}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+    })
     await client.refresh()
   }
 

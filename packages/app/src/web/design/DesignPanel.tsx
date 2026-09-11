@@ -913,7 +913,10 @@ export function DesignPanel({
                       className="nh-upload-delete"
                       title="Delete this image"
                       onClick={() => {
-                        void fetch(`/api/assets/backgrounds/${asset.id}`, { method: 'DELETE' })
+                        void fetch(`/api/assets/backgrounds/${asset.id}`, {
+                          method: 'DELETE',
+                          headers: { 'content-type': 'application/json' },
+                        })
                           .then(loadUploads)
                           .then(() => {
                             if (surface.background === asset.url) setSurface({ background: null })

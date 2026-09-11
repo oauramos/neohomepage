@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { getCompactor } from 'react-grid-layout/core'
 import type { EventCallback, Layout } from 'react-grid-layout'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
+import { normaliseLayout } from '../../shared/placement.ts'
 import type { ResolvedGridSection, ResolvedWidget } from '../../shared/resolved.ts'
 
 /**
@@ -20,6 +21,43 @@ import type { ResolvedGridSection, ResolvedWidget } from '../../shared/resolved.
  * Only the breakpoint being edited is written, and it is marked `authored`. The others stay
  * derived and are regenerated from the authoritative tier.
  */
+
+/**
+ * The sizes a tile can be set to from its bar, columns × rows. Dragging the corner does the same
+ * thing continuously; this is the same thing in one click, and the only way to size a tile
+ * without a pointer. Widths past the tier's column count are clamped, so the phone tier offers
+ * 1×n and 2×n and nothing it cannot draw.
+ */
+const SIZES: readonly (readonly [number, number])[] = [
+  [1, 1],
+  [2, 1],
+  [2, 2],
+  [3, 2],
+  [3, 3],
+  [4, 2],
+  [4, 3],
+  [4, 4],
+  [6, 3],
+  [6, 4],
+  [8, 3],
+  [12, 3],
+]
+
+function sizeOptions(
+  cols: number,
+  current: readonly [number, number],
+): (readonly [number, number])[] {
+  const seen = new Set<string>()
+  const options: (readonly [number, number])[] = []
+  for (const [w, h] of [...SIZES, current]) {
+    const clamped = [Math.min(w, cols), h] as const
+    const key = `${String(clamped[0])}x${String(clamped[1])}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    options.push(clamped)
+  }
+  return options.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+}
 
 const ResponsiveGrid = lazy(async () => {
   const module = await import('react-grid-layout')
@@ -88,6 +126,14 @@ export function GridEditor({
   }
 
   const onPage = widgets.filter((widget) => section.widgetIds.includes(widget.id))
+  const tier = draft[breakpoint] ?? []
+  const tierCols = cols[breakpoint] ?? 12
+
+  /** Set one tile's size on the tier being edited; the rest of the board reflows around it. */
+  const resize = (id: string, w: number, h: number) => {
+    const next = tier.map((item) => (item.i === id ? { ...item, w, h } : { ...item }))
+    onChange(breakpoint, normaliseLayout(next, tierCols))
+  }
 
   return (
     <div
@@ -150,6 +196,31 @@ export function GridEditor({
                     <span aria-hidden="true">⠿</span>
                   </button>
                   <span className="nh-editor-cell-title">{widget.title}</span>
+                  {(() => {
+                    const item = tier.find((entry) => entry.i === widget.id)
+                    const current = [item?.w ?? 4, item?.h ?? 3] as const
+                    return (
+                      <select
+                        className="nh-editor-size"
+                        aria-label={`Size of ${widget.title}, columns by rows`}
+                        title="Size, columns × rows"
+                        value={`${String(current[0])}x${String(current[1])}`}
+                        onChange={(event) => {
+                          const [w, h] = event.target.value.split('x').map(Number)
+                          if (w !== undefined && h !== undefined) resize(widget.id, w, h)
+                        }}
+                      >
+                        {sizeOptions(tierCols, current).map(([w, h]) => (
+                          <option
+                            key={`${String(w)}x${String(h)}`}
+                            value={`${String(w)}x${String(h)}`}
+                          >
+                            {w}×{h}
+                          </option>
+                        ))}
+                      </select>
+                    )
+                  })()}
                   {onRemove === undefined ? null : (
                     <button
                       type="button"

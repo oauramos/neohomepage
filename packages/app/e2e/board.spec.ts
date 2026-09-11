@@ -443,3 +443,39 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   await expect(page.locator('.nh-editbar')).toHaveCount(0)
 })
+
+test('a tile can be removed and resized from edit mode', async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) < 768, 'the layout editor is a desktop affordance')
+  const widgets = async () =>
+    (
+      (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+        resolved: { widgets: { id: string }[] }
+      }
+    ).resolved.widgets.length
+  const before = await widgets()
+
+  await page.goto(`${harness.baseURL}/`)
+  await page.getByRole('button', { name: /editor/i }).click()
+  await page.getByRole('button', { name: 'Layout', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit layout', exact: true }).click()
+  await page.waitForSelector('.react-grid-layout')
+
+  // Size is a select on the tile's bar: pick 2×2 and the draft reflows, nothing is saved yet.
+  const size = page.locator('.nh-editor-size').first()
+  await size.selectOption('2x2')
+  await expect(page.locator('.nh-editbar')).toContainText('unsaved change')
+  // The tile glides to its new width over 200ms; poll rather than read once.
+  await expect
+    .poll(async () => {
+      const shrunk = await page.locator('.react-grid-item').first().boundingBox()
+      const other = await page.locator('.react-grid-item').nth(1).boundingBox()
+      return shrunk !== null && other !== null && shrunk.width < other.width - 40
+    })
+    .toBe(true)
+
+  // Remove is a real write, and it used to 403: a body-less DELETE carried no content type and
+  // the cross-site gate refused it like a form post.
+  await page.locator('.nh-editor-remove').first().click()
+  await expect(page.locator('.react-grid-item')).toHaveCount(before - 1)
+  expect(await widgets()).toBe(before - 1)
+})

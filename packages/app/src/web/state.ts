@@ -139,7 +139,10 @@ export class DashboardClient {
   }
 
   async publish(): Promise<void> {
-    await fetch('/api/publish', { method: 'POST' })
+    await fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    })
     await this.refresh()
   }
 }
