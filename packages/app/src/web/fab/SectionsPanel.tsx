@@ -198,7 +198,8 @@ function LinkRows({
               className="nh-input nh-link-icon"
               value={link.icon ?? ''}
               aria-label="Icon"
-              placeholder="icon"
+              placeholder="si-nextcloud"
+              title="nextcloud (dashboard-icons), si-nextcloud (Simple Icons), lucide-search (Lucide), tabler-search, mdi-router-network; add -#rrggbb for a colour"
               onChange={(event) =>
                 update(index, {
                   icon: event.target.value.trim() === '' ? null : event.target.value.trim(),

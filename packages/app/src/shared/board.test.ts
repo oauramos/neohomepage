@@ -352,6 +352,56 @@ describe('sections', () => {
     expect(tile).toContain('<h2 id="w1-title" class="nh-tile-title">AdGuard</h2>')
   })
 
+  it('paints a glyph-set icon as a mask in the text colour, or the colour the reference named', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+          {
+            id: 'links',
+            kind: 'bookmarks',
+            title: null,
+            columns: { sm: 1, md: 2, lg: 3 },
+            display: 'icons',
+            groups: [
+              {
+                id: 'g',
+                title: 'Net',
+                links: [
+                  {
+                    ...link(
+                      'l1',
+                      'Router',
+                      'http://192.168.1.254/',
+                      '/assets/icons/mdi-router-network',
+                    ),
+                    iconMode: 'mask',
+                  },
+                  {
+                    ...link(
+                      'l2',
+                      'Mi',
+                      'http://192.168.2.101/',
+                      '/assets/icons/mdi-router-wireless-ff6900',
+                    ),
+                    iconMode: 'mask',
+                    iconColor: '#ff6900',
+                  },
+                ],
+              },
+            ],
+          },
+        ]),
+        {},
+      ),
+    )
+    expect(rendered).toContain(
+      'class="nh-icon nh-icon-mask" aria-hidden="true" style="--nh-icon-url:url(&quot;/assets/icons/mdi-router-network&quot;)"',
+    )
+    expect(rendered).toContain('--nh-icon-color:#ff6900')
+    expect(rendered).not.toContain('src="/assets/icons/mdi-router-network"')
+  })
+
   it('keeps one header landmark and one main, with later navbars inside main', () => {
     const rendered = html(
       dashboard(

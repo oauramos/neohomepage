@@ -5,6 +5,7 @@ import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import type { BookmarkLink, NavItem, Page, Section, Target, Widget } from '../config/schema.ts'
 import { effectiveSections, sectionOf } from '../config/sections.ts'
 import { composeHref } from '../../shared/links.ts'
+import { iconKey, iconMode, parseIconRef } from '../assets/icons.ts'
 import type { Overrides } from '../config/overrides.ts'
 import { EMPTY_OVERRIDES } from '../config/overrides.ts'
 import type { ConfigTree } from '../store/tree.ts'
@@ -49,13 +50,16 @@ export type ResolveInput = {
   readonly generatedAt: string
 }
 
-/** Where a cached icon is served from. The store names the file; this only has to agree on the path. */
+/** Where a cached icon is served from. The store names the file; this only has to agree on the key. */
 function iconUrl(
-  slug: string | null | undefined,
+  reference: string | null | undefined,
   icons: ReadonlySet<string> | undefined,
 ): string | null {
-  if (slug === null || slug === undefined || icons === undefined || !icons.has(slug)) return null
-  return `/assets/icons/${slug}`
+  if (reference === null || reference === undefined || icons === undefined) return null
+  const ref = parseIconRef(reference)
+  if (ref === null) return null
+  const key = iconKey(ref)
+  return icons.has(key) ? `/assets/icons/${key}` : null
 }
 
 function manifestDefaults(manifest: Manifest | undefined): Record<string, unknown> {
@@ -183,12 +187,15 @@ export function deriveLayout(
 }
 
 function resolveLink(link: BookmarkLink, icons: ReadonlySet<string> | undefined): ResolvedLink {
+  const ref = link.icon === null ? null : parseIconRef(link.icon)
   return {
     id: link.id,
     label: link.label,
     href: composeHref(link.base, link.path),
     icon: link.icon,
     iconUrl: iconUrl(link.icon, icons),
+    iconMode: ref === null ? 'image' : iconMode(ref),
+    iconColor: ref?.color === null || ref === null ? null : `#${ref.color}`,
   }
 }
 

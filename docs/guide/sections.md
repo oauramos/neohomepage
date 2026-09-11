@@ -47,12 +47,23 @@ Four displays, chosen per section:
 
 ### Icons
 
-An icon is named by its slug in [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
-— `nextcloud`, `adguard-home`, `home-assistant` — the same names gethomepage and Homarr use. The
-server fetches it once into `state/icons/` and the page references that local copy, so a published
-dashboard loads nothing from the internet when viewed. Until the icon is cached, or when there is
-no icon of that name, the link shows its initial in a rounded square. Widgets show their type's
-icon beside the title the same way.
+An icon is a name, never a link. Five sets, told apart by prefix — the same spelling gethomepage
+uses:
+
+| Reference               | Set                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nextcloud`             | [dashboard-icons](https://github.com/homarr-labs/dashboard-icons): full-colour logos of self-hosted things                                            |
+| `si-nextcloud`          | [Simple Icons](https://simpleicons.org): one-colour brand marks, served in the brand colour                                                           |
+| `si-claude-#D97757`     | Simple Icons in a colour you chose — for a brand whose colour is black on a dark theme                                                                |
+| `lucide-search`         | [Lucide](https://lucide.dev): the interface glyphs shadcn and [ReUI](https://reui.io/icons) ship — search, router, house — painted in the text colour |
+| `tabler-search`         | [Tabler Icons](https://tabler.io/icons), the same way                                                                                                 |
+| `mdi-router-network`    | [Material Design Icons](https://pictogrammers.com/library/mdi/), the same way                                                                         |
+| `lucide-router-#ff6900` | any glyph set, in a colour you chose                                                                                                                  |
+
+The server fetches each one once into `state/icons/` and the page references that local copy, so
+a published dashboard loads nothing from the internet when viewed. Until the icon is cached, or
+when there is no icon of that name, the link shows its initial in a rounded square. Widgets show
+their type's icon beside the title the same way.
 
 Set the network mode to `offline` in `config/network.json` and nothing is fetched; cached icons
 are still served.

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseIconRef } from '../assets/icons.ts'
 
 /**
  * The on-disk config tree.
@@ -99,10 +100,18 @@ export const linkPathSchema = z
     'must not contain ".." or "//"',
   )
 
-/** An icon is named by slug and fetched by the server; a name is not a URL. */
+/**
+ * An icon is named, never linked: `nextcloud` (dashboard-icons), `si-nextcloud` (Simple Icons),
+ * `mdi-router-network` (Material Design Icons), with an optional `-#rrggbb`. The server fetches
+ * it; a name is not a URL.
+ */
 export const iconSlugSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'must be a lowercase slug')
+  .max(90)
+  .refine(
+    (value) => parseIconRef(value) !== null,
+    'must be an icon name such as nextcloud, si-nextcloud or mdi-router-network, optionally -#rrggbb',
+  )
   .nullable()
   .default(null)
 

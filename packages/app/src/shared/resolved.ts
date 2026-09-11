@@ -43,8 +43,11 @@ export type ResolvedLink = {
   readonly label: string
   readonly href: string
   readonly icon: string | null
-  /** Page-relative URL of the cached icon; null until fetched, or when the slug is unknown. */
+  /** Page-relative URL of the cached icon; null until fetched, or when the name is unknown. */
   readonly iconUrl: string | null
+  /** `image` draws the file as-is; `mask` paints its shape in `iconColor`, or the text colour. */
+  readonly iconMode: 'image' | 'mask'
+  readonly iconColor: string | null
 }
 
 export type ResolvedNavItem =

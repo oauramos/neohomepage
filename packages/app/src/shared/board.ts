@@ -258,7 +258,25 @@ export type RenderOptions = {
  * square the CSS draws. Decorative either way — the label beside it carries the name — so it is
  * hidden from assistive technology rather than described twice.
  */
-function iconFor(label: string, iconUrl: string | null): ReactNode {
+function iconFor(
+  label: string,
+  iconUrl: string | null,
+  mode: 'image' | 'mask' = 'image',
+  color: string | null = null,
+): ReactNode {
+  if (iconUrl !== null && mode === 'mask') {
+    // A glyph set ships black shapes. Masking paints the shape in the text colour — or the one
+    // the reference named — so it reads on any theme, and a mask image can never run anything.
+    return h('span', {
+      className: 'nh-icon nh-icon-mask',
+      'aria-hidden': 'true',
+      style: {
+        '--nh-icon-url': `url("${iconUrl}")`,
+        ...(color === null ? {} : { '--nh-icon-color': color }),
+      },
+      key: 'icon',
+    })
+  }
   if (iconUrl !== null) {
     return h('img', {
       className: 'nh-icon',
@@ -279,7 +297,7 @@ function iconFor(label: string, iconUrl: string | null): ReactNode {
 }
 
 function linkGlyph(link: ResolvedLink): ReactNode {
-  return iconFor(link.label, link.iconUrl)
+  return iconFor(link.label, link.iconUrl, link.iconMode, link.iconColor)
 }
 
 function linkAnchor(link: ResolvedLink, className: string): ReactNode {
@@ -363,7 +381,26 @@ function navbar(section: ResolvedNavbarSection, resolved: Resolved, now: Date): 
               h(
                 'button',
                 { className: 'nh-search-go', type: 'submit', 'aria-label': 'Search', key: 'go' },
-                '⌕',
+                // A magnifier drawn here, in the button's own colour: the one glyph the page
+                // ships itself, so the header is complete before any icon has been fetched.
+                h(
+                  'svg',
+                  {
+                    className: 'nh-glyph',
+                    viewBox: '0 0 24 24',
+                    width: 18,
+                    height: 18,
+                    fill: 'none',
+                    stroke: 'currentColor',
+                    strokeWidth: 2,
+                    strokeLinecap: 'round',
+                    'aria-hidden': 'true',
+                  },
+                  [
+                    h('circle', { cx: 11, cy: 11, r: 7, key: 'lens' }),
+                    h('path', { d: 'm20 20-3.8-3.8', key: 'handle' }),
+                  ],
+                ),
               ),
             ],
           )
