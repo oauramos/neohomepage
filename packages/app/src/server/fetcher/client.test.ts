@@ -158,6 +158,26 @@ describe('failures carry a code, not a URL', () => {
     expect(['refused', 'unreachable']).toContain(error.code)
     expect(error.message).not.toContain(dead.port)
   })
+
+  it('reaches the socket for an https target named by IP literal', async () => {
+    // Node refuses an IP as the TLS ServerName and throws while the socket is being configured,
+    // so a LAN box addressed as https://192.168.x.x — every Proxmox and Portainer — used to fail
+    // as "unreachable" before a packet was sent. No TLS fixture is needed to prove the fix: the
+    // dial must now get as far as the (closed) port and be REFUSED by it.
+    const url = await serve((_req, res) => res.end('{}'))
+    const server = servers.pop() as Server
+    await new Promise((resolve) => server.close(resolve))
+    const dead = new URL(`https://127.0.0.1:${url.port}/`)
+
+    const error = (await fetchUpstream({
+      url: dead,
+      method: 'GET',
+      allowLoopback: true,
+      insecureSkipVerify: true,
+    }).catch((e) => e)) as UpstreamError
+    expect(error.code).toBe('refused')
+    expect((error.cause as { code?: string }).code).not.toBe('ERR_INVALID_ARG_VALUE')
+  })
 })
 
 describe('the policy still applies', () => {

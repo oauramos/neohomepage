@@ -1,4 +1,4 @@
-import type { LookupFunction } from 'node:net'
+import { isIP, type LookupFunction } from 'node:net'
 import { Agent, request } from 'undici'
 import { pinnedLookup, resolveAndCheck, type PolicyOptions } from './policy.ts'
 
@@ -96,8 +96,12 @@ export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamRes
       lookup: pinnedLookup(resolved) as unknown as LookupFunction,
       timeout: limits.connectTimeoutMs,
       rejectUnauthorized: input.insecureSkipVerify !== true,
-      // SNI and virtual hosts still work: the name travels, only the address is pinned.
-      servername: resolved.hostname,
+      // SNI and virtual hosts still work: the name travels, only the address is pinned. Only a
+      // NAME travels, though — Node refuses an IP literal as the TLS ServerName, and the refusal
+      // is thrown while the socket is being set up, so `https://192.168.1.10:8006` (which is how
+      // every Proxmox, Portainer and TrueNAS on a LAN is addressed) came back "unreachable" before
+      // a packet was sent. Node's own https module makes the same distinction.
+      ...(isIP(resolved.hostname) === 0 ? { servername: resolved.hostname } : {}),
     },
     headersTimeout: limits.headersTimeoutMs,
     bodyTimeout: limits.bodyTimeoutMs,
