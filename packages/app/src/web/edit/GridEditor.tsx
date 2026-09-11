@@ -27,19 +27,23 @@ const ResponsiveGrid = lazy(async () => {
 })
 
 export type GridEditorProps = {
-  /** One grid section: its own columns, row cap and layouts, edited as a board of its own. */
+  /** One grid section: its own columns and row cap, edited as a board of its own. */
   readonly section: ResolvedGridSection
+  /** The layouts being edited — a draft the page holds, not what is saved. */
+  readonly layouts: Readonly<Record<string, readonly LayoutItem[]>>
   readonly widgets: readonly ResolvedWidget[]
   readonly renderWidget: (widget: ResolvedWidget) => React.ReactNode
-  readonly onCommit: (breakpoint: string, items: LayoutItem[]) => void | Promise<void>
+  /** Called on drag-stop and resize-stop with the tier's new geometry. Saving is the page's call. */
+  readonly onChange: (breakpoint: string, items: LayoutItem[]) => void
   readonly onRemove?: (widgetId: string) => void
 }
 
 export function GridEditor({
   section,
+  layouts: draft,
   widgets,
   renderWidget,
-  onCommit,
+  onChange,
   onRemove,
 }: GridEditorProps) {
   const page = section
@@ -71,13 +75,13 @@ export function GridEditor({
   )
   const cols = Object.fromEntries(page.grid.breakpoints.map((entry) => [entry.id, entry.cols]))
   const layouts = Object.fromEntries(
-    Object.entries(page.layouts).map(([id, items]) => [id, items.map((item) => ({ ...item }))]),
+    Object.entries(draft).map(([id, items]) => [id, items.map((item) => ({ ...item }))]),
   )
 
   // RGL's `Layout` is the ARRAY and `LayoutItem` is one entry — inverted from v1, and a
   // muscle-memory mistake that types silently wrong.
   const commit: EventCallback = (layout: Layout) => {
-    void onCommit(
+    onChange(
       breakpoint,
       layout.map((item) => ({ i: item.i, x: item.x, y: item.y, w: item.w, h: item.h })),
     )

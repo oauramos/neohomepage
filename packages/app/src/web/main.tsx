@@ -63,6 +63,11 @@ function TabPanel({
           <button type="button" className="nh-button" onClick={onToggleEdit}>
             {editing ? 'Done editing' : 'Edit layout'}
           </button>
+          {editing ? null : (
+            <p className="nh-panel-dim">
+              Moves are a draft until you press Save in the bar at the top of the page.
+            </p>
+          )}
         </div>
       )
     case 'sections':
@@ -105,6 +110,42 @@ function usePageCss(page: ResolvedPage | undefined): void {
     }
     element.textContent = emitPageCss(page)
   }, [page])
+}
+
+/** Every grid section's tiers, as the editor is changing them. */
+type Draft = Record<string, Record<string, LayoutItem[]>>
+
+function draftFrom(page: ResolvedPage): Draft {
+  const draft: Draft = {}
+  for (const section of page.sections) {
+    if (section.kind !== 'grid') continue
+    draft[section.id] = Object.fromEntries(
+      Object.entries(section.layouts).map(([breakpoint, items]) => [
+        breakpoint,
+        items.map((item) => ({ ...item })),
+      ]),
+    )
+  }
+  return draft
+}
+
+/** The `section\u0000breakpoint` keys whose geometry differs between two drafts, order-blind. */
+function changedTiers(draft: Draft, original: Draft): Set<string> {
+  const shape = (items: readonly LayoutItem[] | undefined) =>
+    JSON.stringify(
+      [...(items ?? [])]
+        .map(({ i, x, y, w, h }) => ({ i, x, y, w, h }))
+        .sort((a, b) => a.i.localeCompare(b.i, 'en-US')),
+    )
+  const changed = new Set<string>()
+  for (const [section, tiers] of Object.entries(draft)) {
+    for (const breakpoint of Object.keys(tiers)) {
+      if (shape(tiers[breakpoint]) !== shape(original[section]?.[breakpoint])) {
+        changed.add(`${section}\u0000${breakpoint}`)
+      }
+    }
+  }
+  return changed
 }
 
 /** A clock that ticks: re-render on the minute, and only if the page actually has one. */
@@ -155,13 +196,71 @@ function App({ client }: { client: DashboardClient }) {
     ) ?? false,
   )
 
-  const saveLayout = async (section: string, breakpoint: string, items: LayoutItem[]) => {
-    await fetch(`/api/pages/${page?.id ?? 'home'}/layout`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ section, breakpoint, items }),
-    })
-    await client.refresh()
+  /**
+   * Edit mode works on a draft.
+   *
+   * A drag used to be written the moment you let go, which made "let me just see if it fits
+   * there" a save. The draft holds every grid section's tiers; a drag or resize changes it and
+   * nothing else, and the bar at the top offers Save or Discard. Save writes only the tiers that
+   * changed, one request each, in one go.
+   */
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [original, setOriginal] = useState<Draft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  // What differs from the saved layout, tier by tier — derived, not counted. A drag that ends
+  // where it began (dropped off the edge and clamped, or compacted straight back) is not a change,
+  // and counting drag-stops instead of differences said "1 unsaved change" for exactly that.
+  const dirty =
+    draft === null || original === null ? new Set<string>() : changedTiers(draft, original)
+
+  const startEditing = () => {
+    if (page === undefined) return
+    setDraft(draftFrom(page))
+    setOriginal(draftFrom(page))
+    setLeaving(false)
+    setEditing(true)
+  }
+
+  const stopEditing = () => {
+    setEditing(false)
+    setDraft(null)
+    setOriginal(null)
+    setLeaving(false)
+  }
+
+  const changeLayout = (section: string, breakpoint: string, items: LayoutItem[]) => {
+    setDraft((current) =>
+      current === null
+        ? current
+        : { ...current, [section]: { ...current[section], [breakpoint]: items } },
+    )
+  }
+
+  const discardLayout = () => {
+    if (original !== null) setDraft(structuredClone(original))
+    setLeaving(false)
+  }
+
+  const saveLayout = async () => {
+    if (draft === null || page === undefined) return
+    setSaving(true)
+    try {
+      for (const key of dirty) {
+        const [section, breakpoint] = key.split('\u0000') as [string, string]
+        await fetch(`/api/pages/${page.id}/layout`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ section, breakpoint, items: draft[section]?.[breakpoint] ?? [] }),
+        })
+      }
+      await client.refresh()
+      // What was just written is the new baseline; the tiers that were not touched stay as read.
+      setOriginal(structuredClone(draft))
+      setLeaving(false)
+    } finally {
+      setSaving(false)
+    }
   }
 
   /**
@@ -206,19 +305,65 @@ function App({ client }: { client: DashboardClient }) {
 
   return (
     <div data-neo-controls={hideControls ? 'hidden' : 'shown'}>
-      {editing && page !== undefined ? (
+      {editing && page !== undefined && draft !== null ? (
         // Edit mode is the page with every grid section swapped for an editor of its own; the
         // navbar and the bookmark groups render exactly as they do in view mode.
         <div id="neo-root-content">
+          <div className="nh-editbar" role="region" aria-label="Layout editing">
+            <strong>Editing layout</strong>
+            <span className="nh-editbar-note" aria-live="polite">
+              {saving
+                ? 'Saving…'
+                : dirty.size === 0
+                  ? 'Drag a tile by its handle, or its corner to resize. Nothing is saved until you say so.'
+                  : leaving
+                    ? 'Save or discard your changes before leaving.'
+                    : `${String(dirty.size)} unsaved ${dirty.size === 1 ? 'change' : 'changes'}`}
+            </span>
+            <span className="nh-editbar-actions">
+              {dirty.size > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    className="nh-button-quiet"
+                    disabled={saving}
+                    onClick={discardLayout}
+                  >
+                    Discard
+                  </button>
+                  <button
+                    type="button"
+                    className="nh-button"
+                    disabled={saving}
+                    onClick={() => void saveLayout()}
+                  >
+                    Save layout
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                className={dirty.size > 0 ? 'nh-button-quiet' : 'nh-button'}
+                disabled={saving}
+                onClick={() => {
+                  if (dirty.size > 0) setLeaving(true)
+                  else stopEditing()
+                }}
+              >
+                Done
+              </button>
+            </span>
+          </div>
           {board(page, state.resolved, state.data, {
             now,
             renderGrid: (section) => (
               <GridEditor
                 key={section.id}
                 section={section}
+                layouts={draft[section.id] ?? section.layouts}
                 widgets={state.resolved.widgets}
                 renderWidget={(widget) => widgetTile(widget, state.data[widget.id])}
-                onCommit={(breakpoint, items) => saveLayout(section.id, breakpoint, items)}
+                onChange={(breakpoint, items) => changeLayout(section.id, breakpoint, items)}
                 onRemove={(id) => void removeWidget(id)}
               />
             ),
@@ -237,7 +382,8 @@ function App({ client }: { client: DashboardClient }) {
             state={state}
             editing={editing}
             onToggleEdit={() => {
-              setEditing((value) => !value)
+              if (editing) stopEditing()
+              else startEditing()
               close()
             }}
             onChanged={() => void client.refresh()}

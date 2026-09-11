@@ -356,3 +356,90 @@ test('board width is a scale of icons, and exactly one is on', async ({ page }) 
       .toBe(expected)
   }
 })
+
+test('a dragged tile stays under the pointer, and the move is a draft until saved', async ({
+  page,
+}) => {
+  // Phones have no pointer to drag with; the layout editor is a desktop affordance.
+  test.skip((page.viewportSize()?.width ?? 0) < 768, 'no drag on the phone tier')
+  const revision = async () =>
+    (
+      (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
+        revision: string
+      }
+    ).revision
+  const before = await revision()
+
+  await page.goto(`${harness.baseURL}/`)
+  await page.getByRole('button', { name: /editor/i }).click()
+  await page.getByRole('button', { name: 'Layout', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit layout', exact: true }).click()
+  await page.waitForSelector('.react-grid-layout')
+
+  // The leftmost tile, so a drag to the right has somewhere to go. DOM order is widget order,
+  // not layout order, so `first()` could be the tile already against the right edge.
+  const leftmost = async () => {
+    const boxes = await page
+      .locator('.nh-drag-handle')
+      .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().toJSON() as DOMRect))
+    return boxes.reduce((min, box) => (box.x < min.x ? box : min))
+  }
+  const box = await leftmost()
+  const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  for (let step = 1; step <= 10; step += 1) {
+    await page.mouse.move(start.x + step * 30, start.y + step * 10, { steps: 2 })
+  }
+
+  // Mid-drag: the handle is where the pointer is. Without the grid's positioning rules the tile
+  // measured itself against the page and rode a hundred pixels away from the cursor.
+  const dragged = await page
+    .locator('.react-draggable-dragging .nh-drag-handle')
+    .evaluate((node) => {
+      const rect = node.getBoundingClientRect()
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+    })
+  expect(Math.abs(dragged.x - (start.x + 300))).toBeLessThan(3)
+  expect(Math.abs(dragged.y - (start.y + 100))).toBeLessThan(3)
+  await expect(page.locator('.react-grid-placeholder')).toBeVisible()
+  await page.mouse.up()
+
+  // Dropped, not saved: the bar counts a change and the server's revision is untouched.
+  await expect(page.locator('.nh-editbar')).toContainText('1 unsaved change')
+  expect(await revision()).toBe(before)
+
+  // Leaving is gated, discarding restores, saving writes.
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(page.locator('.nh-editbar')).toContainText('Save or discard')
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.locator('.nh-editbar')).not.toContainText('unsaved')
+  expect(await revision()).toBe(before)
+  // The tiles glide back over 200ms; measuring one mid-glide would aim the next drag at air.
+  await page.waitForTimeout(400)
+
+  // A drag that ends where it began is not a change: the bar counts differences, not drops.
+  // Nudge the leftmost tile and let it go on the same cell.
+  const same = await leftmost()
+  await page.mouse.move(same.x + 5, same.y + 5)
+  await page.mouse.down()
+  await page.mouse.move(same.x + 20, same.y + 8, { steps: 4 })
+  await page.mouse.up()
+  await expect(page.locator('.nh-editbar')).not.toContainText('unsaved')
+
+  const again = await leftmost()
+  await page.mouse.move(again.x + 5, again.y + 5)
+  await page.mouse.down()
+  for (let step = 1; step <= 10; step += 1) {
+    await page.mouse.move(again.x + 5 + step * 40, again.y + 5, { steps: 2 })
+  }
+  await page.mouse.up()
+  await expect(page.locator('.nh-editbar')).toContainText('1 unsaved change')
+  await page.getByRole('button', { name: 'Save layout', exact: true }).click()
+  // "Saving…" also lacks the word; wait for the idle line, which only returns once the write
+  // has landed and the state has been re-read.
+  await expect(page.locator('.nh-editbar')).toContainText('Nothing is saved until')
+  expect(await revision()).not.toBe(before)
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(page.locator('.nh-editbar')).toHaveCount(0)
+})

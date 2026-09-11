@@ -260,7 +260,109 @@ body {
 
 /* Edit mode and the add-widget form. */
 .nh-editor {
-  padding: 8px 16px 96px;
+  padding: 8px 16px 24px;
+}
+/* react-grid-layout ships a stylesheet the editor never loaded, and without it the grid container
+   was `position: static`: the dragged tile positioned itself against the page instead of the
+   board and rode a hundred pixels off the pointer, and the placeholder that shows where a tile
+   will land had no background at all. These are those rules, in the theme's terms. */
+.nh-editor .react-grid-layout {
+  position: relative;
+  transition: height 200ms ease;
+}
+.nh-editor .react-grid-item {
+  transition: all 200ms ease;
+  transition-property: left, top, width, height;
+}
+.nh-editor .react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+.nh-editor .react-grid-item.resizing {
+  transition: none;
+  z-index: 1;
+  will-change: width, height;
+}
+.nh-editor .react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 3;
+  will-change: transform;
+}
+.nh-editor .react-grid-item.react-draggable-dragging .nh-editor-cell {
+  box-shadow: 0 16px 40px rgb(0 0 0 / 35%);
+  border-style: solid;
+}
+.nh-editor .react-grid-item.react-grid-placeholder {
+  background: color-mix(in oklch, var(--nh-accent) 18%, transparent);
+  border: 1px dashed var(--nh-accent);
+  border-radius: 12px;
+  opacity: 1;
+  transition-duration: 100ms;
+  z-index: 2;
+  user-select: none;
+}
+.nh-editor .react-grid-item.react-grid-placeholder.placeholder-resizing {
+  transition: none;
+}
+.nh-editor .react-grid-item > .react-resizable-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  height: 28px;
+  cursor: se-resize;
+  z-index: 1;
+}
+.nh-editor .react-grid-item > .react-resizable-handle::after {
+  content: '';
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--nh-muted-foreground);
+  border-bottom: 2px solid var(--nh-muted-foreground);
+  border-radius: 0 0 2px 0;
+}
+.nh-editor .react-grid-item:hover > .react-resizable-handle::after,
+.nh-editor .react-grid-item.resizing > .react-resizable-handle::after {
+  border-color: var(--nh-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-editor .react-grid-layout,
+  .nh-editor .react-grid-item {
+    transition: none;
+  }
+}
+/* The bar that edit mode pins to the top: what changed, and the two verbs that decide it. */
+.nh-editbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--nh-border);
+  border-radius: 12px;
+  background: var(--nh-surface);
+  color: var(--nh-surface-foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  font-size: 0.8125rem;
+}
+.nh-editbar-note {
+  color: var(--nh-muted-foreground);
+}
+.nh-editbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.nh-editbar .nh-button,
+.nh-editbar .nh-button-quiet {
+  min-height: 34px;
 }
 .nh-editor-bar {
   display: flex;
