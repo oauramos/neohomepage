@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Sections
+
+- **A page is a stack of sections.** Three kinds: a `navbar` composed of items (the title, a line
+  of text, a row of links, a clock, a search box, a spacer), a `grid` — the free board as before,
+  with its own column counts per breakpoint and its own row cap — and `bookmarks`: named groups of
+  links laid out N per row, drawn as a list, cards, icon-and-name or chips. A page that declares
+  none resolves to the navbar-and-grid pair every install already had, so nothing on disk
+  migrates. Layouts stay one flat file per page; a grid section's board is the entries whose
+  widget names it, so every board starts at row zero and placing into one section cannot move a
+  tile in another. The validator bounds each entry by its section, refuses a section list that
+  would strand a widget, and keeps section, group, link and navbar item ids unique.
+- **A Sections tab** in the editor: add, reorder, remove, expand and configure. Links are typed as
+  URLs and stored as parts — the browser does the split, so the server still never sees a URL.
+  Edits save whole after half a second; a 422 is shown in place with the draft kept. The board
+  re-renders from the resolved state as soon as a save lands, columns included, because the page's
+  stylesheet is now emitted in the browser from the same function the publish step bakes with.
+- **Icons.** A manifest has named its icon by slug since the first widget, and a bookmark can
+  now too — the dashboard-icons names gethomepage users already have. The server fetches each one
+  once into `state/icons/`, checks the bytes are the image they claim to be, and the page
+  references the local copy; a viewed dashboard loads nothing from the internet. Until cached, a
+  link shows its initial. Tiles show their type's icon beside the title.
+- **MCP**: `get_sections`, `set_sections`, `add_bookmark`; `add_widget`, `update_widget` and
+  `set_layout` take a `section`; `describe_dashboard` reports the sections.
+- **The page boots from the state it was published with.** The embedded state was written flat
+  and read as `{resolved}`, so every load booted from an empty dashboard, painted the default theme
+  over the baked one for a frame, then fetched what it already had. Found because a link tile
+  rendering as a real button on first paint let axe scan that frame and fail four presets on a
+  colour that never exists on screen.
+- **An https target addressed by IP is reachable again.** Node refuses an IP literal as the TLS
+  ServerName, and the refusal was mapped to "unreachable" — so every Proxmox, Portainer and
+  TrueNAS at `https://192.168.x.x` failed in a millisecond, before a packet was sent.
+- **A bookmark is a link before it is a liveness check.** A link tile's href is resolved from its
+  target and path, not read from a projection that only exists once `GET /` has succeeded; a
+  service that answers with a login redirect, a 401 or a self-signed certificate is still a
+  bookmark. The probe's verdict stays in the chip.
+
 ### The editor
 
 - **Widgets have a kind** — widget, bookmark or tool — declared on the manifest and defaulted, so no

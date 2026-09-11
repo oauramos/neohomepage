@@ -37,6 +37,7 @@ export default defineConfig({
       {
         text: 'Guide',
         items: [
+          { text: 'Sections', link: '/guide/sections' },
           { text: 'Backup and restore', link: '/guide/backup' },
           { text: 'Signing in', link: '/guide/auth' },
           { text: 'Configuring with an AI', link: '/mcp/' },

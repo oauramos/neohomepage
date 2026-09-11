@@ -1,3 +1,4 @@
+import type { Resolved } from '../../shared/resolved.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -73,10 +74,12 @@ describe('the tool surface', () => {
   it('advertises a fixed set, whatever the catalog contains', async () => {
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'add_bookmark',
       'add_target',
       'add_widget',
       'describe_dashboard',
       'describe_theme',
+      'get_sections',
       'get_widget_schema',
       'list_targets',
       'list_widgets',
@@ -85,6 +88,7 @@ describe('the tool surface', () => {
       'search_catalog',
       'search_presets',
       'set_layout',
+      'set_sections',
       'set_theme',
       'test_target',
       'update_widget',
@@ -130,8 +134,13 @@ describe('the tool surface', () => {
       const properties = Object.keys(
         (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
       )
+      // A bookmark's path is where the VIEWER'S browser goes when the link is clicked; the server
+      // never fetches it, so it is the one path that is not a request leaving the box.
+      const allowed = tool.name === 'add_bookmark' ? ['path'] : []
       expect(
-        properties.filter((name) => /^(url|path|header|method)$/i.test(name)),
+        properties.filter(
+          (name) => /^(url|path|header|method)$/i.test(name) && !allowed.includes(name),
+        ),
         tool.name,
       ).toEqual([])
     }
@@ -682,5 +691,82 @@ describe('what the design tools refuse', () => {
       const schema = JSON.stringify(tool.inputSchema)
       expect(schema, tool.name).not.toMatch(/"(url|path|href|src|data|bytes|content)"/)
     }
+  })
+})
+
+describe('sections', () => {
+  it('reports the implicit pair, replaces them whole, and refuses to strand a widget', async () => {
+    const before = await callJson('get_sections')
+    expect(before.isError).toBe(false)
+    if (!before.isError) {
+      expect((before.value.sections as { kind: string }[]).map((s) => s.kind)).toEqual([
+        'navbar',
+        'grid',
+      ])
+    }
+
+    const set = await callJson('set_sections', {
+      page: 'home',
+      sections: [
+        { id: 'main', kind: 'grid' },
+        { id: 'side', kind: 'grid', cols: { lg: 6 } },
+      ],
+    })
+    expect(set.isError).toBe(false)
+
+    const added = await callJson('add_widget', { type: 'sonarr-queue', section: 'side' })
+    expect(added.isError).toBe(false)
+
+    const strand = await callJson('set_sections', {
+      page: 'home',
+      sections: [{ id: 'main', kind: 'grid' }],
+    })
+    expect(strand.isError).toBe(true)
+    if (strand.isError) expect(strand.text).toContain('side')
+
+    const described = await callJson('describe_dashboard')
+    if (!described.isError) {
+      const page = (
+        described.value.pages as { sections: { id: string; widgets?: string[] }[] }[]
+      )[0]
+      expect(page?.sections.find((s) => s.id === 'side')?.widgets).toHaveLength(1)
+    }
+  })
+
+  it('adds a bookmark from parts, creating the group by title', async () => {
+    await callJson('set_sections', {
+      page: 'home',
+      sections: [
+        { id: 'main', kind: 'grid' },
+        { id: 'links', kind: 'bookmarks' },
+      ],
+    })
+    const result = await callJson('add_bookmark', {
+      section: 'links',
+      group: 'Router',
+      label: 'AdGuard',
+      host: '192.168.2.1',
+      port: 8080,
+      path: '/login.html',
+      icon: 'adguard-home',
+    })
+    expect(result.isError).toBe(false)
+
+    const sections = await callJson('get_sections')
+    if (!sections.isError) {
+      const links = (
+        sections.value.sections as {
+          kind: string
+          groups?: { title: string; links: unknown[] }[]
+        }[]
+      ).find((s) => s.kind === 'bookmarks')
+      expect(links?.groups?.[0]).toMatchObject({ title: 'Router' })
+      expect(links?.groups?.[0]?.links).toHaveLength(1)
+    }
+    const { resolved } = (await context.state()) as { resolved: Resolved }
+    const section = resolved.pages[0]?.sections.find((s) => s.kind === 'bookmarks')
+    expect(section?.kind === 'bookmarks' && section.groups[0]?.links[0]?.href).toBe(
+      'http://192.168.2.1:8080/login.html',
+    )
   })
 })

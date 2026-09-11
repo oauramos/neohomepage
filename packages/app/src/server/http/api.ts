@@ -10,12 +10,10 @@ import {
   targetSchema,
   themeSchema,
   widgetSchema,
-  type Page,
-  type Widget,
 } from '../config/schema.ts'
-import { effectiveSections, gridSectionIds, sectionOf } from '../config/sections.ts'
+import { currentSize, placeWidget, saveSectionLayout } from '../config/board.ts'
+import { effectiveSections, sectionOf } from '../config/sections.ts'
 import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts'
-import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
 import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
@@ -47,43 +45,6 @@ function ifMatch(header: string | undefined): { baseRevision?: string } {
 /** A short, CSS-safe, collision-resistant id. Prefixed so it can never be numeric-like. */
 function newId(prefix: string): string {
   return `${prefix}${randomUUID().replaceAll('-', '').slice(0, 10)}`
-}
-
-/**
- * The geometry a grid section places into: its own column counts and row cap, and only ITS
- * entries of the page's flat layout file. The rest of the file is carried through untouched, so
- * placing into one section can never move a tile in another.
- */
-function sectionGeometry(page: Page, sectionId: string) {
-  const section = effectiveSections(page).find(
-    (candidate) => candidate.id === sectionId && candidate.kind === 'grid',
-  )
-  const cols = Object.fromEntries(
-    page.grid.breakpoints.map((breakpoint) => [
-      breakpoint.id,
-      section?.kind === 'grid' ? (section.cols[breakpoint.id] ?? breakpoint.cols) : breakpoint.cols,
-    ]),
-  )
-  const maxRows =
-    section?.kind === 'grid' ? (section.maxRows ?? page.grid.maxRows) : page.grid.maxRows
-  return { cols, maxRows }
-}
-
-function splitBySection(
-  items: readonly LayoutItem[],
-  widgets: ReadonlyMap<string, Widget>,
-  page: Page,
-  sectionId: string,
-): { mine: LayoutItem[]; others: LayoutItem[] } {
-  const mine: LayoutItem[] = []
-  const others: LayoutItem[] = []
-  for (const item of items) {
-    const widget = widgets.get(item.i)
-    const owner = widget === undefined ? undefined : sectionOf(widget, page)
-    if (owner === sectionId) mine.push(item)
-    else others.push(item)
-  }
-  return { mine, others }
 }
 
 export function createApiRoutes(options: ApiOptions): Hono {
@@ -171,12 +132,6 @@ export function createApiRoutes(options: ApiOptions): Hono {
           const pageId = body.page ?? draft.dashboard.defaultPage
           const page = draft.pages.get(pageId)
           if (page === undefined) throw new Error(`no page "${pageId}"`)
-          const sectionId = body.section ?? gridSectionIds(page)[0]
-          if (sectionId === undefined || !gridSectionIds(page).includes(sectionId)) {
-            throw new ConfigInvalidError([
-              { path: `pages/${pageId}.json`, message: `no grid section "${String(sectionId)}"` },
-            ])
-          }
 
           const widget = widgetSchema.parse({
             id,
@@ -192,54 +147,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
             catalogRev: manifest.version,
           })
           draft.widgets.set(id, widget)
-
-          const existing = draft.layouts.get(pageId)
-          const authored = page.grid.breakpoints
-            .map((breakpoint) => breakpoint.id)
-            .filter((breakpointId) => existing?.meta[breakpointId]?.origin !== 'derived')
-          const { cols, maxRows } = sectionGeometry(page, sectionId)
-
-          // Place within the section's own entries, then hand the other sections' entries back.
-          const split = Object.fromEntries(
-            Object.entries(existing?.layouts ?? {}).map(([breakpointId, items]) => [
-              breakpointId,
-              splitBySection(items as LayoutItem[], draft.widgets, page, sectionId),
-            ]),
-          )
-          const { layouts: placed, refused } = fanOut(
-            Object.fromEntries(Object.entries(split).map(([key, value]) => [key, value.mine])),
-            authored.length > 0 ? authored : [page.grid.authoritative],
-            cols,
-            maxRows,
-            { id, w: body.size?.w ?? 4, h: body.size?.h ?? 3 },
-          )
-          refusals.push(...refused)
-          const layouts = Object.fromEntries(
-            [...new Set([...Object.keys(split), ...Object.keys(placed)])].map((breakpointId) => [
-              breakpointId,
-              [...(split[breakpointId]?.others ?? []), ...(placed[breakpointId] ?? [])],
-            ]),
-          )
-
-          draft.layouts.set(
-            pageId,
-            layoutFileSchema.parse({
-              page: pageId,
-              layouts,
-              meta: {
-                ...existing?.meta,
-                ...Object.fromEntries(
-                  authored.map((breakpointId) => [
-                    breakpointId,
-                    {
-                      origin: 'authored',
-                      cols: cols[breakpointId] ?? 12,
-                      updatedAt: new Date().toISOString(),
-                    },
-                  ]),
-                ),
-              },
-            }),
+          refusals.push(
+            ...placeWidget(draft, page, widget, { w: body.size?.w ?? 4, h: body.size?.h ?? 3 }),
           )
         },
         ifMatch(c.req.header('if-match')),
@@ -284,55 +193,15 @@ export function createApiRoutes(options: ApiOptions): Hono {
 
           // A move keeps the tile's size and lets first-fit find it a spot in the new section:
           // its old coordinates belong to a board it is no longer on.
-          const from = sectionOf(widget, page)
-          const to = sectionOf(updated, page)
-          if (body.section !== undefined && from !== to && to !== undefined) {
-            const existing = draft.layouts.get(page.id)
-            if (existing !== undefined) {
-              const authored = page.grid.breakpoints
-                .map((breakpoint) => breakpoint.id)
-                .filter((breakpointId) => existing.meta[breakpointId]?.origin !== 'derived')
-              const previous = existing.layouts[page.grid.authoritative]?.find(
-                (item) => item.i === id,
-              )
-              const stripped = Object.fromEntries(
-                Object.entries(existing.layouts).map(([breakpointId, items]) => [
-                  breakpointId,
-                  splitBySection(
-                    items.filter((item) => item.i !== id),
-                    draft.widgets,
-                    page,
-                    to,
-                  ),
-                ]),
-              )
-              const { cols, maxRows } = sectionGeometry(page, to)
-              const { layouts: placed, refused } = fanOut(
-                Object.fromEntries(
-                  Object.entries(stripped).map(([key, value]) => [key, value.mine]),
-                ),
-                authored.length > 0 ? authored : [page.grid.authoritative],
-                cols,
-                maxRows,
-                { id, w: previous?.w ?? 4, h: previous?.h ?? 3 },
-              )
-              if (refused.length > 0) {
-                throw new Error(
-                  `section "${to}" has no room for this widget (${refused.join(', ')})`,
-                )
-              }
-              draft.layouts.set(
-                page.id,
-                layoutFileSchema.parse({
-                  ...existing,
-                  layouts: Object.fromEntries(
-                    [...new Set([...Object.keys(stripped), ...Object.keys(placed)])].map((key) => [
-                      key,
-                      [...(stripped[key]?.others ?? []), ...(placed[key] ?? [])],
-                    ]),
-                  ),
-                }),
-              )
+          if (body.section !== undefined && sectionOf(widget, page) !== sectionOf(updated, page)) {
+            const refused = placeWidget(draft, page, updated, currentSize(draft, page, id))
+            if (refused.length > 0) {
+              throw new ConfigInvalidError([
+                {
+                  path: `layouts/${page.id}.json`,
+                  message: `section "${String(updated.section)}" has no room for this widget (${refused.join(', ')})`,
+                },
+              ])
             }
           }
         },
@@ -526,50 +395,12 @@ export function createApiRoutes(options: ApiOptions): Hono {
         (draft) => {
           const page = draft.pages.get(pageId)
           if (page === undefined) throw new Error(`no page "${pageId}"`)
-          const breakpoint = page.grid.breakpoints.find((entry) => entry.id === body.breakpoint)
-          if (breakpoint === undefined)
-            throw new Error(`no breakpoint "${String(body.breakpoint)}"`)
-          const sectionId = body.section ?? gridSectionIds(page)[0]
-          if (sectionId === undefined || !gridSectionIds(page).includes(sectionId)) {
-            throw new ConfigInvalidError([
-              { path: `pages/${pageId}.json`, message: `no grid section "${String(sectionId)}"` },
-            ])
-          }
-          const { cols, maxRows } = sectionGeometry(page, sectionId)
-          const sectionCols = cols[breakpoint.id] ?? breakpoint.cols
-
-          // Only this section's entries are replaced. A tile the caller sent that lives in another
-          // section is dropped rather than written twice.
-          const existing = draft.layouts.get(pageId)
-          const { others } = splitBySection(
-            existing?.layouts[breakpoint.id] ?? [],
-            draft.widgets,
+          saveSectionLayout(
+            draft,
             page,
-            sectionId,
-          )
-          const mine = (body.items as LayoutItem[]).filter((item) => {
-            const widget = draft.widgets.get(item.i)
-            return widget !== undefined && sectionOf(widget, page) === sectionId
-          })
-          const normalised = normaliseLayout(mine, sectionCols)
-          if (!withinMaxRows(normalised, maxRows)) {
-            throw new Error(`layout exceeds the section's ${String(maxRows)}-row limit`)
-          }
-
-          draft.layouts.set(
-            pageId,
-            layoutFileSchema.parse({
-              page: pageId,
-              layouts: { ...existing?.layouts, [breakpoint.id]: [...others, ...normalised] },
-              meta: {
-                ...existing?.meta,
-                [breakpoint.id]: {
-                  origin: 'authored',
-                  cols: breakpoint.cols,
-                  updatedAt: new Date().toISOString(),
-                },
-              },
-            }),
+            body.section,
+            body.breakpoint as string,
+            body.items as LayoutItem[],
           )
         },
         ifMatch(c.req.header('if-match')),

@@ -5,7 +5,7 @@ YAML and restarting a container.
 
 - **Edit everything from the UI.** A button in the bottom-left corner opens the editor: drag
   widgets around, change the theme, set a background, add a service from the catalog by filling in
-  a form.
+  a form, compose the page from [sections](/guide/sections) — a header, grids, bookmark groups.
 - **Your data is a folder of JSON.** `git init` it, push it, and a restore is `git clone`.
 - **Small enough for a 1 GB box.** One Node process, no database, no Redis.
 - **Configurable by an AI.** A built-in MCP server lets Claude, Codex or any MCP client add

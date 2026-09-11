@@ -1,8 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import type { AppContext } from '../context.ts'
-import { layoutFileSchema, targetSchema, widgetSchema } from '../config/schema.ts'
-import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.ts'
+import {
+  bookmarkLinkSchema,
+  layoutFileSchema,
+  pageSchema,
+  sectionSchema,
+  targetSchema,
+  widgetSchema,
+} from '../config/schema.ts'
+import { currentSize, placeWidget, saveSectionLayout } from '../config/board.ts'
+import { effectiveSections, sectionOf } from '../config/sections.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { probe } from '../fetcher/probe.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
@@ -12,7 +20,7 @@ import { DESIGN_TOOL_NAMES, registerDesignTools } from './design.ts'
 /**
  * The MCP surface.
  *
- * Fifteen semantic tools, fixed regardless of how large the catalog grows. One tool per widget type
+ * Seventeen semantic tools, fixed regardless of how large the catalog grows. One tool per widget type
  * was rejected for reasons that are measurable rather than aesthetic: every tool's schema is sent
  * on every request, so the surface is a permanent token tax, and Claude Code flattens root-level
  * anyOf/oneOf — which mangles the obvious discriminated-union-over-widget-types design. Every
@@ -84,6 +92,36 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           columns: Object.fromEntries(page.grid.breakpoints.map((b) => [b.id, b.cols])),
           maxRows: page.grid.maxRows,
           widgets: page.widgetIds.length,
+          // Top to bottom, as the page shows them. A grid section is where add_widget can land;
+          // a bookmarks section is what add_bookmark fills.
+          sections: page.sections.map((section) =>
+            section.kind === 'grid'
+              ? {
+                  id: section.id,
+                  kind: section.kind,
+                  title: section.title,
+                  columns: Object.fromEntries(section.grid.breakpoints.map((b) => [b.id, b.cols])),
+                  maxRows: section.grid.maxRows,
+                  widgets: section.widgetIds,
+                }
+              : section.kind === 'bookmarks'
+                ? {
+                    id: section.id,
+                    kind: section.kind,
+                    title: section.title,
+                    display: section.display,
+                    groups: section.groups.map((group) => ({
+                      id: group.id,
+                      title: group.title,
+                      links: group.links.length,
+                    })),
+                  }
+                : {
+                    id: section.id,
+                    kind: section.kind,
+                    items: section.items.map((item) => item.kind),
+                  },
+          ),
         })),
         widgets: resolved.widgets.map((widget) => ({
           id: widget.id,
@@ -302,6 +340,8 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           .optional(),
         width: z.number().int().min(1).max(24).optional(),
         height: z.number().int().min(1).max(24).optional(),
+        /** A grid section id from describe_dashboard; absent means the page's first grid. */
+        section: z.string().max(64).optional(),
         baseRevision: z.string().max(64).optional(),
       },
     },
@@ -335,51 +375,22 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
             const page = draft.pages.get(pageId)
             if (page === undefined) throw new Error(`no page "${pageId}"`)
 
-            draft.widgets.set(
+            const widget = widgetSchema.parse({
               id,
-              widgetSchema.parse({
-                id,
-                page: pageId,
-                type: manifest.id,
-                title: input.title ?? null,
-                targetId: input.targetId ?? null,
-                bindings: input.bindings ?? {},
-                config: input.config ?? {},
-                catalogRev: manifest.version,
-              }),
-            )
-
-            const existing = draft.layouts.get(pageId)
-            const authored = page.grid.breakpoints
-              .map((breakpoint) => breakpoint.id)
-              .filter((breakpointId) => existing?.meta[breakpointId]?.origin !== 'derived')
-            const cols = Object.fromEntries(
-              page.grid.breakpoints.map((breakpoint) => [breakpoint.id, breakpoint.cols]),
-            )
-
-            const fanned = fanOut(
-              (existing?.layouts ?? {}) as Record<string, LayoutItem[]>,
-              authored.length > 0 ? authored : [page.grid.authoritative],
-              cols,
-              page.grid.maxRows,
-              { id, w: input.width ?? 4, h: input.height ?? 3 },
-            )
-            refused.push(...fanned.refused)
-
-            draft.layouts.set(
-              pageId,
-              layoutFileSchema.parse({
-                page: pageId,
-                layouts: fanned.layouts,
-                meta: {
-                  ...existing?.meta,
-                  ...Object.fromEntries(
-                    authored.map((breakpointId) => [
-                      breakpointId,
-                      { origin: 'authored', cols: cols[breakpointId] ?? 12 },
-                    ]),
-                  ),
-                },
+              page: pageId,
+              type: manifest.id,
+              title: input.title ?? null,
+              section: input.section ?? null,
+              targetId: input.targetId ?? null,
+              bindings: input.bindings ?? {},
+              config: input.config ?? {},
+              catalogRev: manifest.version,
+            })
+            draft.widgets.set(id, widget)
+            refused.push(
+              ...placeWidget(draft, page, widget, {
+                w: input.width ?? 4,
+                h: input.height ?? 3,
               }),
             )
           },
@@ -398,13 +409,16 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     'update_widget',
     {
       title: 'Update a widget',
-      description: 'Change a widget’s title or options. Config is merged, not replaced.',
+      description:
+        'Change a widget’s title or options, or move it to another grid section of its page. ' +
+        'Config is merged, not replaced. A moved widget keeps its size and is placed first-fit.',
       inputSchema: {
         id: z.string().max(64),
         title: z.string().max(64).nullable().optional(),
         config: z
           .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
           .optional(),
+        section: z.string().max(64).optional(),
         baseRevision: z.string().max(64).optional(),
       },
     },
@@ -415,16 +429,26 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           (draft) => {
             const widget = draft.widgets.get(input.id)
             if (widget === undefined) throw new Error(`no widget "${input.id}"`)
-            draft.widgets.set(
-              input.id,
-              widgetSchema.parse({
-                ...widget,
-                ...(input.title === undefined ? {} : { title: input.title }),
-                ...(input.config === undefined
-                  ? {}
-                  : { config: { ...widget.config, ...input.config } }),
-              }),
-            )
+            const page = draft.pages.get(widget.page)
+            if (page === undefined) throw new Error(`no page "${widget.page}"`)
+            const updated = widgetSchema.parse({
+              ...widget,
+              ...(input.title === undefined ? {} : { title: input.title }),
+              ...(input.section === undefined ? {} : { section: input.section }),
+              ...(input.config === undefined
+                ? {}
+                : { config: { ...widget.config, ...input.config } }),
+            })
+            draft.widgets.set(input.id, updated)
+            if (
+              input.section !== undefined &&
+              sectionOf(widget, page) !== sectionOf(updated, page)
+            ) {
+              const refused = placeWidget(draft, page, updated, currentSize(draft, page, input.id))
+              if (refused.length > 0) {
+                throw new Error(`section "${input.section}" has no room (${refused.join(', ')})`)
+              }
+            }
           },
           input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
         )
@@ -484,10 +508,12 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     {
       title: 'Move widgets',
       description:
-        'Set the geometry for one breakpoint. Coordinates are grid units. The layout is clamped ' +
-        'to the column count and refused if it exceeds the page row limit.',
+        'Set the geometry of one grid section for one breakpoint. Coordinates are grid units from ' +
+        'the section’s own top-left. The layout is clamped to the section’s column count and ' +
+        'refused if it exceeds its row limit. Omit section for the page’s first grid.',
       inputSchema: {
         page: z.string().max(64),
+        section: z.string().max(64).optional(),
         breakpoint: z.string().max(32),
         items: z
           .array(
@@ -510,24 +536,12 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           (draft) => {
             const page = draft.pages.get(input.page)
             if (page === undefined) throw new Error(`no page "${input.page}"`)
-            const breakpoint = page.grid.breakpoints.find((entry) => entry.id === input.breakpoint)
-            if (breakpoint === undefined) throw new Error(`no breakpoint "${input.breakpoint}"`)
-
-            const normalised = normaliseLayout(input.items as LayoutItem[], breakpoint.cols)
-            if (!withinMaxRows(normalised, page.grid.maxRows)) {
-              throw new Error(`layout exceeds the page's ${String(page.grid.maxRows)}-row limit`)
-            }
-            const existing = draft.layouts.get(input.page)
-            draft.layouts.set(
-              input.page,
-              layoutFileSchema.parse({
-                page: input.page,
-                layouts: { ...existing?.layouts, [breakpoint.id]: normalised },
-                meta: {
-                  ...existing?.meta,
-                  [breakpoint.id]: { origin: 'authored', cols: breakpoint.cols },
-                },
-              }),
+            saveSectionLayout(
+              draft,
+              page,
+              input.section,
+              input.breakpoint,
+              input.items as LayoutItem[],
             )
           },
           input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
@@ -535,6 +549,132 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         await context.reload()
         void context.requestPublish(deps.actor)
         return ok({ revision: result.revision })
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error))
+      }
+    },
+  )
+
+  server.registerTool(
+    'set_sections',
+    {
+      title: 'Set a page’s sections',
+      description:
+        'Replace a page’s sections whole, top to bottom. Kinds: navbar (items: title, text, ' +
+        'links, clock, search, spacer), grid (a board of widgets, with its own cols per breakpoint ' +
+        'and maxRows), bookmarks (groups of links; columns per breakpoint; display list, cards, ' +
+        'icons or chips). A link is scheme, host, port and path — never a URL. Read the current ' +
+        'list with get_sections first: a grid section that disappears while widgets still name ' +
+        'it is refused, and ids are how the editor finds things.',
+      inputSchema: {
+        page: z.string().max(64),
+        sections: z.array(sectionSchema).max(24),
+        baseRevision: z.string().max(64).optional(),
+      },
+    },
+    async (input) => {
+      try {
+        const result = await context.store.transaction(
+          deps.actor,
+          (draft) => {
+            const page = draft.pages.get(input.page)
+            if (page === undefined) throw new Error(`no page "${input.page}"`)
+            draft.pages.set(input.page, pageSchema.parse({ ...page, sections: input.sections }))
+          },
+          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+        )
+        await context.reload()
+        void context.requestPublish(deps.actor)
+        return ok({ revision: result.revision })
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error))
+      }
+    },
+  )
+
+  server.registerTool(
+    'get_sections',
+    {
+      title: 'Get a page’s sections',
+      description:
+        'The page’s sections as stored — what was set, blanks where the page defaults apply — ' +
+        'in the shape set_sections accepts. A page that never declared any returns the implicit ' +
+        'pair: a navbar carrying the title over one grid.',
+      annotations: { readOnlyHint: true },
+      inputSchema: { page: z.string().max(64).optional() },
+    },
+    async (input) => {
+      const { tree } = await context.state()
+      const pageId = input.page ?? tree.dashboard.defaultPage
+      const page = tree.pages.get(pageId)
+      if (page === undefined) return fail(`no page "${pageId}"`)
+      return ok({ page: pageId, sections: effectiveSections(page) })
+    },
+  )
+
+  server.registerTool(
+    'add_bookmark',
+    {
+      title: 'Add a bookmark',
+      description:
+        'Add one link to a group in a bookmarks section, creating the group by title if it does ' +
+        'not exist. The destination is host and port (and scheme, and a path), never a URL. ' +
+        'Icon is a dashboard-icons slug such as "nextcloud"; it is fetched and cached by the ' +
+        'server. Use set_sections to reorder or remove.',
+      inputSchema: {
+        page: z.string().max(64).optional(),
+        section: z.string().max(64),
+        group: z.string().max(64),
+        label: z.string().min(1).max(64),
+        host: z.string().min(1).max(253),
+        port: z.number().int().min(1).max(65535).optional(),
+        scheme: z.enum(['http', 'https']).optional(),
+        path: z.string().max(200).optional(),
+        icon: z.string().max(64).optional(),
+        baseRevision: z.string().max(64).optional(),
+      },
+    },
+    async (input) => {
+      const linkId = newId('l')
+      try {
+        const result = await context.store.transaction(
+          deps.actor,
+          (draft) => {
+            const pageId = input.page ?? draft.dashboard.defaultPage
+            const page = draft.pages.get(pageId)
+            if (page === undefined) throw new Error(`no page "${pageId}"`)
+            const sections = effectiveSections(page).map((section) => structuredClone(section))
+            const section = sections.find((candidate) => candidate.id === input.section)
+            if (section === undefined || section.kind !== 'bookmarks') {
+              throw new Error(`no bookmarks section "${input.section}" on page "${pageId}"`)
+            }
+            const scheme = input.scheme ?? 'http'
+            const link = bookmarkLinkSchema.parse({
+              id: linkId,
+              label: input.label,
+              base: {
+                scheme,
+                host: input.host,
+                port: input.port ?? (scheme === 'https' ? 443 : 80),
+              },
+              path: input.path ?? '/',
+              icon: input.icon ?? null,
+            })
+            const group =
+              section.groups.find((candidate) => candidate.id === input.group) ??
+              section.groups.find((candidate) => candidate.title === input.group)
+            if (group === undefined) {
+              section.groups.push({ id: newId('g'), title: input.group, links: [link] })
+            } else {
+              group.links.push(link)
+            }
+            draft.pages.set(pageId, pageSchema.parse({ ...page, sections }))
+          },
+          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+        )
+        await context.reload()
+        void context.requestPublish(deps.actor)
+        return ok({ id: linkId, revision: result.revision })
       } catch (error) {
         return fail(error instanceof Error ? error.message : String(error))
       }
@@ -617,6 +757,9 @@ export const TOOL_NAMES = [
   'update_widget',
   'remove_widget',
   'set_layout',
+  'set_sections',
+  'get_sections',
+  'add_bookmark',
   'test_target',
   'publish',
   ...DESIGN_TOOL_NAMES,
