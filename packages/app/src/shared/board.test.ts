@@ -18,6 +18,7 @@ const widget = (overrides: Partial<ResolvedWidget> = {}): ResolvedWidget => ({
   pollIntervalMs: 60_000,
   unsupported: false,
   href: null,
+  iconUrl: null,
   ...overrides,
 })
 
@@ -232,7 +233,13 @@ describe('the dashboard shell', () => {
 })
 
 describe('sections', () => {
-  const link = (id: string, label: string, href: string) => ({ id, label, href, icon: null })
+  const link = (id: string, label: string, href: string, iconUrl: string | null = null) => ({
+    id,
+    label,
+    href,
+    icon: null,
+    iconUrl,
+  })
   const withSections = (sections: unknown[]): Resolved =>
     ({
       schemaVersion: 1,
@@ -273,9 +280,7 @@ describe('sections', () => {
     expect(rendered).toContain('rack 2')
     expect(rendered).toContain('class="nh-nav-link" href="http://nas.home/"')
     expect(rendered).toContain('class="nh-spacer"')
-    expect(rendered).toMatch(
-      /<time class="nh-clock"[^>]*>\d\d:\d\d · [A-Z][a-z]{2} 11 Sep<\/time>/,
-    )
+    expect(rendered).toMatch(/<time class="nh-clock"[^>]*>\d\d:\d\d · [A-Z][a-z]{2} 11 Sep<\/time>/)
     expect(rendered).toContain('action="https://duckduckgo.com/" method="get"')
     expect(rendered).toContain('name="q"')
     expect(rendered).toContain('placeholder="Search the web"')
@@ -310,8 +315,41 @@ describe('sections', () => {
     expect(rendered).toContain('<h2 class="nh-section-title">Links</h2>')
     expect(rendered).toContain('<h3 class="nh-group-title">Router</h3>')
     expect(rendered).toContain('class="nh-bm" href="http://192.168.2.1/"')
-    // The glyph is the label's initial; the icon pipeline replaces it with an image later.
+    // The glyph is the label's initial until the icon is cached; then it is the image.
     expect(rendered).toContain('aria-hidden="true">F</span>')
+  })
+
+  it('draws a cached icon as a decorative image, on links and on tiles', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+          {
+            id: 'links',
+            kind: 'bookmarks',
+            title: null,
+            columns: { sm: 1, md: 2, lg: 3 },
+            display: 'icons',
+            groups: [
+              {
+                id: 'g',
+                title: 'NAS',
+                links: [link('l1', 'Nextcloud', 'http://cloud.home/', '/assets/icons/nextcloud')],
+              },
+            ],
+          },
+        ]),
+        {},
+      ),
+    )
+    expect(rendered).toContain('<img class="nh-icon" src="/assets/icons/nextcloud" alt=""')
+    expect(rendered).not.toContain('aria-hidden="true">N</span>')
+
+    const tile = html(
+      widgetTile(widget({ title: 'AdGuard', iconUrl: '/assets/icons/adguard-home' }), undefined),
+    )
+    expect(tile).toContain('src="/assets/icons/adguard-home"')
+    expect(tile).toContain('<h2 id="w1-title" class="nh-tile-title">AdGuard</h2>')
   })
 
   it('keeps one header landmark and one main, with later navbars inside main', () => {

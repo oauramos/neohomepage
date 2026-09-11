@@ -184,7 +184,7 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-bm:hover{background:var(--nh-muted)}
 .nh-bm:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
 .nh-bm-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nh-icon{flex:none;width:20px;height:20px}
+.nh-icon{flex:none;width:20px;height:20px;object-fit:contain}
 .nh-icon-glyph{display:inline-flex;align-items:center;justify-content:center;
   border-radius:min(6px,var(--nh-radius));background:var(--nh-muted);
   color:var(--nh-muted-foreground);font-size:0.6875rem;font-weight:700}
@@ -225,6 +225,8 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
    presets, which axe saw the moment link tiles stopped rendering as placeholders. */
 .nh-tile[data-neo-template="link-tile"][data-neo-state="pending"] .nh-tile-body{opacity:1}
 .nh-tile-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.nh-tile-titles{display:flex;align-items:center;gap:8px;min-width:0}
+.nh-tile-titles .nh-icon{width:18px;height:18px}
 .nh-tile-title{margin:0;font-size:var(--nh-title-size);font-weight:600;
   letter-spacing:var(--nh-title-tracking);text-transform:var(--nh-title-transform);
   color:var(--nh-muted-foreground)}

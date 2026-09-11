@@ -3,7 +3,10 @@ import { join } from 'node:path'
 import { setTimeout as setNodeTimeout, clearTimeout as clearNodeTimeout } from 'node:timers'
 import type { Manifest, SingleManifest, SourceKind } from '@neohomepage/catalog-schema'
 import { isComposite } from '@neohomepage/catalog-schema'
+import { IconStore, type IconFetch } from './assets/icons.ts'
 import { loadCatalogDirectory } from './catalog/load.ts'
+import { effectiveSections } from './config/sections.ts'
+import { fetchUpstream } from './fetcher/client.ts'
 import { overridesSchema, EMPTY_OVERRIDES, type Overrides } from './config/overrides.ts'
 import { env } from './env.ts'
 import { executeOperation, executeSource } from './fetcher/execute.ts'
@@ -50,6 +53,8 @@ export type AppContext = {
   catalog(): ReadonlyMap<string, Manifest>
   requestPublish(actor: string, mode?: PublishMode): Promise<PublishResult | null>
   publishNow(actor: string, label?: string): Promise<PublishResult>
+  /** The icon cache: what is on disk, and where a cached slug is served from. */
+  icons(): IconStore
   shutdown(): Promise<void>
 }
 
@@ -59,6 +64,51 @@ export type ContextOptions = {
   /** Auto-publish debounce. Twelve rapid edits become one render. */
   readonly publishDebounceMs?: number
   readonly publishMode?: PublishMode
+  /**
+   * How an icon slug becomes bytes. Defaults to the real CDN fetch — except under vitest, where
+   * a test that adds a Sonarr widget must not reach the internet for Sonarr's logo. `null`
+   * disables fetching outright; cached icons are still served.
+   */
+  readonly iconFetch?: IconFetch | null
+}
+
+/** One icon over the same client every widget uses, so the egress policy is the same policy. */
+const fetchIconFromCdn: IconFetch = async (url, maxBytes) => {
+  try {
+    const response = await fetchUpstream({
+      url: new URL(url),
+      method: 'GET',
+      binary: true,
+      limits: { maxBodyBytes: maxBytes },
+    })
+    return response.status === 200 && !response.truncated ? (response.bytes ?? null) : null
+  } catch {
+    return null
+  }
+}
+
+/** Every icon slug the config names: each widget's manifest, each bookmark, each navbar link. */
+function iconSlugs(tree: ConfigTree, catalog: ReadonlyMap<string, Manifest>): Set<string> {
+  const slugs = new Set<string>()
+  for (const widget of tree.widgets.values()) {
+    const icon = catalog.get(widget.type)?.icon
+    if (icon !== undefined) slugs.add(icon)
+  }
+  for (const page of tree.pages.values()) {
+    for (const section of effectiveSections(page)) {
+      if (section.kind === 'bookmarks') {
+        for (const group of section.groups)
+          for (const link of group.links) if (link.icon !== null) slugs.add(link.icon)
+      }
+      if (section.kind === 'navbar') {
+        for (const item of section.items) {
+          if (item.kind === 'links')
+            for (const link of item.links) if (link.icon !== null) slugs.add(link.icon)
+        }
+      }
+    }
+  }
+  return slugs
 }
 
 async function readOverrides(path: string): Promise<Overrides> {
@@ -82,6 +132,16 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     setTimer: (callback, delay) => setNodeTimeout(callback, delay),
     clearTimer: (handle) => clearNodeTimeout(handle as ReturnType<typeof setNodeTimeout>),
   })
+
+  const iconFetch =
+    options.iconFetch === undefined
+      ? process.env.VITEST === undefined
+        ? fetchIconFromCdn
+        : null
+      : options.iconFetch
+  const icons = new IconStore(env.stateDir, iconFetch ?? (async () => null))
+  await icons.load()
+  let fetchingIcons = false
 
   let catalog: ReadonlyMap<string, Manifest> = new Map()
   let tree: ConfigTree | null = null
@@ -119,12 +179,37 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       tree: loaded.tree,
       catalog,
       overrides,
+      icons: icons.available(),
       // Stamped once per resolve so two runs over identical inputs differ only here, which keeps
       // the publish step's no-op detection meaningful.
       generatedAt: new Date().toISOString(),
     })
 
     await resubscribe(loaded.tree, resolved as Resolved)
+    void fetchMissingIcons(loaded.tree)
+  }
+
+  /**
+   * Icons arrive after the fact: the page renders with an initial where an icon is not cached
+   * yet, the fetch runs behind the render, and a rebuild (plus a publish) follows once something
+   * has landed. One pass at a time — a burst of edits must not start a burst of fetches.
+   */
+  async function fetchMissingIcons(current: ConfigTree): Promise<void> {
+    if (iconFetch === null || fetchingIcons) return
+    fetchingIcons = true
+    try {
+      const arrived = await icons.ensure(iconSlugs(current, catalog), {
+        offline: current.network.mode === 'offline',
+      })
+      if (arrived.length === 0) return
+      await rebuild()
+      hub.broadcast({ type: 'config', data: { revision } })
+      await context.requestPublish('icons')
+    } catch (error) {
+      console.warn(`icons: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      fetchingIcons = false
+    }
   }
 
   /**
@@ -493,6 +578,10 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     },
 
     watcher,
+
+    icons() {
+      return icons
+    },
 
     async shutdown() {
       scheduler.stop()

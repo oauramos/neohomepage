@@ -55,6 +55,7 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         pollIntervalMs: 60_000,
         unsupported: false,
         href: null,
+        iconUrl: null,
       },
     ],
     targets: [

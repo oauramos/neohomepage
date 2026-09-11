@@ -44,7 +44,18 @@ export type ResolveInput = {
   readonly tree: ConfigTree
   readonly catalog: ReadonlyMap<string, Manifest>
   readonly overrides?: Overrides
+  /** Icon slugs with a cached file. Absent means no icon renders as an image — the glyph does. */
+  readonly icons?: ReadonlySet<string>
   readonly generatedAt: string
+}
+
+/** Where a cached icon is served from. The store names the file; this only has to agree on the path. */
+function iconUrl(
+  slug: string | null | undefined,
+  icons: ReadonlySet<string> | undefined,
+): string | null {
+  if (slug === null || slug === undefined || icons === undefined || !icons.has(slug)) return null
+  return `/assets/icons/${slug}`
 }
 
 function manifestDefaults(manifest: Manifest | undefined): Record<string, unknown> {
@@ -78,6 +89,7 @@ function resolveWidget(
   targets: ReadonlyMap<string, ResolvedTarget>,
   overrides: Overrides,
   diagnostics: string[],
+  icons: ReadonlySet<string> | undefined,
 ): ResolvedWidget {
   const manifest = catalog.get(widget.type)
   if (manifest === undefined) {
@@ -130,6 +142,7 @@ function resolveWidget(
       config,
       widget.targetId === null ? undefined : targets.get(widget.targetId),
     ),
+    iconUrl: iconUrl(manifest?.icon, icons),
   }
 }
 
@@ -169,23 +182,28 @@ export function deriveLayout(
   return getCompactor('vertical').compact(bounded, toCols) as LayoutItem[]
 }
 
-function resolveLink(link: BookmarkLink): ResolvedLink {
+function resolveLink(link: BookmarkLink, icons: ReadonlySet<string> | undefined): ResolvedLink {
   return {
     id: link.id,
     label: link.label,
     href: composeHref(link.base, link.path),
     icon: link.icon,
+    iconUrl: iconUrl(link.icon, icons),
   }
 }
 
-function resolveNavItem(item: NavItem): ResolvedNavItem {
+function resolveNavItem(item: NavItem, icons: ReadonlySet<string> | undefined): ResolvedNavItem {
   switch (item.kind) {
     case 'title':
       return { id: item.id, kind: 'title' }
     case 'text':
       return { id: item.id, kind: 'text', text: item.text }
     case 'links':
-      return { id: item.id, kind: 'links', links: item.links.map(resolveLink) }
+      return {
+        id: item.id,
+        kind: 'links',
+        links: item.links.map((link) => resolveLink(link, icons)),
+      }
     case 'clock':
       return { id: item.id, kind: 'clock', showDate: item.showDate, hour12: item.hour12 }
     case 'search':
@@ -214,6 +232,7 @@ function resolveSection(
   pageWidgets: readonly Widget[],
   stored: Readonly<Record<string, readonly LayoutItem[]>>,
   meta: Readonly<Record<string, { readonly origin: 'authored' | 'derived' }>>,
+  icons: ReadonlySet<string> | undefined,
 ): ResolvedSection {
   switch (section.kind) {
     case 'navbar':
@@ -221,7 +240,7 @@ function resolveSection(
         id: section.id,
         kind: 'navbar',
         title: section.title,
-        items: section.items.map(resolveNavItem),
+        items: section.items.map((item) => resolveNavItem(item, icons)),
       }
 
     case 'bookmarks':
@@ -239,7 +258,7 @@ function resolveSection(
         groups: section.groups.map((group) => ({
           id: group.id,
           title: group.title,
-          links: group.links.map(resolveLink),
+          links: group.links.map((link) => resolveLink(link, icons)),
         })),
       }
 
@@ -294,7 +313,9 @@ export function resolve(input: ResolveInput): Resolved {
 
   const widgets = [...tree.widgets.values()]
     .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
-    .map((widget) => resolveWidget(widget, catalog, targetsById, overrides, diagnostics))
+    .map((widget) =>
+      resolveWidget(widget, catalog, targetsById, overrides, diagnostics, input.icons),
+    )
 
   const pages: ResolvedPage[] = []
   for (const pageId of tree.dashboard.pages) {
@@ -306,7 +327,14 @@ export function resolve(input: ResolveInput): Resolved {
       .filter((w) => w.page === pageId)
       .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
     const sections = effectiveSections(page).map((section) =>
-      resolveSection(section, page, pageWidgets, layoutFile?.layouts ?? {}, layoutFile?.meta ?? {}),
+      resolveSection(
+        section,
+        page,
+        pageWidgets,
+        layoutFile?.layouts ?? {},
+        layoutFile?.meta ?? {},
+        input.icons,
+      ),
     )
 
     // A widget with no placement anywhere is invisible with no error, which reads as data loss.

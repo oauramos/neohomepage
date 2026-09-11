@@ -33,6 +33,8 @@ export type ResolvedWidget = {
    * and none of those is a reason for the link to vanish from the tile.
    */
   readonly href: string | null
+  /** The cached icon for this widget's type, as a page-relative URL, or null until it is cached. */
+  readonly iconUrl: string | null
 }
 
 /** A bookmark or navbar link with its destination composed: origin plus path, never a raw URL from config. */
@@ -41,6 +43,8 @@ export type ResolvedLink = {
   readonly label: string
   readonly href: string
   readonly icon: string | null
+  /** Page-relative URL of the cached icon; null until fetched, or when the slug is unknown. */
+  readonly iconUrl: string | null
 }
 
 export type ResolvedNavItem =

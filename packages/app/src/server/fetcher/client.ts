@@ -47,19 +47,23 @@ export type UpstreamRequest = {
   readonly allowLoopback?: boolean
   readonly insecureSkipVerify?: boolean
   readonly limits?: Partial<FetchLimits>
+  /** Keep the response as bytes rather than decoding it as UTF-8 text — for an icon, not an API. */
+  readonly binary?: boolean
 }
 
 export type UpstreamResponse = {
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
   readonly body: string
+  /** Present only for a `binary` request; `body` is then empty. */
+  readonly bytes?: Uint8Array
   readonly truncated: boolean
 }
 
 async function readCapped(
   body: AsyncIterable<Buffer>,
   maxBytes: number,
-): Promise<{ text: string; truncated: boolean }> {
+): Promise<{ bytes: Buffer; truncated: boolean }> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of body) {
@@ -68,11 +72,11 @@ async function readCapped(
       // Keep the prefix so a decoder can still report something useful, then stop reading. The
       // remote end is disconnected by leaving the iterator.
       chunks.push(chunk.subarray(0, chunk.length - (total - maxBytes)))
-      return { text: Buffer.concat(chunks).toString('utf8'), truncated: true }
+      return { bytes: Buffer.concat(chunks), truncated: true }
     }
     chunks.push(chunk)
   }
-  return { text: Buffer.concat(chunks).toString('utf8'), truncated: false }
+  return { bytes: Buffer.concat(chunks), truncated: false }
 }
 
 /**
@@ -131,12 +135,14 @@ export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamRes
       )
     }
 
-    const { text, truncated } = await readCapped(response.body, limits.maxBodyBytes)
+    const { bytes, truncated } = await readCapped(response.body, limits.maxBodyBytes)
     const headers: Record<string, string> = {}
     for (const [key, value] of Object.entries(response.headers)) {
       if (typeof value === 'string') headers[key.toLowerCase()] = value
     }
-    return { status: response.statusCode, headers, body: text, truncated }
+    return input.binary === true
+      ? { status: response.statusCode, headers, body: '', bytes: new Uint8Array(bytes), truncated }
+      : { status: response.statusCode, headers, body: bytes.toString('utf8'), truncated }
   } catch (error) {
     if (error instanceof UpstreamError) throw error
     const code = (error as { code?: string }).code

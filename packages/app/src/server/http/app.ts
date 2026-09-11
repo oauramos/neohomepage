@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join, normalize } from 'node:path'
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
@@ -246,6 +246,23 @@ export function createApp(options: AppOptions): Hono {
     return stream(c, async (writable) => {
       const readable = createReadStream(path)
       for await (const chunk of readable) await writable.write(chunk as Uint8Array)
+    })
+  })
+
+  /**
+   * A cached service icon. Served with a sandboxing policy on top of the type check the store
+   * made when it saved the file: an SVG is a document, and one that ever slipped through must not
+   * be able to run anything on this origin even when opened directly.
+   */
+  app.get('/assets/icons/:slug', async (c) => {
+    const file = context.icons().fileFor(c.req.param('slug'))
+    if (file === null) return c.json({ error: 'unknown icon' }, 404)
+    const bytes = await readFile(file.path)
+    return c.body(bytes, 200, {
+      'content-type': file.mime,
+      'cache-control': 'public, max-age=86400',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
     })
   })
 

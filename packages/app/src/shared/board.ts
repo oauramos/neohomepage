@@ -221,11 +221,14 @@ export function widgetTile(
     },
     [
       h('header', { className: 'nh-tile-head', key: 'head' }, [
-        h(
-          'h2',
-          { id: `${widget.id}-title`, className: 'nh-tile-title', key: 'title' },
-          widget.title,
-        ),
+        h('span', { className: 'nh-tile-titles', key: 'titles' }, [
+          widget.iconUrl === null ? null : iconFor(widget.title, widget.iconUrl),
+          h(
+            'h2',
+            { id: `${widget.id}-title`, className: 'nh-tile-title', key: 'title' },
+            widget.title,
+          ),
+        ]),
         state === 'stale' || state === 'error'
           ? h(
               'span',
@@ -250,13 +253,33 @@ export type RenderOptions = {
   readonly renderGrid?: (section: ResolvedGridSection) => ReactNode
 }
 
-/** Placeholder glyph for a link without an icon: its initial, in a rounded square the CSS draws. */
-function linkGlyph(link: ResolvedLink): ReactNode {
+/**
+ * A service icon: the cached image when there is one, else the label's initial in a rounded
+ * square the CSS draws. Decorative either way — the label beside it carries the name — so it is
+ * hidden from assistive technology rather than described twice.
+ */
+function iconFor(label: string, iconUrl: string | null): ReactNode {
+  if (iconUrl !== null) {
+    return h('img', {
+      className: 'nh-icon',
+      src: iconUrl,
+      alt: '',
+      width: 20,
+      height: 20,
+      loading: 'lazy',
+      decoding: 'async',
+      key: 'icon',
+    })
+  }
   return h(
     'span',
     { className: 'nh-icon nh-icon-glyph', 'aria-hidden': 'true', key: 'icon' },
-    link.label.trim().charAt(0).toUpperCase(),
+    label.trim().charAt(0).toUpperCase(),
   )
+}
+
+function linkGlyph(link: ResolvedLink): ReactNode {
+  return iconFor(link.label, link.iconUrl)
 }
 
 function linkAnchor(link: ResolvedLink, className: string): ReactNode {
