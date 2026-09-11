@@ -347,8 +347,12 @@ export const targetSchema = z
           .max(120)
           .default('')
           .refine(
-            (value) => value === '' || /^\/[A-Za-z0-9._~\-/]*$/.test(value),
-            'must be an absolute path containing only unreserved URL characters',
+            // Unreserved characters, plus percent-escapes: a Google Calendar feed lives at
+            // /calendar/ical/<user>%40gmail.com/private-<token>/basic.ics, and refusing `%40`
+            // refused every Google calendar. An escape is still one opaque path character — the
+            // URL parser keeps it as written, so the origin-and-pathname check holds.
+            (value) => value === '' || /^\/(?:[A-Za-z0-9._~\-/]|%[0-9A-Fa-f]{2})*$/.test(value),
+            'must be an absolute path containing only unreserved URL characters or %XX escapes',
           )
           .refine((value) => !value.split('/').includes('..'), 'must not contain ".."'),
       })
