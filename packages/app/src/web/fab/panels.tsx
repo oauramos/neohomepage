@@ -2,21 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { Resolved } from '../../shared/resolved.ts'
 import type { DashboardState } from '../state.ts'
 
-/**
- * The editor's panels, split out of `main.tsx` once there were five of them.
- *
- * The split is not cosmetic: Theme and Config both hold their own draft state, and a `switch` in a
- * render function has nowhere to keep it — the components below can.
- */
+/** The editor's panels; each is a component because Theme and Config hold their own draft state. */
 
-/**
- * Theme import and export.
- *
- * The same JSON either way, and the same JSON that lives in `config/theme.json` — so someone who
- * pulls the repo, edits the file and pushes has done exactly what this box does, and someone who
- * has never seen a terminal can still move a look between two installs. That equivalence is the
- * point: this is not an export format, it is the file.
- */
+/** Theme import and export; the JSON either way is `config/theme.json` as it is on disk. */
 export function ThemePanel({
   state,
   onImported,
@@ -66,8 +54,7 @@ export function ThemePanel({
       return
     }
 
-    // Replace rather than merge: an import is "make it look like this", and merging would leave
-    // whatever the current theme had that the imported one does not mention.
+    // Replace, not merge: tokens the imported theme does not mention must be cleared.
     const cleared = Object.fromEntries(
       (['theme', 'light', 'dark'] as const).map((bucket) => [
         bucket,
@@ -80,13 +67,19 @@ export function ThemePanel({
       ]),
     )
 
-    const response = await fetch('/api/theme', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...theme, cssVars: cleared }),
-    })
+    let response: Response
+    try {
+      response = await fetch('/api/theme', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...theme, cssVars: cleared }),
+      })
+    } catch {
+      setStatus({ tone: 'bad', message: 'The server did not answer' })
+      return
+    }
     if (!response.ok) {
-      const body = (await response.json()) as { error?: string }
+      const body = (await response.json().catch(() => ({}))) as { error?: string }
       setStatus({ tone: 'bad', message: body.error ?? 'The server refused it' })
       return
     }
@@ -274,8 +267,7 @@ export function AboutPanel({ state }: { state: DashboardState }) {
       <ul className="nh-links">
         {LINKS.map((link) => (
           <li key={link.href}>
-            {/* noreferrer as well as noopener: the referrer would leak the dashboard's hostname,
-                which on a homelab is often a private name the user has not published anywhere. */}
+            {/* noreferrer: the referrer would leak the dashboard's (often private) hostname. */}
             <a href={link.href} target="_blank" rel="noreferrer">
               <svg
                 viewBox="0 0 24 24"

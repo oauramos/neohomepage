@@ -1,23 +1,14 @@
 import chokidar, { type FSWatcher } from 'chokidar'
 
 /**
- * Watch the config directory so a hand edit — or a `git pull` — shows up without a restart.
- *
- * Two things make this reliable rather than a source of "works on my machine":
- *
- * The self-write guard is a CONTENT HASH, not a timer. Every write the app makes also fires the
- * watcher, and suppressing that with "ignore events for 500ms after we write" is a race that
- * shows up as a lost edit exactly when the disk is slow — which is to say, on a NAS. Recording
- * the revision we just wrote and ignoring an event that reports it is exact.
- *
- * Polling is exposed as an environment variable and documented, because `fs.watch` genuinely does
- * not fire on SMB, NFS, virtiofs and some LXC bind mounts, which are precisely the places this
- * app runs.
+ * Watches the config directory so external edits show up without a restart. Own writes are
+ * recognised by content revision rather than a timer, which races on slow disks; polling is
+ * opt-in because `fs.watch` does not fire on SMB, NFS, virtiofs and some LXC bind mounts.
  */
 
 export type WatcherOptions = {
   readonly directory: string
-  /** Called after the debounce with the revision now on disk. */
+  /** Called once per debounced burst of file events. */
   readonly onChange: () => void | Promise<void>
   readonly debounceMs?: number
   readonly usePolling?: boolean
@@ -34,11 +25,8 @@ export class ConfigWatcher {
   }
 
   /**
-   * Tell the watcher which revision the app itself just produced.
-   *
-   * The next reload that reports this revision is our own write echoing back and is dropped. A
-   * revision is only expected once: a genuine external edit that happens to restore the same
-   * content still gets through the second time.
+   * Marks a revision as the app's own write so its watcher echo is dropped. Consumed once, so an
+   * external edit that restores the same content still gets through.
    */
   expect(revision: string): void {
     this.#expected.add(revision)
@@ -53,13 +41,11 @@ export class ConfigWatcher {
     if (this.#watcher !== null) return
     this.#watcher = chokidar.watch(this.#options.directory, {
       ignoreInitial: true,
-      // A JSON file being written is briefly incomplete; waiting for it to settle avoids parsing
-      // a half-written document and reporting a spurious error to the user.
+      // Avoids parsing a half-written JSON file.
       awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 50 },
       usePolling: this.#options.usePolling ?? process.env.NEOHOMEPAGE_WATCH_POLLING === '1',
-      // The audit log is append-only and changes on every write; watching it would mean every
-      // write triggers a reload of the tree it just wrote.
-      ignored: (path: string) => path.endsWith('.audit.jsonl') || path.includes('/state/'),
+      // The audit log changes on every write; watching it would reload after each own write.
+      ignored: (path: string) => path.endsWith('.audit.jsonl'),
     })
 
     const schedule = () => {

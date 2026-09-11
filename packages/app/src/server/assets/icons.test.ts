@@ -56,7 +56,6 @@ describe('the icon store', () => {
     expect(store.fileFor('nextcloud')).toMatchObject({ mime: 'image/svg+xml' })
     expect(await readdir(join(dir, 'icons'))).toEqual(['nextcloud.svg'])
 
-    // A second store over the same directory knows the icon without asking anyone.
     const again = new IconStore(dir, fake.fetch)
     await again.load()
     expect(await again.ensure(['nextcloud'], { offline: false })).toEqual([])
@@ -129,7 +128,7 @@ describe('the icon store', () => {
 })
 
 describe('icon references', () => {
-  it('reads the three sets by prefix, with an optional colour, the way gethomepage spells them', () => {
+  it('reads the five sets by prefix, with an optional colour, the way gethomepage spells them', () => {
     expect(parseIconRef('nextcloud')).toEqual({
       source: 'dashboard',
       slug: 'nextcloud',

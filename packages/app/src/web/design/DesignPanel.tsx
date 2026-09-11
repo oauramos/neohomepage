@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Asset } from '../../server/assets/store.ts'
 import type { Theme } from '../../server/config/schema.ts'
 import {
   AA_NON_TEXT,
@@ -10,6 +11,7 @@ import {
 import {
   BOARD_WIDTHS,
   COLOUR_GROUPS,
+  boardWidthOf,
   FONT_STACKS,
   SHAPE_RESET_TOKENS,
   STAT_ALIGNS,
@@ -21,26 +23,16 @@ import {
   firstFamily,
   titleCaseOf,
 } from '../../shared/design-options.ts'
-import { BACKGROUNDS, GRADIENT_PREFIX } from '../../shared/theme-backgrounds.ts'
-import { SHAPE_TOKENS, THEME_PRESETS } from '../../shared/theme-presets.ts'
+import { BACKGROUNDS, GRADIENT_PREFIX, gradientFor } from '../../shared/theme-backgrounds.ts'
+import { SHAPE_TOKENS, THEME_PRESETS, presetById } from '../../shared/theme-presets.ts'
 import { GALLERY_FINISHES, GALLERY_PRESETS, finishOf } from '../../shared/theme-gallery.ts'
 import { resolveTokens } from '../../shared/theme-tokens.ts'
 import { currentScheme } from '../theme.ts'
 
 /**
- * The design panel.
- *
- * Every control here is driven by LOCAL draft state, not by the theme that comes back from the
- * server. That is not a preference — a controlled input whose value arrives over the network is
- * unusable: each drag frame re-renders the input with the value from the previous round trip, so
- * the thumb is dragged back under the cursor and the control reads as dead. The draft is applied
- * to the page immediately and the write is debounced, so one drag is one request rather than sixty.
- *
- * Colour is edited with a picker and a hex field, because that is how people think about colour.
- * The stored token is still `oklch(L C H)`: `contrastRatio` parses nothing else, so a hex in
- * `cssVars` would make every ratio here and in `theme-contrast.test.ts` come back null. The
- * conversion happens on the way in, and the ratios shown are computed with the same function the
- * test suite asserts with — so the panel cannot claim a pair passes when CI would disagree.
+ * The design panel. Controls are driven by local draft state, not the server's theme: a controlled
+ * input fed from a round trip snaps back under the cursor mid-drag. Colours are stored as
+ * `oklch(L C H)` because `contrastRatio` parses nothing else.
  */
 
 export type ThemePatch = {
@@ -56,21 +48,13 @@ const MODES: { id: Theme['mode']; label: string }[] = [
   { id: 'system', label: 'System' },
 ]
 
-/**
- * Tokens that are scheme-independent, so a draft edit belongs in the shared `theme` bucket rather
- * than in the current scheme's — a radius that changed when the OS went dark would be a bug.
- * Derived from the contract rather than restated, so a new shape token cannot be missed here.
- */
+/** Scheme-independent tokens; draft edits to these go in the shared `theme` bucket. */
 const SHAPE_LIKE = new Set<string>(SHAPE_TOKENS)
 
 /**
- * One gallery swatch.
- *
- * Memoised and fed plain strings rather than the preset object: sixty-four cards re-rendering on
- * every keystroke of the filter — or on every frame of a slider drag in another section — is the
- * cost that would undo the paint work. Its colours come from the preset ALONE, not from
- * `resolveTokens` with the user's overrides on top, because a gallery card should show what the
- * theme is rather than what it would look like underneath your edits.
+ * Memoised and fed plain strings so the sixty-four cards do not re-render on every filter keystroke
+ * or slider frame. Colours come from the preset alone, not `resolveTokens` with overrides: a card
+ * shows what the theme is, not what it would look like under the user's edits.
  */
 const GalleryCard = memo(function GalleryCard({
   id,
@@ -110,15 +94,7 @@ const GalleryCard = memo(function GalleryCard({
   )
 })
 
-/**
- * The board's width cap, drawn rather than named.
- *
- * A dropdown hides four options behind a click and asks you to translate "Comfortable" into a
- * picture of a page. The thing being chosen IS a picture — how much margin the board leaves — so
- * the control shows it: an outer frame for the viewport and an inner block for the board, with the
- * margin closing as the cap widens. `inset` is that margin in viewBox units, which is what makes
- * the four icons a scale instead of four unrelated glyphs.
- */
+/** Viewport frame with the board inside; `inset` is the board's margin in viewBox units. */
 function WidthIcon({ inset }: { inset: number }) {
   return (
     <svg viewBox="0 0 24 18" width="26" height="20" aria-hidden="true" focusable="false">
@@ -133,7 +109,6 @@ function WidthIcon({ inset }: { inset: number }) {
         strokeWidth="1.25"
         opacity="0.45"
       />
-      {/* Two stacked bars read as content rather than as a second frame. */}
       <rect x={2 + inset} y="4" width={20 - inset * 2} height="4" rx="1" fill="currentColor" />
       <rect x={2 + inset} y="10" width={20 - inset * 2} height="4" rx="1" fill="currentColor" />
     </svg>
@@ -165,8 +140,7 @@ function ColourRow({
   onReset: () => void
 }) {
   const hex = toHex(value) ?? '#000000'
-  // The text field keeps its own string so a half-typed "#3b8" is not thrown away or "corrected"
-  // mid-keystroke; it only commits once it parses.
+  // Keeps a half-typed hex like "#3b8" until it parses.
   const [typed, setTyped] = useState<string | null>(null)
   const shown = typed ?? hex
 
@@ -231,16 +205,12 @@ export function DesignPanel({
     'theme' | 'presets' | 'colour' | 'shape' | 'type' | 'background'
   >('theme')
 
-  /**
-   * The draft. Seeded empty and cleared whenever the preset or the scheme changes, because those
-   * are wholesale changes the panel SHOULD follow; everything else is the user's own typing and
-   * must survive the round trip that a save triggers.
-   */
-  const [uploads, setUploads] = useState<{ id: string; url: string; bytes: number }[]>([])
+  const [uploads, setUploads] = useState<Asset[]>([])
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [query, setQuery] = useState('')
   const [finish, setFinish] = useState<string>('all')
+  // Cleared only on a preset or scheme change; the user's own edits must survive a save round trip.
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [draftSurface, setDraftSurface] = useState<Partial<Theme['surface']>>({})
   useEffect(() => {
@@ -248,10 +218,7 @@ export function DesignPanel({
     setDraftSurface({})
   }, [theme.preset, theme.mode])
 
-  /**
-   * Swatch colours for all sixty-four, computed once per scheme rather than per render. Reading
-   * straight from the preset skips resolveTokens entirely — the gallery does not need the merge.
-   */
+  // Computed once per scheme, straight from the preset; the gallery does not need resolveTokens.
   const swatches = useMemo(
     () =>
       new Map(
@@ -305,9 +272,7 @@ export function DesignPanel({
   const loadUploads = useCallback(async () => {
     try {
       const response = await fetch('/api/assets/backgrounds')
-      const body = (await response.json()) as {
-        assets: { id: string; url: string; bytes: number }[]
-      }
+      const body = (await response.json()) as { assets: Asset[] }
       setUploads(body.assets)
     } catch {
       setUploads([])
@@ -324,8 +289,8 @@ export function DesignPanel({
   /** Accumulate into one patch and send it once the user stops moving. */
   const queue = (patch: ThemePatch) => {
     const merged = pending.current
-    // Assigned only when present: under exactOptionalPropertyTypes, writing `undefined` is not the
-    // same as leaving the key off, and the server reads a present-but-undefined key as a change.
+    // Under exactOptionalPropertyTypes a present-but-undefined key is not an absent one, and the
+    // server reads it as a change.
     if (patch.mode !== undefined) merged.mode = patch.mode
     if (patch.preset !== undefined) merged.preset = patch.preset
     if (patch.surface !== undefined) merged.surface = { ...merged.surface, ...patch.surface }
@@ -338,6 +303,7 @@ export function DesignPanel({
     }
     if (timer.current !== null) clearTimeout(timer.current)
     timer.current = setTimeout(() => {
+      timer.current = null
       const send = pending.current
       pending.current = {}
       onCommit(send)
@@ -347,19 +313,19 @@ export function DesignPanel({
   // A pending write must not be lost because the panel closed.
   useEffect(
     () => () => {
-      if (timer.current !== null) clearTimeout(timer.current)
+      if (timer.current === null) return
+      clearTimeout(timer.current)
+      timer.current = null
+      const send = pending.current
+      pending.current = {}
+      onCommit(send)
     },
-    [],
+    [onCommit],
   )
 
   /**
-   * Send now, throwing away anything still queued.
-   *
-   * Picking a preset or a scheme is a wholesale change, and any token nudge still sitting in the
-   * debounce was aimed at the preset you just left. Letting it fly would land AFTER the switch and
-   * write itself into the new one — nudge the radius, immediately pick Terminal, and Terminal comes
-   * out with rounded corners it does not have. Measured: radius 6px leaked into a preset whose own
-   * radius is 0.
+   * Send now, dropping anything still debounced: a token nudge queued before a preset or scheme
+   * switch would otherwise land after it and write into the new preset.
    */
   const commitNow = useCallback(
     (patch: ThemePatch) => {
@@ -375,11 +341,10 @@ export function DesignPanel({
 
   const pickPreset = useCallback(
     (id: string) => {
-      const preset = [...THEME_PRESETS, ...GALLERY_PRESETS].find((entry) => entry.id === id)
+      const preset = presetById(id)
       commitNow({
         preset: id,
-        // A preset may nominate a background. Applied only when it asks for one, so choosing a
-        // plain theme does not silently strip the one you picked.
+        // Only a preset that nominates a background replaces the current one.
         ...(preset?.background === undefined
           ? {}
           : { surface: { background: `${GRADIENT_PREFIX}${preset.background}` } }),
@@ -388,39 +353,25 @@ export function DesignPanel({
     [commitNow],
   )
 
-  const setColour = (token: string, value: string | null) => {
+  const setToken = (bucket: 'theme' | 'light' | 'dark', token: string, value: string | null) => {
     setDraft((current) => {
       const next = { ...current }
       if (value === null) delete next[token]
       else next[token] = value
       return next
     })
-    queue({ cssVars: { [scheme]: { [token]: value } } })
+    queue({ cssVars: { [bucket]: { [token]: value } } })
   }
-
-  const setShape = (token: string, value: string | null) => {
-    setDraft((current) => {
-      const next = { ...current }
-      if (value === null) delete next[token]
-      else next[token] = value
-      return next
-    })
-    queue({ cssVars: { theme: { [token]: value } } })
-  }
+  const setColour = (token: string, value: string | null) => setToken(scheme, token, value)
+  const setShape = (token: string, value: string | null) => setToken('theme', token, value)
 
   const setSurface = (patch: Partial<Theme['surface']>) => {
     setDraftSurface((current) => ({ ...current, ...patch }))
     queue({ surface: patch })
   }
 
-  /**
-   * Paint at most once per frame.
-   *
-   * A drag emits input events faster than the browser can repaint a board, so painting on every
-   * one builds a backlog: the queue grows, the thumb runs ahead of the colours, and it reads as
-   * lag. Coalescing to an animation frame throws away the intermediate states nobody could have
-   * seen anyway and keeps at most one repaint in flight.
-   */
+  // Coalesce previews to one per animation frame; a drag emits input events faster than the board
+  // repaints.
   const frame = useRef<number | null>(null)
   useEffect(() => {
     if (frame.current !== null) cancelAnimationFrame(frame.current)
@@ -434,12 +385,7 @@ export function DesignPanel({
     }
   }, [draftTheme, onPreview])
 
-  /**
-   * Overrides outlive the preset that was active when they were made — which is right (a colour you
-   * chose should not be undone by trying another theme) and invisible (you pick Terminal, the board
-   * keeps your radius, and nothing says why it does not match the card). Counting them here is what
-   * makes that legible, and the clear is the way back.
-   */
+  // Overrides survive a preset switch; the count makes that visible and the clear undoes it.
   const overrideTokens = useMemo(
     () => [
       ...Object.keys(theme.cssVars.theme).map((token) => ['theme', token] as const),
@@ -463,10 +409,7 @@ export function DesignPanel({
 
   const radius = Number.parseFloat(tokens.radius ?? '12') || 0
   const borderWidth = Number.parseFloat(tokens['border-width'] ?? '1') || 0
-  const activeBackground =
-    surface.background?.startsWith(GRADIENT_PREFIX) === true
-      ? surface.background.slice(GRADIENT_PREFIX.length)
-      : null
+  const activeBackground = gradientFor(surface.background)?.id ?? null
 
   return (
     <div className="nh-design">
@@ -692,7 +635,7 @@ export function DesignPanel({
                   key={width.id}
                   type="button"
                   className="nh-width"
-                  aria-pressed={(tokens['max-width'] ?? '1600px') === width.value}
+                  aria-pressed={boardWidthOf(tokens['max-width'])?.id === width.id}
                   title={width.label}
                   onClick={() => setShape('max-width', width.value)}
                 >
@@ -706,9 +649,8 @@ export function DesignPanel({
             type="button"
             className="nh-button-quiet"
             onClick={() => {
-              // Every non-type shape token, not the four this tab has controls for: a finish
-              // picked over MCP also writes elevation and the link treatment, and a reset that
-              // left those behind would claim to undo more than it did.
+              // Every non-type shape token, not only the four with controls here: a finish picked
+              // over MCP also writes elevation and the link treatment.
               for (const token of SHAPE_RESET_TOKENS) setShape(token, null)
             }}
           >
@@ -851,9 +793,8 @@ export function DesignPanel({
                     if (file === undefined) return
                     setUploadError(null)
                     setBusy(true)
-                    // Raw bytes, not multipart: the server names the file from its content, and a
-                    // filename from a browser is the one field here that would be attacker text
-                    // heading for a path.
+                    // Raw bytes, not multipart: the server names the file from its content, so no
+                    // browser-supplied filename reaches a path.
                     void fetch('/api/assets/backgrounds', {
                       method: 'POST',
                       headers: { 'content-type': file.type },
@@ -886,9 +827,8 @@ export function DesignPanel({
               </p>
             ) : (
               <ul className="nh-bg-grid">
-                {/* The delete control is a SIBLING of the picker, not nested inside it: a button
-                    within a button is invalid HTML, and the browser's own repair moves the inner
-                    one out — to where its click handler is no longer the thing you aimed at. */}
+                {/* Delete is a sibling of the picker: a button inside a button is invalid HTML and
+                    the browser's repair moves the inner one out. */}
                 {uploads.map((asset) => (
                   <li key={asset.id} className="nh-upload-item">
                     <button
@@ -921,6 +861,7 @@ export function DesignPanel({
                           .then(() => {
                             if (surface.background === asset.url) setSurface({ background: null })
                           })
+                          .catch(() => setUploadError('Delete failed'))
                       }}
                     >
                       <span className="nh-sr-only">Delete this image</span>

@@ -1,31 +1,28 @@
 /**
- * Dev runner: the Vite dev server (HMR, port 5173) alongside the real Hono server (port 7575).
- * Vite proxies /api and /mcp to Hono, so the browser talks to one origin and the dev topology
- * matches production, where Hono serves the built assets from a single process.
- *
- * Deliberately dependency-free: `concurrently` would be a devDependency to spawn two processes.
+ * Dev runner: Vite (HMR, port 5173) alongside the real Hono server (port 7575); Vite proxies /api
+ * and /mcp so the browser talks to one origin as in production. No `concurrently`: it would be a
+ * devDependency just to spawn two processes.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { setTimeout } from 'node:timers'
 import process from 'node:process'
 
-// The server resolves the catalog against its cwd, which here is packages/app — where no `catalog`
-// directory exists. The container sets NEOHOMEPAGE_CATALOG_DIR explicitly; without the same courtesy
-// in dev the catalog silently loads zero manifests and the editor offers no widgets at all.
+// The server resolves the catalog against its cwd (packages/app), which has no `catalog` directory;
+// without this the catalog silently loads zero manifests.
 const env = {
   ...process.env,
   NEOHOMEPAGE_CATALOG_DIR:
     process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolve(import.meta.dirname, '../../../catalog'),
 }
 
-const children: { name: string; child: ChildProcess }[] = []
+const children: ChildProcess[] = []
 let shuttingDown = false
 
 function shutdown(code: number): void {
   if (shuttingDown) return
   shuttingDown = true
-  for (const { child } of children) if (child.exitCode === null) child.kill('SIGTERM')
+  for (const child of children) if (child.exitCode === null) child.kill('SIGTERM')
   setTimeout(() => process.exit(code), 250).unref()
 }
 
@@ -36,7 +33,7 @@ function run(name: string, args: string[]): void {
     console.error(`\n[dev] ${name} exited (${signal ?? code}) — stopping the other process`)
     shutdown(typeof code === 'number' ? code : 1)
   })
-  children.push({ name, child })
+  children.push(child)
 }
 
 process.on('SIGINT', () => shutdown(0))

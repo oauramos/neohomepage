@@ -38,8 +38,6 @@ const facts = (overrides: Partial<RequestFacts> = {}): RequestFacts => ({
 
 describe('startup checks', () => {
   it('refuses forward-auth with no trusted proxies', () => {
-    // Believing an identity header from anyone who can reach the port is strictly worse than no
-    // auth, because it looks like auth.
     expect(() => assertAuthUsable(config({ mode: 'forward' }))).toThrow(/TRUSTED_PROXIES/)
     expect(() =>
       assertAuthUsable(config({ mode: 'forward', trustedProxies: ['10.0.0.1'] })),
@@ -76,8 +74,7 @@ describe('sessions', () => {
   })
 
   it('invalidates every session when the password changes', () => {
-    // The key is derived from the password, so a rotation revokes outstanding sessions with no
-    // store to purge — which is the behaviour someone changing a leaked password expects.
+    // The key is derived from the password, so a rotation revokes outstanding sessions.
     const before = config()
     const token = issueSession(before, NOW)
     expect(verifySession(before, token, NOW)).toBe(true)
@@ -103,8 +100,7 @@ describe('credentials', () => {
   })
 
   it('does not throw on a length mismatch', () => {
-    // timingSafeEqual throws when the buffers differ in length; guarding first is what keeps a
-    // wrong-length password a `false` rather than a 500.
+    // timingSafeEqual throws on a length mismatch.
     expect(() => checkPassword(config(), 'n', 'x')).not.toThrow()
   })
 })
@@ -118,8 +114,6 @@ describe('what may write', () => {
   })
 
   it('refuses a cross-site write even with no auth configured', () => {
-    // The attack is a page on the internet POSTing to a LAN address. It does not care whether the
-    // target has a password, so this defence stays on in every mode.
     const open = config({ mode: 'none' })
     const decision = checkWrite(open, facts({ secFetchSite: 'cross-site' }), NOW)
     expect(decision).toMatchObject({ allowed: false, status: 403 })
@@ -147,8 +141,7 @@ describe('what may write', () => {
   })
 
   it('allows a non-browser client that sends neither header, subject to credentials', () => {
-    // curl and the MCP bridge send no Sec-Fetch-Site. Blocking them outright would break the
-    // command line; they still have to satisfy the credential check.
+    // curl and the MCP bridge send no Sec-Fetch-Site.
     const open = config({ mode: 'none' })
     expect(checkWrite(open, facts({ secFetchSite: undefined }), NOW)).toMatchObject({
       allowed: true,
@@ -182,7 +175,6 @@ describe('forward auth', () => {
   })
 
   it('refuses the same identity from an untrusted peer', () => {
-    // Otherwise anyone who can reach the port simply sends the header themselves.
     expect(
       checkWrite(auth, facts({ remoteAddress: '10.9.9.9', forwardedUser: 'otavio' }), NOW),
     ).toMatchObject({ allowed: false, status: 403 })
@@ -205,8 +197,7 @@ describe('trusted peers', () => {
   })
 
   it('sees through the IPv4-mapped IPv6 form', () => {
-    // Node reports a dual-stack peer as ::ffff:10.0.0.1, and a naive string compare against the
-    // configured 10.0.0.1 would silently never match.
+    // Node reports a dual-stack peer as ::ffff:10.0.0.1.
     expect(isTrusted(['10.0.0.1'], '::ffff:10.0.0.1')).toBe(true)
     expect(isTrusted(['192.168.1.0/24'], '::ffff:192.168.1.9')).toBe(true)
   })
@@ -225,8 +216,7 @@ describe('the cookie', () => {
   })
 
   it('only sets Secure over https', () => {
-    // On a plain-http LAN install, Secure would make the cookie silently never arrive, which
-    // presents as "signing in does nothing".
+    // Over plain http a Secure cookie silently never arrives.
     expect(sessionCookie('token', 60_000, false)).not.toContain('Secure')
     expect(sessionCookie('token', 60_000, true)).toContain('Secure')
   })
@@ -240,8 +230,6 @@ describe('the cookie', () => {
 
 describe('the upload content-type allowance', () => {
   it('never admits a type a cross-site form could send', () => {
-    // This is the whole reason the JSON requirement works. If one of these ever appeared in the
-    // list, any page on the internet could write to a homelab dashboard with a plain <form>.
     const formEncodable = ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain']
     for (const type of formEncodable) {
       expect(UPLOADABLE_TYPES, `${type} must never be uploadable`).not.toContain(type)
@@ -249,24 +237,23 @@ describe('the upload content-type allowance', () => {
   })
 
   it('admits an image, and still refuses a form encoding', () => {
-    const base = {
-      method: 'POST',
-      secFetchSite: 'same-origin',
-      host: 'nas.home',
-      origin: 'http://nas.home',
-      cookie: undefined,
-      forwardedUser: undefined,
-      remoteAddress: undefined,
-    }
+    const open = config({ mode: 'none' })
     expect(
-      checkWrite({ mode: 'none' } as AuthConfig, { ...base, contentType: 'image/png' }, Date.now())
-        .allowed,
+      checkWrite(
+        open,
+        facts({ contentType: 'image/png', origin: 'http://nas.home', host: 'nas.home' }),
+        NOW,
+      ).allowed,
     ).toBe(true)
     expect(
       checkWrite(
-        { mode: 'none' } as AuthConfig,
-        { ...base, contentType: 'multipart/form-data; boundary=x' },
-        Date.now(),
+        open,
+        facts({
+          contentType: 'multipart/form-data; boundary=x',
+          origin: 'http://nas.home',
+          host: 'nas.home',
+        }),
+        NOW,
       ).allowed,
     ).toBe(false)
   })

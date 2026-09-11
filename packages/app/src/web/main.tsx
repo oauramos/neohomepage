@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { board, dashboard } from '../shared/board.ts'
-import type { Resolved, ResolvedPage } from '../shared/resolved.ts'
+import { board, dashboard, defaultPageOf, widgetTile } from '../shared/board.ts'
+import type { ResolvedPage } from '../shared/resolved.ts'
 import { emitPageCss } from '../shared/section-css.ts'
 import { AboutPanel, ConfigPanel, ThemePanel } from './fab/panels.tsx'
 import { WidgetsPanel } from './fab/WidgetsPanel.tsx'
@@ -10,7 +10,6 @@ import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
 import { DesignFab } from './design/DesignFab.tsx'
 import { DesignPanel, type ThemePatch } from './design/DesignPanel.tsx'
-import { widgetTile } from '../shared/board.ts'
 import type { LayoutItem } from '../shared/grid-geometry.ts'
 import { DashboardClient, readEmbeddedState, type DashboardState } from './state.ts'
 import { applyTheme } from './theme.ts'
@@ -18,11 +17,8 @@ import { useAutoHide } from './useAutoHide.ts'
 import './styles.css'
 
 /**
- * The browser entry point.
- *
- * The published page is already complete, so this does not paint anything new on load — it takes
- * over the same component tree, keeps it current over SSE, and adds the editor. On the shell
- * fallback (no generation published yet) there is nothing baked, so it fetches state first.
+ * Browser entry point: takes over the published page's component tree, keeps it current over SSE
+ * and adds the editor. On the shell fallback (nothing published yet) it fetches state first.
  */
 
 function EmptyState() {
@@ -37,6 +33,7 @@ function EmptyState() {
 function TabPanel({
   tab,
   state,
+  pageId,
   editing,
   onToggleEdit,
   onChanged,
@@ -45,6 +42,7 @@ function TabPanel({
 }: {
   tab: Tab
   state: DashboardState
+  pageId: string
   editing: boolean
   onToggleEdit: () => void
   onChanged: () => void
@@ -71,12 +69,7 @@ function TabPanel({
         </div>
       )
     case 'sections':
-      return (
-        <SectionsPanel
-          pageId={state.resolved.pages[0]?.id ?? state.resolved.defaultPage}
-          onChanged={onChanged}
-        />
-      )
+      return <SectionsPanel pageId={pageId} onChanged={onChanged} />
     case 'widgets':
       return <WidgetsPanel state={state} onChanged={onChanged} onRemove={onRemove} />
     case 'theme':
@@ -93,11 +86,8 @@ function TabPanel({
 }
 
 /**
- * The page's own stylesheet — board geometry and bookmark columns — kept current in the browser.
- *
- * The document arrives with this baked in, but it is baked as of the last publish. Adding a
- * widget or a section changes the resolved page over SSE long before the next generation is
- * written, and without this the new tile would sit at the top-left with no rules until a reload.
+ * Keeps the page stylesheet (board geometry, bookmark columns) current: the baked one is as of the
+ * last publish, but SSE changes the resolved page before the next generation is written.
  */
 function usePageCss(page: ResolvedPage | undefined): void {
   useEffect(() => {
@@ -129,19 +119,19 @@ function draftFrom(page: ResolvedPage): Draft {
   return draft
 }
 
-/** The `section\u0000breakpoint` keys whose geometry differs between two drafts, order-blind. */
-function changedTiers(draft: Draft, original: Draft): Set<string> {
+/** The tiers whose geometry differs between two drafts, order-blind. */
+function changedTiers(draft: Draft, original: Draft): { section: string; breakpoint: string }[] {
   const shape = (items: readonly LayoutItem[] | undefined) =>
     JSON.stringify(
       [...(items ?? [])]
         .map(({ i, x, y, w, h }) => ({ i, x, y, w, h }))
         .sort((a, b) => a.i.localeCompare(b.i, 'en-US')),
     )
-  const changed = new Set<string>()
+  const changed: { section: string; breakpoint: string }[] = []
   for (const [section, tiers] of Object.entries(draft)) {
     for (const breakpoint of Object.keys(tiers)) {
       if (shape(tiers[breakpoint]) !== shape(original[section]?.[breakpoint])) {
-        changed.add(`${section}\u0000${breakpoint}`)
+        changed.push({ section, breakpoint })
       }
     }
   }
@@ -186,9 +176,7 @@ function App({ client }: { client: DashboardClient }) {
     applyTheme(state.resolved.theme)
   }, [state.resolved.theme])
 
-  const page =
-    state.resolved.pages.find((candidate) => candidate.id === state.resolved.defaultPage) ??
-    state.resolved.pages[0]
+  const page = defaultPageOf(state.resolved)
   usePageCss(page)
   const now = useClock(
     page?.sections.some(
@@ -196,23 +184,14 @@ function App({ client }: { client: DashboardClient }) {
     ) ?? false,
   )
 
-  /**
-   * Edit mode works on a draft.
-   *
-   * A drag used to be written the moment you let go, which made "let me just see if it fits
-   * there" a save. The draft holds every grid section's tiers; a drag or resize changes it and
-   * nothing else, and the bar at the top offers Save or Discard. Save writes only the tiers that
-   * changed, one request each, in one go.
-   */
+  // Edit mode works on a draft of every grid section's tiers; Save writes only the changed ones.
   const [draft, setDraft] = useState<Draft | null>(null)
   const [original, setOriginal] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [leaving, setLeaving] = useState(false)
-  // What differs from the saved layout, tier by tier — derived, not counted. A drag that ends
-  // where it began (dropped off the edge and clamped, or compacted straight back) is not a change,
-  // and counting drag-stops instead of differences said "1 unsaved change" for exactly that.
-  const dirty =
-    draft === null || original === null ? new Set<string>() : changedTiers(draft, original)
+  // Derived by difference, not by counting drag-stops: a drag that ends where it began (clamped
+  // or compacted back) is not a change.
+  const dirty = draft === null || original === null ? [] : changedTiers(draft, original)
 
   const startEditing = () => {
     if (page === undefined) return
@@ -246,16 +225,15 @@ function App({ client }: { client: DashboardClient }) {
     if (draft === null || page === undefined) return
     setSaving(true)
     try {
-      for (const key of dirty) {
-        const [section, breakpoint] = key.split('\u0000') as [string, string]
-        await fetch(`/api/pages/${page.id}/layout`, {
+      for (const { section, breakpoint } of dirty) {
+        const response = await fetch(`/api/pages/${page.id}/layout`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ section, breakpoint, items: draft[section]?.[breakpoint] ?? [] }),
         })
+        if (!response.ok) throw new Error(`layout save failed: ${response.status}`)
       }
       await client.refresh()
-      // What was just written is the new baseline; the tiers that were not touched stay as read.
       setOriginal(structuredClone(draft))
       setLeaving(false)
     } finally {
@@ -263,70 +241,36 @@ function App({ client }: { client: DashboardClient }) {
     }
   }
 
-  /**
-   * Two halves, because they run at different rates.
-   *
-   * `previewTheme` paints a draft on the next frame and touches no network — a slider drag calls it
-   * sixty times a second. `saveTheme` is what the panel debounces, so one drag is one request and
-   * one publish rather than a queue of them racing to be last.
-   */
-  // Stable identity: the panel paints from an effect keyed on this, so a new function every render
-  // would repaint on every render rather than on every change.
-  const previewTheme = useCallback((draft: Parameters<typeof applyTheme>[0]) => {
-    applyTheme(draft)
-  }, [])
-
-  // Stable too: the gallery memoises sixty-four cards on the identity of the handler they call.
+  // Both theme handlers must be identity-stable: the panel keys its paint effect on `onPreview`
+  // (applyTheme, module-level) and the gallery memoises its cards on `onCommit`, which the panel
+  // debounces so a slider drag is one request.
   const saveTheme = useCallback(
-    async (patch: ThemePatch) => {
-      await fetch('/api/theme', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
-      await client.refresh()
-    },
+    (patch: ThemePatch) => client.write('PATCH', '/api/theme', patch),
     [client],
   )
 
-  const saveFeatures = async (patch: Partial<DashboardState['resolved']['features']>) => {
-    await fetch('/api/dashboard', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ features: patch }),
-    })
-    await client.refresh()
-  }
+  const saveFeatures = (patch: Partial<DashboardState['resolved']['features']>) =>
+    client.write('PATCH', '/api/dashboard', { features: patch })
 
-  const removeWidget = async (id: string) => {
-    // The write gate refuses anything a cross-site form could send, and a body-less DELETE with no
-    // content type looks like one — the header is the ticket, not the payload.
-    await fetch(`/api/widgets/${id}`, {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-    })
-    await client.refresh()
-  }
+  const removeWidget = (id: string) => client.write('DELETE', `/api/widgets/${id}`)
 
   return (
     <div data-neo-controls={hideControls ? 'hidden' : 'shown'}>
       {editing && page !== undefined && draft !== null ? (
-        // Edit mode is the page with every grid section swapped for an editor of its own; the
-        // navbar and the bookmark groups render exactly as they do in view mode.
         <div id="neo-root-content">
           <div className="nh-editbar" role="region" aria-label="Layout editing">
             <strong>Editing layout</strong>
             <span className="nh-editbar-note" aria-live="polite">
               {saving
                 ? 'Saving…'
-                : dirty.size === 0
+                : dirty.length === 0
                   ? 'Drag a tile by its handle, or its corner to resize. Nothing is saved until you say so.'
                   : leaving
                     ? 'Save or discard your changes before leaving.'
-                    : `${String(dirty.size)} unsaved ${dirty.size === 1 ? 'change' : 'changes'}`}
+                    : `${String(dirty.length)} unsaved ${dirty.length === 1 ? 'change' : 'changes'}`}
             </span>
             <span className="nh-editbar-actions">
-              {dirty.size > 0 ? (
+              {dirty.length > 0 ? (
                 <>
                   <button
                     type="button"
@@ -348,10 +292,10 @@ function App({ client }: { client: DashboardClient }) {
               ) : null}
               <button
                 type="button"
-                className={dirty.size > 0 ? 'nh-button-quiet' : 'nh-button'}
+                className={dirty.length > 0 ? 'nh-button-quiet' : 'nh-button'}
                 disabled={saving}
                 onClick={() => {
-                  if (dirty.size > 0) setLeaving(true)
+                  if (dirty.length > 0) setLeaving(true)
                   else stopEditing()
                 }}
               >
@@ -385,6 +329,7 @@ function App({ client }: { client: DashboardClient }) {
           <TabPanel
             tab={tab}
             state={state}
+            pageId={page?.id ?? state.resolved.defaultPage}
             editing={editing}
             onToggleEdit={() => {
               if (editing) stopEditing()
@@ -399,17 +344,17 @@ function App({ client }: { client: DashboardClient }) {
       />
       <DesignFab>
         {() => (
-          <DesignPanel theme={state.resolved.theme} onPreview={previewTheme} onCommit={saveTheme} />
+          <DesignPanel theme={state.resolved.theme} onPreview={applyTheme} onCommit={saveTheme} />
         )}
       </DesignFab>
     </div>
   )
 }
 
-async function boot(container: HTMLElement, root: Root): Promise<void> {
+async function boot(root: Root): Promise<void> {
   const embedded = readEmbeddedState()
   const initial: DashboardState = {
-    resolved: (embedded?.resolved ?? {
+    resolved: embedded?.resolved ?? {
       schemaVersion: 1,
       title: 'neohomepage',
       defaultPage: 'home',
@@ -425,7 +370,7 @@ async function boot(container: HTMLElement, root: Root): Promise<void> {
       },
       features: { autoHideControls: false, autoHideDelayMs: 5000 },
       diagnostics: [],
-    }) as Resolved,
+    },
     data: {},
     revision: '',
     generation: null,
@@ -440,24 +385,15 @@ async function boot(container: HTMLElement, root: Root): Promise<void> {
     </StrictMode>,
   )
 
-  // Always refresh: the baked state is as fresh as the last publish, and something may have
-  // changed since. On the shell fallback this is what produces the first render at all.
-  await client.refresh().catch(() => {
-    if (embedded === null) container.innerHTML = ''
-  })
+  // Baked state is only as fresh as the last publish; on the shell fallback this is the first render.
+  await client.refresh().catch(() => {})
 }
 
-/**
- * One React root for the container, for the life of the page.
- *
- * The empty state used to get a root of its own and `boot` created a second one on the same
- * element — React warns, and the first root is never unmounted, so it keeps its subscriptions and
- * its slice of memory for as long as the tab is open. On a wall display that stays open for weeks,
- * "never unmounted" is not a warning.
- */
+// One React root for the life of the page: a second root on the same element is never unmounted
+// and keeps its subscriptions for as long as the tab is open.
 const container = document.getElementById('neo-root')
 if (container === null) throw new Error('#neo-root missing from the document')
 
 const root = createRoot(container)
 if (container.childElementCount === 0) root.render(<EmptyState />)
-void boot(container, root)
+void boot(root)

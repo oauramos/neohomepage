@@ -59,11 +59,8 @@ describe('a percentile that is secretly a maximum', () => {
   })
 
   it('demonstrates the trap it exists to prevent', () => {
-    // Three samples. The "95th percentile" is the largest of them.
     expect(percentile([100, 200, 900], 95)).toBe(900)
     expect(percentile([100, 200, 900], 100)).toBe(900)
-    // Which means a gate written as a p95 gets tighter with every sample added — the opposite of
-    // what more samples are for.
     expect(percentile([100, 200], 95)).toBe(200)
   })
 

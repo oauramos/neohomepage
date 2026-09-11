@@ -89,8 +89,7 @@ describe('the two manifest shapes', () => {
   })
 
   it('refuses a manifest that is both shapes at once', () => {
-    // Strict on both branches, so "a target AND roles" fails rather than silently picking one and
-    // leaving half the manifest unread.
+    // Both branches are strict, so a mixed manifest fails instead of half of it going unread.
     const both = { ...base(), target: { fields: [], auth: { kind: 'none' } }, operations: {} }
     expect(manifestSchema.safeParse(both).success).toBe(false)
   })
@@ -106,8 +105,6 @@ describe('the two manifest shapes', () => {
 
 describe('derived requirements', () => {
   it('unions the auth kinds, decoders and opcodes over every source', () => {
-    // A composite that only declared the first source's needs would install on a build with no
-    // ICS decoder and then render half a calendar.
     expect(deriveRequires(compositeManifestSchema.parse(base()))).toEqual({
       templates: ['list'],
       opcodes: ['get', 'map', 'pick'],
@@ -141,9 +138,7 @@ describe('the audit applies to every source, not just the first', () => {
     const manifest = base()
     manifest.roles.calendars.kinds.sonarr.operation.path = '/api/{{secret:apiKey}}/calendar'
     const problems = auditManifest(manifestSchema.parse(manifest))
-    expect(problems.map((p) => p.path)).toContain(
-      'roles.calendars.kinds.sonarr.operation.operation',
-    )
+    expect(problems.map((p) => p.path)).toContain('roles.calendars.kinds.sonarr.operation')
   })
 
   it('catches duplicate emit ids, which would silently double a stream', () => {

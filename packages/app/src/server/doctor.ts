@@ -6,28 +6,23 @@ import type { Manifest } from '@neohomepage/catalog-schema'
 import { isComposite } from '@neohomepage/catalog-schema'
 import { CURRENT_SCHEMA_VERSION } from './config/schema.ts'
 import type { Env } from './env.ts'
+import { environmentVariableName } from './secrets/vault.ts'
 import { targetShapeFields } from '../shared/target-shape.ts'
 import type { ConfigTree } from './store/tree.ts'
 
 /**
- * Everything that can be wrong with an install, in one command.
- *
- * The point is not to find bugs in the app — it is to answer "why is this widget blank?" without
- * anyone reading a log. Almost every finding here has a cause the user can act on and a fix in the
- * message; a check whose output is "something is wrong" would be worse than no check.
- *
- * Read-only. `neo doctor` never repairs anything: a command that silently fixes a config file is
- * a command nobody can safely run on a machine they care about.
+ * Read-only health checks behind `neo doctor`; every finding names a cause and a fix, none
+ * repairs anything.
  */
 
 export type Severity = 'error' | 'warning' | 'note'
 
 export type Finding = {
   readonly severity: Severity
-  /** Short, stable, greppable. Used by tests and by anyone writing a bug report. */
+  /** Stable identifier; tests match on it. */
   readonly code: string
   readonly message: string
-  /** What to do about it, in one line. Absent only when the message already says. */
+  /** Absent only when the message already says what to do. */
   readonly fix?: string
 }
 
@@ -35,20 +30,13 @@ export type DoctorInput = {
   readonly env: Env
   readonly tree: ConfigTree
   readonly catalog: ReadonlyMap<string, Manifest>
-  /**
-   * Whether one secret can be resolved, asked name by name.
-   *
-   * A predicate rather than a list because there is no list: an environment variable cannot be
-   * mapped back to a secret name, so anything enumerable would miss exactly the credentials the
-   * recommended setup uses.
-   */
+  /** A predicate rather than a list: secrets held in environment variables cannot be enumerated. */
   readonly hasSecret: (name: string) => boolean
-  /** Names present in secrets.json, which IS enumerable — used only to spot orphans. */
+  /** Names in secrets.json; used only to spot orphans. */
   readonly storedNames: ReadonlySet<string>
   readonly diagnostics: readonly string[]
 }
 
-/** Backgrounds and icons are binary and git does not forget: a warning before it is a problem. */
 const ASSETS_WARN_BYTES = 50 * 1024 * 1024
 const ASSET_FILE_WARN_BYTES = 2 * 1024 * 1024
 
@@ -91,13 +79,6 @@ function checkSchemaVersion({ tree }: DoctorInput): Finding[] {
       ]
 }
 
-/**
- * The check that answers the most common support question.
- *
- * A restored backup has no `secrets/` by design, so every credential is missing on first boot.
- * Naming each one WITH the target it belongs to is the difference between a two-minute fix and
- * an hour of guessing which of four API keys the blank widget wanted.
- */
 function checkCredentials({ tree, hasSecret, storedNames }: DoctorInput): Finding[] {
   const findings: Finding[] = []
   const referenced = new Map<string, string>()
@@ -114,12 +95,11 @@ function checkCredentials({ tree, hasSecret, storedNames }: DoctorInput): Findin
       severity: 'error',
       code: 'missing-credential',
       message: `no value for secret "${name}" — needed by ${owner}`,
-      fix: `set NEOHOMEPAGE_SECRET_${name.replace(/[.-]/g, '_').toUpperCase()}, or enter it in the editor`,
+      fix: `set ${environmentVariableName(name)}, or enter it in the editor`,
     })
   }
 
-  // Only the file is checked for orphans. An unused environment variable is the user's business
-  // and often deliberate — a compose file that serves several installs, say.
+  // Only the file is checked for orphans; an unused environment variable is often deliberate.
   for (const name of storedNames) {
     if (referenced.has(name)) continue
     findings.push({
@@ -217,8 +197,8 @@ function checkWidgets({ tree, catalog }: DoctorInput): Finding[] {
       })
     }
 
-    // Values under a name the shape declares `secret` would be a leak; the write path routes them
-    // to the vault, so finding one here means an older release or a hand-edited file.
+    // The write path routes secret-kind fields to the vault, so one here is from an older release
+    // or a hand-edited file.
     const declared = targetShapeFields(catalog, target.widgetType)
     for (const name of Object.keys(target.fields)) {
       if (declared?.find((field) => field.name === name)?.kind === 'secret') {
@@ -237,20 +217,13 @@ function checkWidgets({ tree, catalog }: DoctorInput): Finding[] {
 
 const exec = promisify(execFile)
 
-/**
- * Is anything that must never be committed actually tracked?
- *
- * Committing `state/generations/` turns every publish into a large commit of duplicated HTML and
- * makes the repository unusable within weeks; committing `secrets/` is worse and irreversible,
- * because git does not forget.
- */
 async function checkGit(env: Env): Promise<Finding[]> {
   let tracked: string
   try {
     const { stdout } = await exec('git', ['ls-files'], { cwd: env.dataDir, maxBuffer: 8 << 20 })
     tracked = stdout
   } catch {
-    // Not a git repository, or no git. Backing up with git is optional, so this is not a problem.
+    // Not a git repository, or no git installed.
     return []
   }
 
@@ -288,36 +261,39 @@ async function checkGit(env: Env): Promise<Finding[]> {
   return findings
 }
 
+/** Every file under `dir`, depth-first in readdir order. Empty when the directory is unreadable. */
+async function walkFiles(dir: string): Promise<string[]> {
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const entry of entries) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...(await walkFiles(path)))
+    else out.push(path)
+  }
+  return out
+}
+
 async function checkAssets(env: Env): Promise<Finding[]> {
   const findings: Finding[] = []
   let total = 0
 
-  const walk = async (dir: string): Promise<void> => {
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const path = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        await walk(path)
-        continue
-      }
-      const info = await stat(path)
-      total += info.size
-      if (info.size > ASSET_FILE_WARN_BYTES) {
-        findings.push({
-          severity: 'warning',
-          code: 'large-asset',
-          message: `${relative(env.dataDir, path)} is ${(info.size / 1024 / 1024).toFixed(1)} MB`,
-          fix: 'a background this large is committed forever, even after you delete it — re-save it smaller',
-        })
-      }
+  for (const path of await walkFiles(env.assetsDir)) {
+    const info = await stat(path)
+    total += info.size
+    if (info.size > ASSET_FILE_WARN_BYTES) {
+      findings.push({
+        severity: 'warning',
+        code: 'large-asset',
+        message: `${relative(env.dataDir, path)} is ${(info.size / 1024 / 1024).toFixed(1)} MB`,
+        fix: 'a background this large is committed forever, even after you delete it — re-save it smaller',
+      })
     }
   }
-  await walk(env.assetsDir)
 
   if (total > ASSETS_WARN_BYTES) {
     findings.push({
@@ -347,8 +323,7 @@ async function checkPermissions({ env, storedNames }: DoctorInput): Promise<Find
       ]
     }
   } catch {
-    // Secrets may come entirely from environment variables, in which case there is no file — and
-    // that is the recommended arrangement, not a problem.
+    // No file when secrets come entirely from environment variables.
   }
   return []
 }
@@ -364,23 +339,8 @@ function checkResolveDiagnostics({ diagnostics }: DoctorInput): Finding[] {
 /** Unknown keys survive a round trip so a rollback loses nothing; doctor is where they surface. */
 export async function unknownKeys(configDir: string): Promise<Finding[]> {
   const findings: Finding[] = []
-  const walk = async (dir: string): Promise<string[]> => {
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return []
-    }
-    const out: string[] = []
-    for (const entry of entries) {
-      const path = join(dir, entry.name)
-      if (entry.isDirectory()) out.push(...(await walk(path)))
-      else if (entry.name.endsWith('.json')) out.push(path)
-    }
-    return out
-  }
 
-  for (const file of await walk(configDir)) {
+  for (const file of (await walkFiles(configDir)).filter((path) => path.endsWith('.json'))) {
     try {
       JSON.parse(await readFile(file, 'utf8'))
     } catch {

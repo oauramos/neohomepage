@@ -2,14 +2,9 @@ import type { Field, Manifest } from '@neohomepage/catalog-schema'
 import { isComposite } from '@neohomepage/catalog-schema'
 
 /**
- * What the installer needs to know about a widget type, with the two manifest shapes flattened.
- *
- * One description serves the catalog list, the install form and the MCP schema tool. Without it
- * each of those grows its own `if (isComposite)` and they drift — which is the same class of bug
- * the derived `requires` block exists to prevent, one layer up.
- *
- * Nothing here is a URL, a path or a header. A client learns that a widget needs "an API key" and
- * "a Sonarr", never where either is sent.
+ * Flattens the two manifest shapes into the one description the catalog list, the install form
+ * and the MCP schema tool share. Contains no URL, path or header: a client learns a widget needs
+ * an API key, never where it is sent.
  */
 
 export type BindableKind = {
@@ -48,11 +43,8 @@ export type ManifestView = {
   /** True when any bindable surface declares a secret field, so the UI can warn before install. */
   readonly needsCredential: boolean
   /**
-   * True when a composite has at least one kind that needs no credential.
-   *
-   * The calendar accepts four source kinds and only one of them — an iCalendar feed — needs
-   * nothing. Saying "needs an API key" flatly is what makes someone with a public .ics URL skip
-   * the widget that would have worked for them.
+   * True when a composite has a kind that needs no credential (e.g. an iCalendar feed), so the UI
+   * does not claim an API key is required.
    */
   readonly someKindsNeedNoCredential: boolean
 }

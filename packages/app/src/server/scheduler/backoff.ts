@@ -1,9 +1,6 @@
 /**
- * Failure backoff and idle decay.
- *
- * Both exist for the same reason: the box running this dashboard is usually the box running the
- * services it polls. Hammering a dead Sonarr every 60 seconds costs the user twice — once in
- * wasted work, and again because the dashboard gets blamed for the slowness it caused.
+ * Failure backoff and idle decay for poll intervals; the dashboard usually shares a box with the
+ * services it polls.
  */
 
 export type BackoffPolicy = {
@@ -27,20 +24,12 @@ export const DEFAULT_BACKOFF: BackoffPolicy = {
 export type IntervalInput = {
   readonly baseIntervalMs: number
   readonly consecutiveFailures: number
-  /** Live subscribers right now. Zero means nobody has the dashboard open. */
   readonly subscribers: number
-  /** How long there has been nobody watching. */
   readonly unobservedForMs: number
   readonly policy?: BackoffPolicy
 }
 
-/**
- * The interval one fetch key should use next.
- *
- * Idle decay is the single largest saving in the design: a home dashboard is unobserved roughly
- * twenty-two hours a day, and polling forty services through the night for nobody is the
- * difference between a background process and a nuisance.
- */
+/** Next interval for one fetch key: failure backoff past `grace`, then idle decay. */
 export function nextIntervalMs(input: IntervalInput): number {
   const policy = input.policy ?? DEFAULT_BACKOFF
 
@@ -51,19 +40,15 @@ export function nextIntervalMs(input: IntervalInput): number {
   }
 
   if (input.subscribers === 0 && input.unobservedForMs >= policy.idleAfterMs) {
-    // Never speed up because of idleness: a failing target that has already backed off past the
-    // idle interval must stay backed off.
+    // Idleness never speeds up a target that has already backed off further.
     interval = Math.max(interval, policy.idleIntervalMs)
   }
   return Math.round(interval)
 }
 
 /**
- * Spread scheduling by up to a tenth either way.
- *
- * Forty widgets configured at 60 seconds otherwise align permanently after the first tick and
- * fire as one burst, which is what turns a comfortable poll rate into a visible stutter.
- * `random` is injected so tests are deterministic.
+ * Spread an interval by up to a tenth either way so equal intervals do not align into one burst.
+ * `random` is injectable for deterministic tests.
  */
 export function withJitter(intervalMs: number, random: () => number = Math.random): number {
   const spread = intervalMs * 0.1

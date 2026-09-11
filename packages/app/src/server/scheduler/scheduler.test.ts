@@ -25,8 +25,6 @@ describe('TimerHeap', () => {
   })
 
   it('reschedules an existing id instead of duplicating it', () => {
-    // A widget whose interval changes must not end up scheduled twice, which would double its
-    // request rate silently.
     const h = heap()
     h.schedule({ id: 'a', dueAt: 500, value: 'a' })
     h.schedule({ id: 'a', dueAt: 100, value: 'a' })
@@ -57,8 +55,6 @@ describe('TimerHeap', () => {
   })
 
   it('stays ordered under a randomised workload', () => {
-    // The heap decides when every upstream request happens; an ordering bug here shows up as
-    // "some widgets just stop updating", which is close to unreportable.
     const h = heap()
     let seed = 42
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
@@ -85,8 +81,6 @@ describe('fetch keys', () => {
   }
 
   it('collapses two widgets asking for the same thing into one fetch', () => {
-    // This is what makes "three Radarr sources, one HTTP request" fall out for free, with no
-    // special case anywhere in the calendar widget.
     expect(fetchKey(base)).toBe(fetchKey({ ...base, params: { includeSeries: true, pageSize: 5 } }))
   })
 
@@ -100,7 +94,6 @@ describe('fetch keys', () => {
   })
 
   it('changes when the target changes, so nothing stale survives a repoint', () => {
-    // Otherwise a cached projection stays attributed to a service the user has since moved.
     expect(fetchKey(base)).not.toBe(fetchKey({ ...base, targetRevision: 'r2' }))
   })
 
@@ -136,7 +129,6 @@ describe('backoff', () => {
   })
 
   it('decays to the idle interval when nobody has been watching', () => {
-    // The largest single saving in the design: a home dashboard is unobserved most of the day.
     expect(nextIntervalMs({ ...input, subscribers: 0, unobservedForMs: 6 * 60_000 })).toBe(600_000)
   })
 
@@ -169,7 +161,6 @@ describe('jitter', () => {
   })
 
   it('spreads a fleet that would otherwise fire as one burst', () => {
-    // Forty widgets at the same interval align permanently after the first tick without this.
     let seed = 7
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
     const values = new Set(Array.from({ length: 40 }, () => withJitter(60_000, random)))

@@ -1,39 +1,26 @@
 /**
- * Build the published catalog.
- *
- * Two files, and the split is the whole design:
- *
- *   latest.json          ~300 bytes, mutable, points at the payload by content hash
- *   catalog-<sha>.json   the manifests, immutable because its name IS its hash
- *
- * That shape fixes four things at once. GitHub Pages sends an unconfigurable `max-age=600`, which
- * only ever applies to the tiny pointer. Migration is a `movedTo` field on a stable URL. Integrity
- * is a sha256 the client re-checks, so the payload can be served from a second host. And pinning a
- * release is just remembering a hash.
- *
- * The whole catalog ships as ONE gzipped file rather than paginated or fetched per id: manifests
- * are structurally near-identical, so a bundle compresses about seven times better than the same
- * documents fetched separately. Revisit at a couple of thousand widgets, not before.
+ * Builds the published catalog: a small mutable `latest.json` pointer (the only file GitHub Pages'
+ * fixed `max-age=600` matters for) and an immutable `catalog-<sha>.json` payload named by its hash.
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { gzipSync } from 'node:zlib'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
-import { auditManifest, deriveRequires, manifestSchema } from '@neohomepage/catalog-schema'
+import {
+  auditManifest,
+  deriveRequires,
+  parseManifest,
+  type Manifest,
+} from '@neohomepage/catalog-schema'
 import { SUPPORTED_DECODERS } from '../src/server/decode/index.ts'
 import { TEMPLATES } from '../src/shared/board.ts'
 
-const CATALOG_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_DIR ?? '../../catalog')
-const OUT_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_OUT ?? '../../catalog-dist')
+const ROOT = resolve(import.meta.dirname, '../../..')
+const CATALOG_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_DIR ?? join(ROOT, 'catalog'))
+const OUT_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_OUT ?? join(ROOT, 'catalog-dist'))
 
-/**
- * What this build of the app can actually render.
- *
- * Published alongside the catalog so a client can decide, before installing, whether a manifest
- * needs something it does not have — rather than installing it and rendering nothing, which is
- * the failure the whole capability contract exists to prevent.
- */
+/** What this build can render, published so a client can reject a manifest before installing it. */
 function capabilities() {
   return {
     templates: [...TEMPLATES].sort(),
@@ -47,22 +34,24 @@ async function main(): Promise<number> {
     .map((entry) => entry.name)
     .sort()
 
-  const manifests: unknown[] = []
+  const manifests: Manifest[] = []
   let problems = 0
 
   for (const slug of slugs) {
     const path = join(CATALOG_DIR, slug, 'manifest.json')
-    const parsed = manifestSchema.safeParse(JSON.parse(await readFile(path, 'utf8')))
-    if (!parsed.success) {
-      console.error(`FAIL ${slug}: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    const parsed = parseManifest(JSON.parse(await readFile(path, 'utf8')))
+    if (!parsed.ok) {
+      console.error(
+        `FAIL ${slug}: ${parsed.issues.map((i) => `${i.path}: ${i.message}`).join('; ')}`,
+      )
       problems++
       continue
     }
-    const found = auditManifest(parsed.data)
+    const found = auditManifest(parsed.manifest)
     for (const problem of found) console.error(`FAIL ${slug}: ${problem.path}: ${problem.message}`)
     problems += found.length
     if (found.length === 0)
-      manifests.push({ ...parsed.data, requires: deriveRequires(parsed.data) })
+      manifests.push({ ...parsed.manifest, requires: deriveRequires(parsed.manifest) })
   }
 
   if (problems > 0) {
@@ -70,6 +59,8 @@ async function main(): Promise<number> {
     return 1
   }
 
+  // One bundle rather than per-id files: near-identical manifests gzip about seven times better
+  // together. Revisit at a couple of thousand widgets.
   const payload = `${JSON.stringify({ manifests, capabilities: capabilities() }, null, 0)}\n`
   const sha256 = createHash('sha256').update(payload).digest('hex')
   const payloadName = `catalog-${sha256.slice(0, 16)}.json`
@@ -81,22 +72,13 @@ async function main(): Promise<number> {
     join(OUT_DIR, 'v1', 'latest.json'),
     `${JSON.stringify(
       {
-        // Deliberately relative: the payload has to resolve from whichever host is serving the
-        // pointer, so the same file works from Pages and from a mirror.
+        // Relative so the pointer resolves from whichever host serves it.
         payload: payloadName,
         sha256,
         count: manifests.length,
-        /**
-         * Where this pointer has moved to, if it has.
-         *
-         * Present and null rather than absent, so a client written today already reads the field
-         * and a future move is a one-line change to this file instead of a client release. This
-         * is what makes serving the catalog from a path on the docs domain safe: when the catalog
-         * gets its own repository and host, the old pointer keeps working and says where to go.
-         */
+        // Present and null so today's clients already read it when the catalog moves host.
         movedTo: null,
-        // No build timestamp. Two builds of identical input must produce identical bytes, or
-        // "reproducible" is a word rather than a property.
+        // No build timestamp: identical input must produce identical bytes.
       },
       null,
       2,

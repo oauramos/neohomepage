@@ -1,21 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Field } from '@neohomepage/catalog-schema'
 import type { ResolvedWidget } from '../../shared/resolved.ts'
 import { FieldForm, type FieldValues } from '../form/FieldForm.tsx'
 import type { DashboardState } from '../state.ts'
 import { AddWidget, type CatalogEntry } from './AddWidget.tsx'
 
-/**
- * The Widgets tab: what is on the page, and a way to add to it.
- *
- * One search box at the top does both jobs. Empty, the panel is the list of placed widgets, each
- * row opening into its own editor — title, section, how its readings are drawn, the options its
- * manifest declares, and a two-step remove. Typed into, it is the catalog, narrowed as you type;
- * choosing a type replaces the panel with the form, and adding brings you back to the list.
- *
- * Nothing here is saved on a "Save" button. An edit lands half a second after the last keystroke,
- * the same way the Sections tab works, and the row says so.
- */
+/** The Widgets tab: placed widgets with inline editors, plus the catalog search that adds more. */
 
 export const WIDGET_KINDS = [
   { id: 'widget', label: 'Readings', blurb: 'Things that show a reading.' },
@@ -26,12 +16,8 @@ export const WIDGET_KINDS = [
 export type WidgetKind = (typeof WIDGET_KINDS)[number]['id']
 
 /**
- * Which kind a placed widget is.
- *
- * The manifest carries `kind`, but a RESOLVED widget carries only its type — so the kind is looked
- * up from the catalog the editor already fetched. A type the catalog does not know (a widget whose
- * manifest was removed) is shown under Widgets rather than hidden, because hiding it would make an
- * un-removable tile invisible in the one screen that can remove it.
+ * A resolved widget carries only its type; a type the catalog no longer knows falls under Widgets
+ * so it stays removable.
  */
 export function kindOf(type: string, catalog: ReadonlyMap<string, CatalogEntry>): WidgetKind {
   const kind = catalog.get(type)?.kind
@@ -56,7 +42,7 @@ type Patch = {
   title?: string | null
   section?: string
   look?: Partial<Look>
-  config?: Record<string, string | number | boolean | null>
+  config?: FieldValues
 }
 
 function stateLabel(state: string | undefined): { label: string; tone: string } {
@@ -70,6 +56,41 @@ function stateLabel(state: string | undefined): { label: string; tone: string } 
     default:
       return { label: 'waiting', tone: 'muted' }
   }
+}
+
+function KindSegments({
+  kind,
+  onChange,
+  label,
+}: {
+  kind: WidgetKind | 'all'
+  onChange: (kind: WidgetKind | 'all') => void
+  label: string
+}) {
+  return (
+    <div className="nh-seg nh-seg-compact" role="group" aria-label={label}>
+      <button
+        type="button"
+        className="nh-seg-item"
+        aria-pressed={kind === 'all'}
+        onClick={() => onChange('all')}
+      >
+        All
+      </button>
+      {WIDGET_KINDS.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          className="nh-seg-item"
+          aria-pressed={kind === entry.id}
+          title={entry.blurb}
+          onClick={() => onChange(entry.id)}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 function WidgetRow({
@@ -97,8 +118,7 @@ function WidgetRow({
   const [confirming, setConfirming] = useState(false)
   const [saved, setSaved] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Edits made inside the pause merge into one write, so a title typed and a box clicked in the
-  // same second both land rather than the later one replacing the earlier.
+  // Edits made within the debounce window merge into one write.
   const pending = useRef<Patch>({})
   const status = stateLabel(state.data[widget.id]?.meta.state)
   const target = state.resolved.targets.find((candidate) => candidate.id === widget.targetId)
@@ -131,7 +151,10 @@ function WidgetRow({
       timer.current = null
       const body = pending.current
       pending.current = {}
-      void onPatch(body).then((ok) => setSaved(ok ? 'saved' : 'failed'))
+      void onPatch(body).then(
+        (ok) => setSaved(ok ? 'saved' : 'failed'),
+        () => setSaved('failed'),
+      )
     }, 500)
   }
 
@@ -330,7 +353,7 @@ export function WidgetsPanel({
   onRemove: (id: string) => void | Promise<void>
 }) {
   const [kind, setKind] = useState<WidgetKind | 'all'>('all')
-  const [catalog, setCatalog] = useState<Map<string, CatalogEntry>>(new Map())
+  const [entries, setEntries] = useState<CatalogEntry[] | null>(null)
   const [query, setQuery] = useState('')
   const [browsing, setBrowsing] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -341,16 +364,21 @@ export function WidgetsPanel({
     void fetch('/api/catalog')
       .then((response) => response.json() as Promise<{ manifests: CatalogEntry[] }>)
       .then((payload) => {
-        if (live) setCatalog(new Map(payload.manifests.map((entry) => [entry.id, entry])))
+        if (live) setEntries(payload.manifests)
       })
       .catch(() => {
-        // A failed catalog fetch means everything lands under Widgets, which is the honest
-        // fallback: the list is still complete and still removable.
+        // Without a catalog every widget falls under Widgets; the list stays complete and removable.
+        if (live) setEntries([])
       })
     return () => {
       live = false
     }
   }, [])
+
+  const catalog = useMemo(
+    () => new Map((entries ?? []).map((entry) => [entry.id, entry])),
+    [entries],
+  )
 
   const page = state.resolved.pages[0]
   const grids = (page?.sections ?? [])
@@ -367,21 +395,17 @@ export function WidgetsPanel({
     (widget) => kind === 'all' || kindOf(widget.type, catalog) === kind,
   )
 
-  const patch = useCallback(
-    async (id: string, body: Patch) => {
-      const response = await fetch(`/api/widgets/${id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      onChanged()
-      return response.ok
-    },
-    [onChanged],
-  )
+  const patch = async (id: string, body: Patch) => {
+    const response = await fetch(`/api/widgets/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    onChanged()
+    return response.ok
+  }
 
   const searching = query.trim() !== '' || browsing
-  const onEditing = useCallback((editing: boolean) => setAdding(editing), [])
 
   return (
     <div className="nh-panel-stack">
@@ -411,34 +435,12 @@ export function WidgetsPanel({
 
       {searching || adding ? (
         <>
-          {adding ? null : (
-            <div className="nh-seg nh-seg-compact" role="group" aria-label="Widget kind">
-              <button
-                type="button"
-                className="nh-seg-item"
-                aria-pressed={kind === 'all'}
-                onClick={() => setKind('all')}
-              >
-                All
-              </button>
-              {WIDGET_KINDS.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className="nh-seg-item"
-                  aria-pressed={kind === entry.id}
-                  title={entry.blurb}
-                  onClick={() => setKind(entry.id)}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {adding ? null : <KindSegments kind={kind} onChange={setKind} label="Widget kind" />}
           <AddWidget
+            entries={entries}
             query={query}
             {...(kind === 'all' ? {} : { kind })}
-            onEditing={onEditing}
+            onEditing={setAdding}
             onCancel={() => {
               setQuery('')
               setBrowsing(false)
@@ -457,27 +459,7 @@ export function WidgetsPanel({
               On this page <span className="nh-count">{placed.length}</span>
             </span>
             {state.resolved.widgets.length > 0 ? (
-              <div className="nh-seg nh-seg-compact" role="group" aria-label="Show">
-                <button
-                  type="button"
-                  className="nh-seg-item"
-                  aria-pressed={kind === 'all'}
-                  onClick={() => setKind('all')}
-                >
-                  All
-                </button>
-                {WIDGET_KINDS.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className="nh-seg-item"
-                    aria-pressed={kind === entry.id}
-                    onClick={() => setKind(entry.id)}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
+              <KindSegments kind={kind} onChange={setKind} label="Show" />
             ) : null}
           </div>
           {placed.length === 0 ? (

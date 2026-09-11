@@ -1,14 +1,11 @@
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
-import { expect, startServer, test, type Harness } from './fixtures.ts'
+import { expect, readState, sendJson, startServer, test, type Harness } from './fixtures.ts'
 import type { Page } from '@playwright/test'
 
 /**
- * The board as a document: with JavaScript off, and at the widths people actually use.
- *
- * The static path is the product's main claim — a start page that is a file, not an app — and it
- * is the one that cannot be checked without a real layout engine. A unit test can assert the HTML
- * contains a tile; only a browser can say whether the tile is where the grid said it would be.
+ * The published board in a real browser: the no-JavaScript path and the widths people use, which
+ * only a layout engine can check.
  */
 
 let harness: Harness
@@ -33,28 +30,15 @@ test.beforeAll(async () => {
     ['Uptime', 'uptime-kuma-status'],
     ['Link', 'service-link'],
   ]) {
-    const target = await fetch(`${harness.baseURL}/api/targets`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        label,
-        widgetType: type,
-        base: { scheme: 'http', host: '127.0.0.1', port: 9913 },
-        values: { apiKey: 'x', label: 'Open', path: 'x' },
-      }),
+    const { id } = await sendJson<{ id: string }>(`${harness.baseURL}/api/targets`, {
+      label,
+      widgetType: type,
+      base: { scheme: 'http', host: '127.0.0.1', port: 9913 },
+      values: { apiKey: 'x', label: 'Open', path: 'x' },
     })
-    const { id } = (await target.json()) as { id: string }
-    await fetch(`${harness.baseURL}/api/widgets`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ type, targetId: id }),
-    })
+    await sendJson(`${harness.baseURL}/api/widgets`, { type, targetId: id })
   }
-  await fetch(`${harness.baseURL}/api/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{}',
-  })
+  await sendJson(`${harness.baseURL}/api/publish`, {})
 })
 
 test.afterAll(async () => {
@@ -71,8 +55,8 @@ test.describe('with JavaScript disabled', () => {
     const tiles = page.locator('article.nh-tile')
     await expect(tiles).toHaveCount(3)
 
-    // Laid out, not stacked in the corner: the published page carries a `calc()` grid mirroring
-    // react-grid-layout's own formula, and this is what proves it survives to the browser.
+    // The published page carries a `calc()` grid mirroring react-grid-layout's formula; check it
+    // reached the browser.
     const boxes = await tiles.evaluateAll((nodes) =>
       nodes.map((node) => {
         const box = node.getBoundingClientRect()
@@ -86,20 +70,16 @@ test.describe('with JavaScript disabled', () => {
 
     const viewport = page.viewportSize()?.width ?? 0
     if (viewport >= 768) {
-      // Wide enough for more than one column, so at least two tiles share a row — which cannot
-      // happen if the grid CSS did not reach the browser.
+      // More than one column, so at least two tiles share a row.
       expect(new Set(boxes.map((box) => Math.round(box.y))).size).toBeLessThan(boxes.length)
     } else {
-      // At the narrow tier the grid is two columns and a default widget spans both, so every tile
-      // IS full width and stacked. That is the grid working, not failing — the proof here is that
-      // tiles expanded to the column rather than sitting at some intrinsic content width.
+      // The narrow tier is two columns and a default widget spans both, so tiles are stacked and
+      // full width; check they expanded to the column rather than to their content width.
       for (const box of boxes) expect(box.w).toBeGreaterThan(viewport * 0.6)
     }
   })
 
   test('the editor button is absent rather than present and dead', async ({ page }) => {
-    // A control that does nothing is worse than no control: it teaches the user the page is
-    // broken rather than that this view is static.
     await page.goto(`${harness.baseURL}/`)
     await expect(page.locator('button.nh-fab')).toHaveCount(0)
   })
@@ -115,13 +95,11 @@ for (const width of [1400, 900, 380]) {
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }))
-    // A page that scrolls sideways on a phone is the single most common responsive failure, and
-    // the one people notice first.
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
   })
 }
 
-/** Every visible control, with the ones under WCAG 2.5.8's 24×24 named. */
+/** Visible controls smaller than WCAG 2.5.8's 24×24 CSS pixels. */
 async function undersizedControls(page: Page) {
   return page.evaluate(() => {
     const controls = [...document.querySelectorAll<HTMLElement>('button, a[href], input, select')]
@@ -136,8 +114,7 @@ async function undersizedControls(page: Page) {
 }
 
 test('every control is big enough to hit on a touchscreen', async ({ page }) => {
-  // WCAG 2.5.8 (AA): 24×24 CSS pixels. The FABs and the editor's tabs are the controls a phone
-  // user reaches for, and they are also the smallest things on the page.
+  // The FABs and the editor's tabs are the smallest controls on the page.
   await page.setViewportSize({ width: 380, height: 800 })
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-editor').click()
@@ -146,8 +123,6 @@ test('every control is big enough to hit on a touchscreen', async ({ page }) => 
 })
 
 test('the design panel is reachable by thumb too', async ({ page }) => {
-  // The panel is a second modal full of small controls — swatches, sliders, segmented buttons —
-  // and it is the surface most likely to grow one that is too small to hit.
   await page.setViewportSize({ width: 380, height: 800 })
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
@@ -162,10 +137,8 @@ test('the design panel is reachable by thumb too', async ({ page }) => {
 })
 
 test('a design control follows the pointer instead of the last round trip', async ({ page }) => {
-  // The regression this exists for: the panel's inputs were controlled by the theme that came back
-  // from the server, so every drag frame re-rendered them with the PREVIOUS value and the thumb was
-  // pulled back under the cursor. The control looked dead. Nothing in the unit suite can see it —
-  // it only exists once a real input event races a real fetch.
+  // Regression: inputs controlled by the theme returned from the server re-rendered every drag
+  // frame with the previous value, pulling the thumb back under the cursor.
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
   await page.getByRole('button', { name: 'Shape', exact: true }).click()
@@ -179,9 +152,7 @@ test('a design control follows the pointer instead of the last round trip', asyn
       sent: value,
       // The control must never lag: its value is local state, settled before the event returns.
       shows: await slider.inputValue(),
-      // The PAGE is allowed exactly one frame. Painting is coalesced to an animation frame on
-      // purpose — a drag emits events faster than a board of tiles can repaint, and painting every
-      // one builds a backlog that reads as lag. One frame behind is not lag; a queue is.
+      // Painting is coalesced to an animation frame, so the page may be exactly one frame behind.
       painted: await page.evaluate(
         () =>
           new Promise<string>((resolve) => {
@@ -205,13 +176,11 @@ test('a design control follows the pointer instead of the last round trip', asyn
     })),
   )
 
-  // And the write is debounced rather than dropped: the last value survives a reload.
+  // The write is debounced, not dropped: the last value reaches the server.
   await expect
     .poll(
       async () => {
-        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-          resolved: { theme: { cssVars: { theme: Record<string, string> } } }
-        }
+        const state = await readState(page, harness.baseURL)
         return state.resolved.theme.cssVars.theme.radius
       },
       { timeout: 5000 },
@@ -219,11 +188,9 @@ test('a design control follows the pointer instead of the last round trip', asyn
     .toBe('28px')
 })
 
-/** Put the theme back to stock, so a test's claim is about what it did rather than what ran before. */
+/** Resets the theme to stock; tests share one server. */
 async function clearTheme(page: Page) {
-  const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-    resolved: { theme: { cssVars: Record<'theme' | 'light' | 'dark', Record<string, string>> } }
-  }
+  const state = await readState(page, harness.baseURL)
   const cssVars = Object.fromEntries(
     (['theme', 'light', 'dark'] as const).map((bucket) => [
       bucket,
@@ -236,9 +203,8 @@ async function clearTheme(page: Page) {
 }
 
 test('the type control shows which stack every preset is on', async ({ page }) => {
-  // Exact string equality against a whole font stack marked nothing as active on six of the seven
-  // presets, because a preset may append families and write its list with spaces. The control was
-  // not broken so much as permanently blank, which looks the same from the outside.
+  // Regression: exact equality against a whole font stack marked no stack active, because a
+  // preset may append families and space its list differently.
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
 
@@ -260,27 +226,22 @@ test('the type control shows which stack every preset is on', async ({ page }) =
 })
 
 test('switching preset discards a nudge that was aimed at the old one', async ({ page }) => {
-  // The debounce made this reachable: move a slider, immediately pick a preset, and the pending
-  // write lands AFTER the switch and writes itself into the theme you just chose. Measured once as
-  // radius 6px inside Terminal, whose own radius is 0.
-  // Earlier tests in this file leave overrides on the shared server, so start from a known theme
-  // rather than from whatever ran last: the claim here is about ONE nudge, not about the store.
+  // Regression: a debounced slider write landing after a preset switch wrote itself into the new
+  // preset. Earlier tests leave overrides on the shared server, so start from stock.
   await clearTheme(page)
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
   await page.getByRole('button', { name: 'Shape', exact: true }).click()
   await page.locator('input[type=range]').first().fill('7')
 
-  // No wait: the point is to switch while the write is still queued.
+  // Switch while the write is still queued.
   await page.getByRole('button', { name: 'Themes', exact: true }).click()
   await page.locator('.nh-preset', { hasText: 'Terminal' }).first().click()
 
   await expect
     .poll(
       async () => {
-        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-          resolved: { theme: { preset: string; cssVars: { theme: Record<string, string> } } }
-        }
+        const state = await readState(page, harness.baseURL)
         return `${state.resolved.theme.preset}:${Object.keys(state.resolved.theme.cssVars.theme).length}`
       },
       { timeout: 5000 },
@@ -297,8 +258,6 @@ test('switching preset discards a nudge that was aimed at the old one', async ({
 })
 
 test('custom values are counted and clearable', async ({ page }) => {
-  // An override outlives the preset it was made under, which is right and invisible: the board
-  // stops matching the card you clicked and nothing explains it.
   await clearTheme(page)
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
@@ -313,9 +272,7 @@ test('custom values are counted and clearable', async ({ page }) => {
   await expect
     .poll(
       async () => {
-        const state = (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-          resolved: { theme: { cssVars: { theme: Record<string, string> } } }
-        }
+        const state = await readState(page, harness.baseURL)
         return Object.keys(state.resolved.theme.cssVars.theme).length
       },
       { timeout: 5000 },
@@ -324,8 +281,6 @@ test('custom values are counted and clearable', async ({ page }) => {
 })
 
 test('board width is a scale of icons, and exactly one is on', async ({ page }) => {
-  // It used to be a dropdown, which hid four options behind a click and asked the reader to
-  // translate "Comfortable" into a picture of a page. The thing being chosen is a picture.
   await clearTheme(page)
   await page.goto(`${harness.baseURL}/`)
   await page.locator('button.nh-fab-design').click()
@@ -345,7 +300,6 @@ test('board width is a scale of icons, and exactly one is on', async ({ page }) 
       'aria-pressed',
       'true',
     )
-    // Never two: the pressed state IS the answer to "which one am I on".
     await expect(page.locator('.nh-width[aria-pressed="true"]')).toHaveCount(1)
     await expect
       .poll(() =>
@@ -360,14 +314,8 @@ test('board width is a scale of icons, and exactly one is on', async ({ page }) 
 test('a dragged tile stays under the pointer, and the move is a draft until saved', async ({
   page,
 }) => {
-  // Phones have no pointer to drag with; the layout editor is a desktop affordance.
   test.skip((page.viewportSize()?.width ?? 0) < 768, 'no drag on the phone tier')
-  const revision = async () =>
-    (
-      (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-        revision: string
-      }
-    ).revision
+  const revision = async () => (await readState(page, harness.baseURL)).revision
   const before = await revision()
 
   await page.goto(`${harness.baseURL}/`)
@@ -376,8 +324,7 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
   await page.getByRole('button', { name: 'Edit layout', exact: true }).click()
   await page.waitForSelector('.react-grid-layout')
 
-  // The leftmost tile, so a drag to the right has somewhere to go. DOM order is widget order,
-  // not layout order, so `first()` could be the tile already against the right edge.
+  // DOM order is widget order, not layout order, so `first()` could already be at the right edge.
   const leftmost = async () => {
     const boxes = await page
       .locator('.nh-drag-handle')
@@ -392,8 +339,7 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
     await page.mouse.move(start.x + step * 30, start.y + step * 10, { steps: 2 })
   }
 
-  // Mid-drag: the handle is where the pointer is. Without the grid's positioning rules the tile
-  // measured itself against the page and rode a hundred pixels away from the cursor.
+  // Mid-drag the handle is under the pointer; without the grid's positioning rules it drifted.
   const dragged = await page
     .locator('.react-draggable-dragging .nh-drag-handle')
     .evaluate((node) => {
@@ -405,21 +351,18 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
   await expect(page.locator('.react-grid-placeholder')).toBeVisible()
   await page.mouse.up()
 
-  // Dropped, not saved: the bar counts a change and the server's revision is untouched.
   await expect(page.locator('.nh-editbar')).toContainText('1 unsaved change')
   expect(await revision()).toBe(before)
 
-  // Leaving is gated, discarding restores, saving writes.
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   await expect(page.locator('.nh-editbar')).toContainText('Save or discard')
   await page.getByRole('button', { name: 'Discard', exact: true }).click()
   await expect(page.locator('.nh-editbar')).not.toContainText('unsaved')
   expect(await revision()).toBe(before)
-  // The tiles glide back over 200ms; measuring one mid-glide would aim the next drag at air.
+  // Tiles glide back over 200ms; measure after they settle.
   await page.waitForTimeout(400)
 
-  // A drag that ends where it began is not a change: the bar counts differences, not drops.
-  // Nudge the leftmost tile and let it go on the same cell.
+  // A drop on the same cell is not a change.
   const same = await leftmost()
   await page.mouse.move(same.x + 5, same.y + 5)
   await page.mouse.down()
@@ -436,8 +379,7 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
   await page.mouse.up()
   await expect(page.locator('.nh-editbar')).toContainText('1 unsaved change')
   await page.getByRole('button', { name: 'Save layout', exact: true }).click()
-  // "Saving…" also lacks the word; wait for the idle line, which only returns once the write
-  // has landed and the state has been re-read.
+  // "Saving…" also lacks "unsaved"; the idle line only returns once the write has landed.
   await expect(page.locator('.nh-editbar')).toContainText('Nothing is saved until')
   expect(await revision()).not.toBe(before)
   await page.getByRole('button', { name: 'Done', exact: true }).click()
@@ -446,12 +388,7 @@ test('a dragged tile stays under the pointer, and the move is a draft until save
 
 test('a tile can be removed and resized from edit mode', async ({ page }) => {
   test.skip((page.viewportSize()?.width ?? 0) < 768, 'the layout editor is a desktop affordance')
-  const widgets = async () =>
-    (
-      (await (await page.request.get(`${harness.baseURL}/api/state`)).json()) as {
-        resolved: { widgets: { id: string }[] }
-      }
-    ).resolved.widgets.length
+  const widgets = async () => (await readState(page, harness.baseURL)).resolved.widgets.length
   const before = await widgets()
 
   await page.goto(`${harness.baseURL}/`)
@@ -460,7 +397,6 @@ test('a tile can be removed and resized from edit mode', async ({ page }) => {
   await page.getByRole('button', { name: 'Edit layout', exact: true }).click()
   await page.waitForSelector('.react-grid-layout')
 
-  // Size is a select on the tile's bar: pick 2×2 and the draft reflows, nothing is saved yet.
   const size = page.locator('.nh-editor-size').first()
   await size.selectOption('2x2')
   await expect(page.locator('.nh-editbar')).toContainText('unsaved change')
@@ -473,8 +409,6 @@ test('a tile can be removed and resized from edit mode', async ({ page }) => {
     })
     .toBe(true)
 
-  // Remove is a real write, and it used to 403: a body-less DELETE carried no content type and
-  // the cross-site gate refused it like a form post.
   await page.locator('.nh-editor-remove').first().click()
   await expect(page.locator('.react-grid-item')).toHaveCount(before - 1)
   expect(await widgets()).toBe(before - 1)

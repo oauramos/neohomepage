@@ -1,14 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createServer, type Server } from 'node:http'
-import { once } from 'node:events'
-import { singleManifestSchema, type SingleManifest } from '@neohomepage/catalog-schema'
+import { singleManifestSchema, type Auth, type SingleManifest } from '@neohomepage/catalog-schema'
 import { executeOperation } from './execute.ts'
+import { closeServers, serve } from './fixtures.ts'
 import { SessionManager } from './session.ts'
 
-/**
- * qBittorrent's shape: form login, session cookie, everything after it carries the cookie.
- * Pi-hole v6's shape is the other branch — a JSON body with the token at `session.sid`.
- */
+// qBittorrent's shape (form login, session cookie); tokenManifest is Pi-hole v6's (JSON token).
 const cookieManifest = (): SingleManifest =>
   singleManifestSchema.parse({
     manifestVersion: 1,
@@ -76,25 +72,12 @@ const tokenManifest = (): SingleManifest => {
   })
 }
 
-let server: Server | null = null
-afterEach(async () => {
-  if (server !== null) {
-    server.close()
-    await once(server, 'close')
-    server = null
-  }
-})
+const sessionAuth = () =>
+  cookieManifest().target.auth as Extract<Auth, { kind: 'session-exchange' }>
 
-type Handler = Parameters<typeof createServer>[1]
+afterEach(closeServers)
 
-async function listen(handler: Handler): Promise<string> {
-  server = createServer(handler)
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('no address')
-  return `http://127.0.0.1:${address.port}`
-}
+const listen = async (handler: Parameters<typeof serve>[0]) => (await serve(handler)).origin
 
 const run = (
   manifest: SingleManifest,
@@ -145,8 +128,7 @@ describe('the cookie flavour', () => {
   })
 
   it('shares one login between many requests on the same credential', async () => {
-    // Six widgets on one qBittorrent must not open six sessions: it counts them and starts
-    // refusing. This is the reason the manager exists at all rather than a per-request login.
+    // qBittorrent counts sessions and starts refusing.
     let logins = 0
     const origin = await listen((req, res) => {
       req.resume()
@@ -210,9 +192,8 @@ describe('the cookie flavour', () => {
     })
 
     const pool = new SessionManager({ now: () => 1_000 })
-    // The status stands after one re-login: a FRESH session being refused means the credential
-    // is wrong, and "http-403" says that where a synthetic "session-rejected" would hide it.
-    // Two attempts and no more — services here ban an IP after N failures.
+    // A fresh session being refused means the credential is wrong, so the 403 stands; a third
+    // attempt would risk an IP ban.
     expect(await run(cookieManifest(), origin, pool)).toMatchObject({ ok: false, code: 'http-403' })
     expect({ logins, dataRequests }).toEqual({ logins: 2, dataRequests: 2 })
   })
@@ -315,10 +296,7 @@ describe('expiry and keys', () => {
   })
 
   it('keys on the credential, not only the target', () => {
-    const auth = cookieManifest().target.auth as Extract<
-      ReturnType<typeof cookieManifest>['target']['auth'],
-      { kind: 'session-exchange' }
-    >
+    const auth = sessionAuth()
     const one = SessionManager.key('http://nas:8080', '', auth, {
       secrets: { password: 'a' },
       config: {},
@@ -331,10 +309,7 @@ describe('expiry and keys', () => {
   })
 
   it('does not store the credential it keyed on', () => {
-    const auth = cookieManifest().target.auth as Extract<
-      ReturnType<typeof cookieManifest>['target']['auth'],
-      { kind: 'session-exchange' }
-    >
+    const auth = sessionAuth()
     const key = SessionManager.key('http://nas:8080', '', auth, {
       secrets: { password: 'hunter2' },
       config: {},

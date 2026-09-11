@@ -1,26 +1,12 @@
 /**
- * The restore drill.
- *
- * The claim this project makes about backup is specific: push `/data` to a repository, lose the
- * machine, clone it onto a new one with the same secret environment variables, and the dashboard
- * comes back identical with no manual step. That is a claim with a lot of moving parts —
- * gitignore seeding, sparse serialisation, the resolve compiler, credential indirection — and any
- * one of them can quietly stop being true.
- *
- * So it is executed, end to end, rather than described:
- *
- *   1. Build a dashboard through the real API, with a real credential.
- *   2. `git init` and commit `/data`. Assert that secrets/ and state/ are NOT in the commit.
- *   3. Clone into an empty directory — a new machine, with nothing carried over.
- *   4. Boot there with the credential supplied ONLY as an environment variable.
- *   5. Assert the resolved tree hashes the same, the served board is byte-identical, `git status`
- *      is clean, and doctor reports nothing.
+ * Restore drill: builds a dashboard through the real API, commits `/data`, clones it into an empty
+ * directory, boots there with the credential supplied only by environment, and asserts the result
+ * is identical and the clone stays clean.
  *
  * Usage:
  *   node scripts/restore-drill.ts
  */
-import { execFile } from 'node:child_process'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -89,16 +75,9 @@ const post = async (base: string, path: string, body: unknown) => {
   return JSON.parse(text) as Record<string, unknown>
 }
 
-/**
- * Hash the resolved tree with `generatedAt` removed.
- *
- * It is a timestamp stamped once per resolve, so two runs of identical config differ only there.
- * Including it would make the drill's central assertion impossible to satisfy and tempt whoever
- * hits that into weakening the comparison to something meaningless.
- */
+/** Hash of the resolved tree without `generatedAt`, which is stamped once per resolve. */
 function resolvedHash(resolved: Record<string, unknown>): string {
   const { generatedAt, ...rest } = resolved
-  void generatedAt
   return createHash('sha256').update(JSON.stringify(rest)).digest('hex')
 }
 
@@ -153,12 +132,8 @@ async function main(): Promise<number> {
 
     // ---- 2. commit /data, and prove what is NOT in it ------------------------------------
     console.log('committing the data directory')
-    // `-b main` explicitly. `git init --bare` takes its default branch from the machine's
-    // `init.defaultBranch`, so a bare repo created on a host that still defaults to `master` gets
-    // a HEAD pointing at a branch this drill never pushes — and `git clone` then checks out
-    // NOTHING. The drill passed locally and failed in CI for exactly that reason, and it failed
-    // in the worst way: the empty clone booted, seeded a fresh config, and every later assertion
-    // compared that against the original.
+    // `-b main`: a bare repo otherwise takes `init.defaultBranch`, and on a host defaulting to
+    // `master` HEAD points at a branch never pushed here, so the clone checks out nothing.
     await exec('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare })
     await exec('git', ['init', '-q'], { cwd: original })
     await exec('git', ['config', 'user.email', 'drill@example.invalid'], { cwd: original })
@@ -185,7 +160,6 @@ async function main(): Promise<number> {
       `${files.filter((file) => file.startsWith('state/')).length} file(s)`,
     )
 
-    // The grep the beta definition names, over everything the repository actually carries.
     let leaked = false
     for (const file of files) {
       const text = await readFile(join(original, file), 'utf8').catch(() => '')
@@ -199,12 +173,7 @@ async function main(): Promise<number> {
     await exec('git', ['clone', '-q', bare, restored])
 
     // ---- 4. boot with the credential supplied ONLY by environment ------------------------
-    /**
-     * The credentials, exactly as the documented restore supplies them: environment variables and
-     * nothing else. Derived from every secret the config declares rather than from `targets[0]`,
-     * which is whichever id sorts first — the ICS feed here, which has no credential at all. That
-     * mistake was invisible while the clone was coming up empty.
-     */
+    // One env var per secret the config declares; `targets[0]` may be the credential-less feed.
     const secretEnv = Object.fromEntries(
       (originalResolved.targets as { secretRefs?: Record<string, string> }[]).flatMap((target) =>
         Object.values(target.secretRefs ?? {}).map((name) => [
@@ -219,8 +188,6 @@ async function main(): Promise<number> {
 
     console.log('booting the restore')
     server = await start(restored, RESTORED_PORT, {
-      // The recommended path: the key lives in the compose file or the systemd unit, and the
-      // repository never sees it.
       ...secretEnv,
     })
     try {
@@ -233,18 +200,7 @@ async function main(): Promise<number> {
         `${resolvedHash(state.resolved).slice(0, 12)} vs ${resolvedHash(originalResolved).slice(0, 12)}`,
       )
 
-      /**
-       * Byte-identical, with one timestamp normalised.
-       *
-       * The published document embeds the resolved state, which carries `generatedAt` — stamped
-       * once per resolve so that two runs over identical config differ ONLY there. That is the
-       * property the publish step's no-op detection depends on, so it has to be true, and it
-       * makes a literal byte comparison impossible to satisfy.
-       *
-       * Normalising exactly that one field, and nothing else, keeps the assertion strong: the
-       * markup, the baked stylesheet, the grid CSS, the asset filenames and every projection in
-       * the embedded state must all match.
-       */
+      // The embedded state carries `generatedAt`, stamped once per resolve; normalise only that.
       const normalise = (html: string) =>
         html.replace(/"generatedAt":"[^"]*"/g, '"generatedAt":"<stamped>"')
       const board = await (await fetch(`${server.base}/`)).text()
@@ -262,8 +218,6 @@ async function main(): Promise<number> {
       }
       check('the served board is byte-identical', identical)
 
-      // And the visible document — everything before the embedded state — matches literally, with
-      // nothing normalised at all.
       const bodyOf = (html: string) => html.slice(0, html.indexOf('<script id="__NEO_STATE__"'))
       check(
         'the rendered markup matches with nothing normalised',
@@ -271,8 +225,7 @@ async function main(): Promise<number> {
       )
 
       const { stdout: status } = await exec('git', ['status', '--porcelain'], { cwd: restored })
-      // state/ is regenerated on boot and must not show up as a change, or every restore starts
-      // with a dirty tree and the next `git add -A` commits a generation.
+      // state/ is regenerated on boot and must not dirty the tree.
       check('the clone is still clean after booting', status.trim() === '', status.trim())
 
       const doctor = await exec(process.execPath, [join(ROOT, 'src/cli/neo.ts'), 'doctor'], {
@@ -288,8 +241,7 @@ async function main(): Promise<number> {
 
       check('doctor reports no errors', doctor.stdout.includes('0 problems'), doctor.stdout.trim())
 
-      // Doctor is happy about an EMPTY install too, so on its own it proves nothing here. This is
-      // the assertion that would have caught the empty clone immediately.
+      // doctor passes on an empty install too, so also check the widgets came back.
       const widgets = (state.resolved as { widgets?: unknown[] }).widgets ?? []
       check(
         'the restored dashboard actually has the widgets',

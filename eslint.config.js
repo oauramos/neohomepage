@@ -2,16 +2,11 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 /**
- * The client/server boundary is enforced here, not by a package split.
- *
- * `src/web` is bundled for the browser and `src/shared` is pulled in with it, so neither may take
- * a VALUE import from a Node builtin or from `src/server` — that is what would put server code in
- * the bundle. Type-only imports are allowed everywhere, because they vanish at compile time and
- * describing a server-owned shape is exactly what `src/shared` is for.
- *
- * Tests are exempt: they run in Node and are never bundled, so a test asserting that the server
- * and the browser agree has to be able to import both.
+ * Enforces the client/server boundary: src/web and src/shared are bundled for the browser, so they
+ * may not value-import Node builtins or src/server. Type-only imports vanish at compile time and
+ * are allowed. Tests run in Node and are exempt.
  */
+// prettier-ignore
 const NODE_BUILTINS = [
   'assert', 'buffer', 'child_process', 'cluster', 'crypto', 'dgram', 'dns', 'fs', 'http',
   'http2', 'https', 'inspector', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
@@ -45,10 +40,8 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Plain JS tooling scripts. They are not TypeScript, so the `no-undef: off` below does not
-    // reach them and every Node global reads as undefined. Declared by hand rather than pulling
-    // in `globals` for seven names — including `window`, which really is a browser global here:
-    // the body of a `page.evaluate()` is serialised and run inside the page, where it exists.
+    // Plain JS is not covered by the `no-undef: off` below. `window` is real here: a
+    // `page.evaluate()` body runs inside the page.
     files: ['scripts/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2023,
@@ -72,9 +65,8 @@ export default tseslint.config(
     rules: {
       // TypeScript resolves globals from `types`; core no-undef only yields false positives.
       'no-undef': 'off',
-      // Node runs TypeScript in strip-only mode: it erases types, it does not GENERATE code.
-      // Parameter properties, enums and namespaces all need generation, so a file using them
-      // typechecks, passes tests (vitest transpiles) and then fails at `node src/server/main.ts`.
+      // Node type stripping erases types but generates no code: parameter properties, enums and
+      // namespaces pass typecheck and vitest, then fail at `node src/server/main.ts`.
       '@typescript-eslint/parameter-properties': ['error', { prefer: 'class-property' }],
       '@typescript-eslint/no-namespace': 'error',
       'no-restricted-syntax': [
@@ -85,7 +77,10 @@ export default tseslint.config(
             'enums are not supported by Node type stripping; use a const object with `as const`',
         },
       ],
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
       '@typescript-eslint/consistent-type-imports': 'error',
     },
   },

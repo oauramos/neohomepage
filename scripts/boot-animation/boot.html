@@ -1,9 +1,20 @@
 <!doctype html>
 <meta charset="utf-8" />
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { background: #000; }
-  body { width: 640px; height: 480px; overflow: hidden; }
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    background: #000;
+  }
+  body {
+    width: 640px;
+    height: 480px;
+    overflow: hidden;
+  }
 
   .stage {
     position: relative;
@@ -16,8 +27,7 @@
     overflow: hidden;
   }
 
-  /* A Didone — heavy stems, hairline thins, unbracketed serifs — which is what the reference mark
-     is set in. Bodoni 72 falls back to nearly the same shapes. */
+  /* Didone, as in the reference mark; Bodoni 72 is the closest fallback. */
   .mark {
     font-family: 'Didot', 'Bodoni 72', 'Playfair Display', serif;
     font-weight: 700;
@@ -26,9 +36,7 @@
     line-height: 1;
   }
 
-  /* A regular-width bold grotesque, not a condensed face with wide tracking. Side by side with
-     the reference the condensed version read as a footnote; the reference's spec line is large
-     and plain, roughly 40% of the wordmark's cap height, and it is the second thing you read. */
+  /* Regular-width, not condensed: the reference's spec line is large and plain. */
   .tag {
     font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
     font-weight: 700;
@@ -48,20 +56,18 @@
     white-space: nowrap;
   }
 
-  /* Scanlines only, and no vignette.
-     A vignette seemed like the obvious CRT touch and it is wrong here: it darkens the corners, so
-     the frame at the crossing is no longer one flat tone and the mirrored mark stays faintly
-     legible right through the moment that is supposed to hide it. Measured against the reference
-     at the same instant, the reference is flat and this was not. Tied to darkness so the white
-     opening carries none, as the reference's does not. */
+  /* No vignette: it darkens the corners, so the frame at the crossing is no longer one flat tone
+     and the mirrored mark stays faintly legible through the moment meant to hide it. */
   .scan {
     position: absolute;
     inset: 0;
     pointer-events: none;
     background: repeating-linear-gradient(
       to bottom,
-      rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
-      rgba(0,0,0,0.13) 3px, rgba(0,0,0,0.13) 4px
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.13) 3px,
+      rgba(0, 0, 0, 0.13) 4px
     );
   }
 </style>
@@ -78,15 +84,23 @@
   const P = new URLSearchParams(location.search)
   const W = 640
   const $ = (id) => document.getElementById(id)
-  for (const [key, el] of [['mark','mark'],['t1','tag1'],['t2','tag2'],['maker','maker']]) {
+  for (const [key, el] of [
+    ['mark', 'mark'],
+    ['t1', 'tag1'],
+    ['t2', 'tag2'],
+    ['maker', 'maker'],
+  ]) {
     if (P.get(key)) $(el).innerHTML = P.get(key)
   }
 
-  const stage = $('stage'), mark = $('mark'), tag1 = $('tag1'), tag2 = $('tag2')
-  const maker = $('maker'), scan = $('scan')
+  const stage = $('stage'),
+    mark = $('mark'),
+    tag1 = $('tag1'),
+    tag2 = $('tag2')
+  const maker = $('maker'),
+    scan = $('scan')
 
-  /* Fit the wordmark once. NEO·HOMEPAGE is nearly twice NEO·GEO's character count, so a size that
-     suits one overflows or under-fills the other. */
+  /* Fit the wordmark to the stage; its text is overridable, so its length varies. */
   mark.style.color = '#000'
   let size = 96
   mark.style.fontSize = size + 'px'
@@ -106,38 +120,19 @@
   const easeOut = (x) => 1 - Math.pow(1 - x, 3)
   const grey = (v) => `rgb(${v},${v},${v})`
 
-  /* The cabinet holds on black before it does anything. Faithful to the reference, but shortened:
-     it runs 1.1s there, and a looping GIF in a README that opens on a second of nothing reads as
-     a broken image. Long enough to be a beat, short enough not to look empty. */
+  // The reference holds 1.1s on black; shorter here so a looping GIF does not open on nothing.
   const BLACK_HOLD = Number(P.get('hold') ?? 0.6)
   const UNFOLD_END = BLACK_HOLD + 0.6 // width 24→379 px in ~11 reference frames at 17.8 fps
   const ZOOM_END = UNFOLD_END + 0.3 // held at full width, still mirrored, before the dissolve
   const CROSS_END = ZOOM_END + 1.1 // the reference dissolves over ~24 frames
   const DURATION = CROSS_END + 5.6
 
-  /**
-   * The whole sequence as a pure function of time.
-   *
-   * The transition at its centre is the thing worth getting right, and it is not a flip. The
-   * screen opens WHITE with the wordmark in BLACK and mirrored, growing. Then the background
-   * ramps white to black while the mark ramps black to white — two opposite ramps that cross at
-   * mid-grey, where the frame is briefly one flat tone and nothing is visible at all. The
-   * mirroring resolves inside that blind moment, so the mark simply is the right way round when
-   * it comes back out.
-   *
-   * The first attempt at this read the crossing as a specular flash and did a 3D rotation through
-   * it. Extracting the reference frame by frame is what showed it: at the midpoint the image's
-   * min/max collapses to 138/255 — the black text rising to meet a darkening ground, not a
-   * highlight passing over it.
-   *
-   * Driven by an explicit clock rather than CSS animation, because the renderer takes one
-   * screenshot per frame and a CSS timeline advances by wall clock between them, which under
-   * headless capture spaces the frames unevenly and shows at the loop seam.
-   */
+  /* The whole sequence as a pure function of time. An explicit clock, not CSS animation: the
+     renderer takes one screenshot per frame, and a CSS timeline advancing by wall clock between
+     them spaces the frames unevenly and shows at the loop seam. */
   window.DURATION = DURATION
   window.renderAt = function (t) {
-    // The opening hold. The reference cuts from black to white rather than fading, so this does
-    // too — everything below simply stays at its t=0 state until the cut.
+    // Opening hold; the reference cuts from black to white rather than fading.
     if (t < BLACK_HOLD) {
       stage.style.background = '#000'
       mark.style.opacity = '0'
@@ -164,19 +159,9 @@
     // and ink are the same value, so there is nothing on screen to see it happen.
     const mirrored = cross < 0.5
 
-    /* A horizontal unfold, and ONLY horizontal.
-     *
-     * Measured off the reference frame by frame, the mark's height is 67 px on every frame of the
-     * white phase while its width goes 24 → 70 → 94 → 212 → 284 → 379 and then holds. That is
-     * scaleX from near zero to one with scaleY fixed — the projection of a card turning on its
-     * vertical axis with no perspective, seen from the back, which is why it is mirrored. Three
-     * earlier attempts got this wrong three different ways: a perspective rotation, a uniform
-     * zoom from a point, and a dissolve with no entry motion at all. */
-    // Linear, not eased. Measured against the reference frame for frame, the width grows by a
-    // near-constant amount per frame (+56, +19, +38, +59, +56 px); eased-out it raced ahead in
-    // the middle and crawled at the end, reaching the same width at the same moment by the wrong
-    // route. A card turning at constant speed would give ease-out here, so whatever the cabinet
-    // is doing, it is not that — and the data wins over the model.
+    // Horizontal unfold only: in the reference the mark's height is constant while its width grows
+    // from 24 to 379 px, a card turning on its vertical axis seen from the back, hence mirrored.
+    // Linear, not eased: the reference's width grows by a near-constant amount per frame.
     const unfold = 0.06 + 0.94 * span(t, BLACK_HOLD, UNFOLD_END)
     mark.style.transform = `scaleX(${mirrored ? -unfold : unfold}) scaleY(1)`
 
@@ -185,33 +170,28 @@
     // Scanlines belong to the dark field; on the white opening the reference shows none.
     scan.style.opacity = String(darkness)
 
-    /* Bloom, and this is why the mark looks heavier on black than on white.
-     *
-     * Measuring the reference settles it: the same glyphs at the same scale have visibly thinner
-     * strokes in the black-on-white phase than in the white-on-black one. A phosphor spreads a
-     * bright stroke and does nothing for a dark one, so the apparent weight is the display, not
-     * the typeface. Reaching for a fatter Didone would have matched the final frame and made the
-     * opening wrong.
-     *
-     * Tied to darkness, so it arrives exactly as the ground goes down. */
+    // Bloom: in the reference the strokes read heavier white-on-black than black-on-white because
+    // the phosphor spreads bright strokes, so the extra weight comes from glow, not a fatter face.
     const glow = darkness
-    mark.style.textShadow = glow < 0.02 ? 'none' :
-      `0 0 ${1.2 * glow}px rgba(255,255,255,${0.95 * glow}),` +
-      `0 0 ${3.5 * glow}px rgba(255,255,255,${0.45 * glow}),` +
-      `0 0 ${9 * glow}px rgba(255,255,255,${0.18 * glow})`
-    const smallGlow = glow < 0.02 ? 'none' :
-      `0 0 ${1 * glow}px rgba(255,255,255,${0.7 * glow}),` +
-      `0 0 ${3 * glow}px rgba(255,255,255,${0.28 * glow})`
+    mark.style.textShadow =
+      glow < 0.02
+        ? 'none'
+        : `0 0 ${1.2 * glow}px rgba(255,255,255,${0.95 * glow}),` +
+          `0 0 ${3.5 * glow}px rgba(255,255,255,${0.45 * glow}),` +
+          `0 0 ${9 * glow}px rgba(255,255,255,${0.18 * glow})`
+    const smallGlow =
+      glow < 0.02
+        ? 'none'
+        : `0 0 ${1 * glow}px rgba(255,255,255,${0.7 * glow}),` +
+          `0 0 ${3 * glow}px rgba(255,255,255,${0.28 * glow})`
     tag1.style.textShadow = smallGlow
     tag2.style.textShadow = smallGlow
-    maker.style.textShadow = glow < 0.02 ? 'none' :
-      `0 0 ${1.5 * glow}px rgba(80,150,255,${0.8 * glow}), 0 0 ${5 * glow}px rgba(40,110,230,${0.4 * glow})`
+    maker.style.textShadow =
+      glow < 0.02
+        ? 'none'
+        : `0 0 ${1.5 * glow}px rgba(80,150,255,${0.8 * glow}), 0 0 ${5 * glow}px rgba(40,110,230,${0.4 * glow})`
 
-    // The spec lines wipe in from the left, the second overlapping the first so the pair reads as
-    // one gesture rather than two events.
-    // The spec line wipes in linearly, like a typewriter, slowly enough to be read as it appears
-    // — "MAX", then "MAX 330 MEGA", then the second line. Eased, it snapped in and read as one
-    // event; the reference takes about 1.6 s per line.
+    // Spec lines wipe in linearly, like a typewriter; the reference takes about 1.6 s per line.
     const after = (a, b) => span(t, CROSS_END + a, CROSS_END + b)
     tag1.style.clipPath = `inset(0 ${100 - after(0.2, 1.7) * 100}% 0 0)`
     tag2.style.clipPath = `inset(0 ${100 - after(1.4, 2.9) * 100}% 0 0)`

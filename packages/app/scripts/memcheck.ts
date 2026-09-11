@@ -1,17 +1,11 @@
 /**
- * The memory harness. Boots the real server as a child process, drives HTTP load at it, samples
- * the child's RSS, and fails the run if the process exceeds a budget or drifts upward.
- *
- * This is F1's instrument and, later, the CI gate. It reports the runtime's own view of its
- * memory limits first, because on the primary deployment target (an unprivileged LXC, a
- * memory-capped container) V8 may size its heap from the host's RAM rather than the cgroup — in
- * which case the kernel OOM killer arbitrates instead of V8, and it can take neighbours with it.
+ * Memory soak: boots the real server as a child process, drives HTTP load at it, samples the
+ * child's RSS, and fails if it exceeds a budget or drifts upward.
  *
  * Usage:
  *   node scripts/memcheck.ts --duration=300 --budget-mb=250 --rps=20
  */
-import { spawn, type ChildProcess } from 'node:child_process'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 import process from 'node:process'
@@ -38,16 +32,14 @@ function parseArgs(argv: readonly string[]): Options {
     rps: 20,
     concurrency: 8,
     sampleMs: 1000,
-    // RSS climbs to a plateau during warmup. Counting that ramp as "drift" would make every
-    // clean run look like a leak, so the statistics window starts after it.
+    // RSS ramps to a plateau during warmup; drift is measured after it.
     warmupSec: 60,
     port: 7599,
     nodeArgs: [],
   }
   for (const arg of argv) {
-    // `arg.split('=', 2)` would DISCARD everything after the second field rather than keeping it,
-    // so `--node-arg=--max-old-space-size=192` would silently become `--max-old-space-size` with
-    // no value and the child would refuse to start. Split on the first `=` only.
+    // Split on the first `=` only: `split('=', 2)` would drop the value of
+    // `--node-arg=--max-old-space-size=192`.
     const separator = arg.indexOf('=')
     const rawKey = separator === -1 ? arg : arg.slice(0, separator)
     const rawValue = separator === -1 ? undefined : arg.slice(separator + 1)
@@ -218,8 +210,8 @@ async function main(): Promise<number> {
     )
     const steady = samples.slice(warmupSamples)
 
-    // Peak is judged across the whole run — a warmup spike still has to fit inside the box.
-    // Drift is judged on the plateau only, or the startup ramp reads as a leak on every run.
+    // Peak is judged over the whole run; drift only on the plateau, or the startup ramp reads as
+    // a leak.
     const peak = percentile(samples, 100)
     const p95 = percentile(steady, 95)
     const first = samples[0] as number
@@ -246,6 +238,8 @@ async function main(): Promise<number> {
     if (growth > options.driftPct)
       problems.push(`drift ${growth.toFixed(1)}% exceeds ${options.driftPct}%`)
     if (failures > 0) problems.push(`${failures} requests failed`)
+    // In a memory-capped container V8 may size its heap from host RAM rather than the cgroup,
+    // leaving the kernel OOM killer to arbitrate.
     if (environment.heapLimitExceedsMemoryLimit) {
       problems.push(
         'V8 heap limit exceeds the memory this process is allowed (set --max-old-space-size)',

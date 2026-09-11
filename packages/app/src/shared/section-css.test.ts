@@ -66,8 +66,7 @@ describe('the page stylesheet', () => {
   })
 
   it("uses the section's own column count, not the page's", () => {
-    // Six columns on lg for the narrow section: the column width divides by 6, not 12.
-    // Each grid section emits its own media blocks; find the narrow section's lg rule.
+    // Each grid section emits its own media blocks; match the lg rule of each.
     expect(css).toMatch(
       /\.neo-board\[data-neo-section="narrow"\]\{--nh-col:calc\(\(100% - \d+px\) \/ 6\)/,
     )

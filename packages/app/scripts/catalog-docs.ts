@@ -1,14 +1,11 @@
 /**
- * Generate the widget reference from the manifests.
- *
- * Written to a committed file rather than rendered at docs-build time, and CI fails if the file is
- * stale. That is deliberate: a generated page nobody can see in a diff is a page nobody notices
- * going wrong, and "the docs say this widget needs an API key" is a claim a reviewer should be
- * able to check against the manifest in the same pull request.
+ * Generates the widget reference from the manifests into a committed file, so the page is
+ * reviewable in the same diff as a manifest change; CI fails when it is stale.
  */
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
+import { format, resolveConfig } from 'prettier'
 import {
   AUTH_KINDS,
   DECODERS,
@@ -17,13 +14,15 @@ import {
   parseManifest,
   sourceKinds,
   TEMPLATES,
+  type AuthKind,
   type Manifest,
 } from '@neohomepage/catalog-schema'
 
-const CATALOG_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_DIR ?? '../../catalog')
-const OUT = resolve(process.env.NEOHOMEPAGE_DOCS_OUT ?? '../../docs/widgets/index.md')
+const ROOT = resolve(import.meta.dirname, '../../..')
+const CATALOG_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_DIR ?? join(ROOT, 'catalog'))
+const OUT = resolve(process.env.NEOHOMEPAGE_DOCS_OUT ?? join(ROOT, 'docs/widgets/index.md'))
 
-const AUTH_LABEL: Record<string, string> = {
+const AUTH_LABEL: Record<AuthKind, string> = {
   none: 'none',
   header: 'API key header',
   basic: 'username and password',
@@ -107,9 +106,7 @@ async function main(): Promise<number> {
     for (const manifest of (byCategory.get(category) ?? []).sort((a, b) =>
       a.id.localeCompare(b.id, 'en-US'),
     )) {
-      const auth = [
-        ...new Set(deriveRequires(manifest).authKinds.map((kind) => AUTH_LABEL[kind] ?? kind)),
-      ]
+      const auth = [...new Set(deriveRequires(manifest).authKinds.map((kind) => AUTH_LABEL[kind]))]
       const shows = isComposite(manifest)
         ? `${sourceKinds(manifest).length} source kinds merged into one tile`
         : Object.keys(manifest.operations).join(', ')
@@ -167,7 +164,8 @@ operation with one or more \`emits\`. Several emits over one response is how Rad
 three dated events per film — in cinemas, physical, digital — from a single HTTP request.
 `)
 
-  await writeFile(OUT, `${lines.join('\n')}`)
+  const markdown = lines.join('\n')
+  await writeFile(OUT, await format(markdown, { ...(await resolveConfig(OUT)), filepath: OUT }))
   console.log(`wrote ${OUT} (${manifests.length} widgets)`)
   return 0
 }

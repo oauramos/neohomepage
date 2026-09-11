@@ -3,40 +3,12 @@ import { fanOut, normaliseLayout, withinMaxRows } from '../../shared/placement.t
 import { ConfigInvalidError } from '../store/configstore.ts'
 import type { MutableConfigTree } from '../store/tree.ts'
 import { layoutFileSchema, type Page, type Widget } from './schema.ts'
-import { effectiveSections, gridSectionIds, sectionOf } from './sections.ts'
+import { gridSectionIds, sectionGeometry, sectionOf } from './sections.ts'
 
 /**
- * The board operations both writers share: the HTTP API behind the editor, and the MCP tools
- * behind an agent. One implementation, so a widget an agent adds lands exactly where one added by
- * hand would, and a layout either can save is bounded by the same section.
- *
- * Everything here works on a transaction draft and throws `ConfigInvalidError` for a caller's
- * mistake — an unknown section, a full board — which the API maps to 422 and a tool to a failure
- * message with the reason in it.
+ * Board operations shared by the HTTP API and the MCP tools. Everything works on a transaction
+ * draft and throws `ConfigInvalidError` for a caller's mistake (unknown section, full board).
  */
-
-/**
- * The geometry a grid section places into: its own column counts and row cap. The page's layout
- * file is flat, so a section's board is the entries whose widget lives in it; the rest are carried
- * through untouched, which is what makes placing into one section unable to move a tile in another.
- */
-export function sectionGeometry(
-  page: Page,
-  sectionId: string,
-): { cols: Record<string, number>; maxRows: number | null } {
-  const section = effectiveSections(page).find(
-    (candidate) => candidate.id === sectionId && candidate.kind === 'grid',
-  )
-  const cols = Object.fromEntries(
-    page.grid.breakpoints.map((breakpoint) => [
-      breakpoint.id,
-      section?.kind === 'grid' ? (section.cols[breakpoint.id] ?? breakpoint.cols) : breakpoint.cols,
-    ]),
-  )
-  const maxRows =
-    section?.kind === 'grid' ? (section.maxRows ?? page.grid.maxRows) : page.grid.maxRows
-  return { cols, maxRows }
-}
 
 export function splitBySection(
   items: readonly LayoutItem[],
@@ -67,10 +39,8 @@ function requireGridSection(page: Page, sectionId: string | null | undefined): s
 }
 
 /**
- * Place a widget in its section on every authored breakpoint, first-fit, and write the layout.
- *
- * The widget must already be in the draft. Returns the breakpoints that had no room: with a row
- * cap the widget exists but is refused a place there, and saying so beats hiding it.
+ * Places a widget in its section on every authored breakpoint, first-fit. The widget must already
+ * be in the draft. Returns the breakpoints where the row cap left no room.
  */
 export function placeWidget(
   draft: MutableConfigTree,
@@ -145,7 +115,11 @@ export function saveSectionLayout(
   items: readonly LayoutItem[],
 ): void {
   const breakpoint = page.grid.breakpoints.find((entry) => entry.id === breakpointId)
-  if (breakpoint === undefined) throw new Error(`no breakpoint "${breakpointId}"`)
+  if (breakpoint === undefined) {
+    throw new ConfigInvalidError([
+      { path: `layouts/${page.id}.json`, message: `no breakpoint "${breakpointId}"` },
+    ])
+  }
   const chosen = requireGridSection(page, sectionId)
   const { cols, maxRows } = sectionGeometry(page, chosen)
   const sectionCols = cols[breakpoint.id] ?? breakpoint.cols
@@ -157,10 +131,7 @@ export function saveSectionLayout(
     page,
     chosen,
   )
-  const mine = items.filter((item) => {
-    const widget = draft.widgets.get(item.i)
-    return widget !== undefined && sectionOf(widget, page) === chosen
-  })
+  const { mine } = splitBySection(items, draft.widgets, page, chosen)
   const normalised = normaliseLayout(mine, sectionCols)
   if (!withinMaxRows(normalised, maxRows)) {
     throw new ConfigInvalidError([
@@ -188,14 +159,27 @@ export function saveSectionLayout(
   )
 }
 
+/** Drop a widget's entries from every page and breakpoint. */
+export function removeFromLayouts(draft: MutableConfigTree, widgetId: string): void {
+  for (const [pageId, layout] of draft.layouts) {
+    const layouts = Object.fromEntries(
+      Object.entries(layout.layouts).map(([breakpoint, items]) => [
+        breakpoint,
+        items.filter((entry) => entry.i !== widgetId),
+      ]),
+    )
+    draft.layouts.set(pageId, layoutFileSchema.parse({ ...layout, layouts }))
+  }
+}
+
 /** The size a widget currently has on the authoritative tier, for re-placing it elsewhere. */
 export function currentSize(
   draft: MutableConfigTree,
   page: Page,
   widgetId: string,
 ): { w: number; h: number } {
-  const item = draft.layouts.get(page.id)?.layouts[page.grid.authoritative]?.find(
-    (entry) => entry.i === widgetId,
-  )
+  const item = draft.layouts
+    .get(page.id)
+    ?.layouts[page.grid.authoritative]?.find((entry) => entry.i === widgetId)
   return { w: item?.w ?? 4, h: item?.h ?? 3 }
 }

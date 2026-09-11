@@ -1,16 +1,9 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { useFocusTrap } from '../useFocusTrap.ts'
 
 /**
- * The design entry point: a button in the bottom-right corner.
- *
- * The editor FAB deliberately sits bottom-LEFT, because the right corner is where chat widgets and
- * cookie banners live. Two corners is the point: the left one changes what the dashboard SAYS —
- * widgets, layout, services — and this one changes how it LOOKS. Those are different jobs done at
- * different times, and putting them in one modal made the theme controls something you found by
- * accident while adding a service.
- *
- * The focus trap is the same shape as the editor's, and for the same reason: `aria-modal` tells a
- * screen reader the rest of the page is inert and does precisely nothing about Tab.
+ * Design panel entry point, bottom-right; the editor FAB is bottom-left so changing what the
+ * dashboard shows and how it looks stay separate. `aria-modal` does nothing about Tab, hence the trap.
  */
 
 export function DesignFab({ children }: { children: (close: () => void) => ReactNode }) {
@@ -19,47 +12,10 @@ export function DesignFab({ children }: { children: (close: () => void) => React
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const titleId = useId()
 
-  useEffect(() => {
-    if (!open) return
-
-    const focusable = (): HTMLElement[] => {
-      const dialog = dialogRef.current
-      if (dialog === null) return []
-      return [
-        ...dialog.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
-            'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ].filter((element) => element.offsetParent !== null || element === document.activeElement)
-    }
-
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false)
-        buttonRef.current?.focus()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const stops = focusable()
-      if (stops.length === 0) return
-      const first = stops[0] as HTMLElement
-      const last = stops[stops.length - 1] as HTMLElement
-      const active = document.activeElement
-
-      if (event.shiftKey && (active === first || active === dialogRef.current)) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKey)
-    dialogRef.current?.focus()
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  useFocusTrap(open, dialogRef, () => {
+    setOpen(false)
+    buttonRef.current?.focus()
+  })
 
   return (
     <>
@@ -71,8 +27,7 @@ export function DesignFab({ children }: { children: (close: () => void) => React
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        {/* An SVG rather than an emoji: an emoji is a font-dependent picture of an icon, and it
-            renders as a different colour and weight on every platform. */}
+        {/* SVG, not emoji: emoji colour and weight differ per platform. */}
         <svg
           className="nh-fab-icon"
           viewBox="0 0 24 24"

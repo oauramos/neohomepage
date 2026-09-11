@@ -1,14 +1,9 @@
 import type { Auth } from '@neohomepage/catalog-schema'
 
 /**
- * Declarative authentication.
- *
- * gethomepage grows a credential branch per integration — a long if/else chain that every new
- * widget has to be threaded into. Here the manifest names one of five kinds and this table applies
- * it, so adding an integration touches no shared code and a reviewer reads one JSON object.
- *
- * The resolved credential exists only inside the outbound request. It is never returned to a
- * caller that could serialise it, never logged, and never reachable from a projection.
+ * Declarative authentication: a manifest names one of five kinds and this module applies it. The
+ * resolved credential exists only inside the outbound request; it is never returned, logged or
+ * projected.
  */
 
 export class MissingSecretError extends Error {
@@ -22,9 +17,7 @@ export class MissingSecretError extends Error {
 }
 
 export type AuthContext = {
-  /** Field name to secret value. Resolved by the vault immediately before the request. */
   readonly secrets: Readonly<Record<string, string>>
-  /** Non-secret target and instance fields, for templates like `{{config:username}}`. */
   readonly config: Readonly<Record<string, string | number | boolean>>
 }
 
@@ -36,11 +29,8 @@ export type AppliedAuth = {
 const TEMPLATE = /\{\{(secret|config):([A-Za-z][A-Za-z0-9]*)\}\}/g
 
 /**
- * Fill a template from the manifest.
- *
- * A missing secret throws rather than interpolating an empty string. Sending `X-Api-Key:` with no
- * value produces a confusing 401 from the service and sends the user hunting through their reverse
- * proxy; "credential not set" points at the actual problem.
+ * A missing secret throws rather than interpolating an empty string, which would only produce a
+ * confusing 401 upstream.
  */
 export function fillTemplate(template: string, context: AuthContext): string {
   return template.replace(TEMPLATE, (_match, kind: string, name: string) => {
@@ -70,13 +60,12 @@ export function applyAuth(auth: Auth, context: AuthContext): AppliedAuth {
     }
 
     case 'query':
-      // Allowed because some services offer nothing else, and the reason a query string is never
-      // logged and never returned to the browser.
+      // Query strings can carry a credential, so they are never logged or returned to the browser.
       return { headers: {}, query: { [auth.param]: fillTemplate(auth.value, context) } }
 
     case 'session-exchange':
-      // Handled by the session manager, which must make a login request first. Returning empty
-      // here rather than throwing keeps applyAuth total; the caller checks the kind.
+      // Handled by the session manager after a login round trip; empty rather than throwing keeps
+      // applyAuth total.
       return { headers: {}, query: {} }
 
     default: {
@@ -89,11 +78,8 @@ export function applyAuth(auth: Auth, context: AuthContext): AppliedAuth {
 const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'set-cookie', 'proxy-authorization'])
 
 /**
- * Redact a header set for logging.
- *
- * Headers auth produces are redacted by name, and anything else that merely *looks* like a
- * credential is redacted too — a manifest names its own header, so an allowlist of known names
- * would miss whatever the next integration invents.
+ * Redacts for logging by name and by credential-shaped substring, since a manifest names its own
+ * header.
  */
 export function redactHeaders(headers: Readonly<Record<string, string>>): Record<string, string> {
   const out: Record<string, string> = {}

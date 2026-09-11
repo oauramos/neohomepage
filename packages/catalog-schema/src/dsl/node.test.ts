@@ -49,8 +49,7 @@ const EXAMPLES: Record<(typeof OP_NAMES)[number], Node> = {
 
 describe('the operator set is closed and fully covered', () => {
   it('has an example for every operator, and no example for a non-operator', () => {
-    // If someone adds an operator to the union without adding it here, this fails — which is the
-    // point: the walker, the schema and the docs all key off OP_NAMES.
+    // The walker, the schema and the docs all key off OP_NAMES.
     expect(Object.keys(EXAMPLES).sort()).toEqual([...OP_NAMES].sort())
   })
 

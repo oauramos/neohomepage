@@ -15,21 +15,9 @@ import {
 import { SHAPE_TOKENS } from './theme-presets.ts'
 import { THEME_TOKENS } from './theme-tokens.ts'
 
-/**
- * The option tables, held to the two claims their comments make.
- *
- * Both are claims about coverage, and coverage is exactly what goes wrong quietly: a token added
- * to the contract and to neither reset is a value a "Reset to the preset" button leaves behind,
- * and a colour token no group names is one the panel cannot edit and the design tools cannot
- * explain. Neither shows up as a crash.
- */
-
 describe('the reset partition', () => {
-  // Only one of these two lists is authored: `SHAPE_RESET_TOKENS` is the complement of
-  // `TYPE_RESET_TOKENS` inside `SHAPE_TOKENS`, which is what makes "covers everything" true by
-  // construction rather than by test. What a test CAN catch is the authored half drifting — a
-  // renamed or removed token still named as a type reset, which would silently shrink the shape
-  // reset by one and leave a value the Type tab claims to undo.
+  // SHAPE_RESET_TOKENS is derived as the complement of TYPE_RESET_TOKENS, so only the authored
+  // half can drift.
   it('names only tokens that exist', () => {
     for (const token of TYPE_RESET_TOKENS) expect(SHAPE_TOKENS).toContain(token)
   })
@@ -64,8 +52,6 @@ describe('the lookups', () => {
   })
 
   it('answers null for a width no option names, rather than the nearest one', () => {
-    // A finish can ship 1500px. Reporting that as "comfortable" would make a read-then-write
-    // round trip through the design tools silently retype the board.
     expect(boardWidthOf('1500px')).toBeUndefined()
   })
 

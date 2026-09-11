@@ -1,14 +1,7 @@
 /**
- * The board the README demos are recorded against.
- *
- * Every tile is a real widget rendering its own recorded upstream fixture — the same JSON the
- * catalog tests assert against — through the real fetcher, decoder, projection and template. The
- * only thing standing in for a homelab is the socket at the other end: one stub per widget,
- * answering that widget's operation with `catalog/<slug>/fixtures/<op>.upstream.json`.
- *
- * That constraint is the point. A demo assembled from mockups drifts from the product the first
- * time a template changes and nobody notices; this one cannot, because a projection that stops
- * producing what the template needs makes the recording visibly wrong.
+ * The board the README demos are recorded against: every tile is a real widget rendering its own
+ * `catalog/<slug>/fixtures/<op>.upstream.json` through the real fetcher, served by one stub per
+ * widget.
  */
 
 /** Twelve columns at the `lg` tier, rows of 56px with 12px gutters. */
@@ -27,11 +20,8 @@ export const TILES = [
 ]
 
 /**
- * What each widget's target and config need to be well-formed.
- *
- * The secrets are the string "demo" on purpose and reach a socket on this machine that ignores
- * them — there is no credential here to leak into a recording, and the stub is deliberately not
- * checking, so a failure in this script can never be mistaken for an auth failure.
+ * Values and config each widget's target needs to be well-formed; the "demo" secrets reach a local
+ * stub that never checks them.
  */
 export const VALUES = {
   'adguard-stats': { values: { username: 'demo', password: 'demo' } },

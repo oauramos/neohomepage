@@ -12,15 +12,8 @@ const run = promisify(execFile)
 const created: string[] = []
 
 /**
- * Write a gzipped tar with an entry name chosen exactly, byte for byte.
- *
- * Not `tar(1)`, because the two tars disagree about the one thing under test: GNU tar silently
- * rewrites `../escape` to `escape` and warns, BSD tar keeps it. A hostile-archive test built by
- * shelling out therefore asserts a different guard on Linux than on macOS — which is precisely
- * what happened, and it passed locally and failed in CI.
- *
- * A ustar header is 512 bytes of fixed-offset fields; this writes one, the payload padded to a
- * block, and the two zero blocks that end an archive.
+ * Handwritten gzipped ustar archive with entry names kept byte for byte: GNU tar rewrites
+ * `../escape` to `escape` while BSD tar keeps it, so `tar(1)` would build a different archive per OS.
  */
 function tarball(entries: readonly { name: string; body: string }[]): Buffer {
   const blocks: Buffer[] = []
@@ -86,7 +79,7 @@ describe('seeding', () => {
   })
 
   it('creates the secrets directory 0700, not just the files inside it', async () => {
-    // A world-readable directory of 0600 files still leaks the name of every service you run.
+    // A world-readable directory of 0600 files still leaks the names of the services in use.
     const paths = await dataDir()
     expect((await stat(paths.secretsDir)).mode & 0o777).toBe(0o700)
   })
@@ -124,11 +117,11 @@ describe('backup', () => {
     expect(result.included.sort()).toEqual(['assets', 'config'])
 
     const { stdout } = await run('tar', ['-tzf', archive])
-    expect(stdout).toMatch(/config\/dashboard\.json/)
-    expect(stdout).toMatch(/assets\/bg\.txt/)
-    expect(stdout).not.toMatch(/secrets/)
-    expect(stdout).not.toMatch(/state/)
-    expect(stdout).not.toMatch(/overrides\.local\.json/)
+    const entries = stdout.trim().split('\n')
+    expect(entries).toContain('config/dashboard.json')
+    expect(entries).toContain('assets/bg.txt')
+    expect(entries.every((e) => e.startsWith('config/') || e.startsWith('assets/'))).toBe(true)
+    expect(entries).not.toContain('config/overrides.local.json')
   })
 
   it('round-trips into an empty directory', async () => {
@@ -152,8 +145,7 @@ describe('restore refuses a hostile archive', () => {
     const root = await mkdtemp(join(tmpdir(), 'neo-evil-'))
     created.push(root)
     const archive = join(root, 'evil.tar.gz')
-    // Handwritten, so the entry name really is `../` and not whatever the local tar decided to
-    // rewrite it to. `tar` will happily create this; the check has to happen before extraction.
+    // Handwritten so the entry name really is `../`; the check must happen before extraction.
     await writeFile(
       archive,
       tarball([

@@ -2,24 +2,20 @@ import { assertSafeId, emitGridCss, type Breakpoint, type GridConfig } from './g
 import type { ResolvedBookmarksSection, ResolvedGridSection, ResolvedPage } from './resolved.ts'
 
 /**
- * The per-page stylesheet: one absolutely-positioned board per grid section, and a column count
- * per bookmarks section, each keyed by the section's id.
- *
- * Emitted by the publish step into the document and by the browser into a `<style>` it owns, from
- * the same resolved page — which is what keeps a section added in the editor laid out before the
- * next publish, rather than stacked at the top-left until a reload.
+ * The per-page stylesheet: one absolutely-positioned board per grid section and a column count per
+ * bookmarks section, keyed by section id. Emitted by both the publish step and the browser.
  */
 
-export function gridConfigOf(section: ResolvedGridSection): GridConfig {
+function gridConfigOf(section: ResolvedGridSection): GridConfig {
   return {
-    breakpoints: section.grid.breakpoints as readonly Breakpoint[],
+    breakpoints: section.grid.breakpoints,
     rowHeight: section.grid.rowHeight,
     margin: section.grid.margin,
     containerPadding: section.grid.containerPadding,
   }
 }
 
-export function boardSelector(sectionId: string): string {
+function boardSelector(sectionId: string): string {
   assertSafeId(sectionId)
   return `.neo-board[data-neo-section="${sectionId}"]`
 }
@@ -29,8 +25,8 @@ function px(value: number): string {
 }
 
 /**
- * Groups per row is a custom property the base stylesheet reads into `grid-template-columns`, set
- * mobile-first per breakpoint so the section follows the same tiers the boards do.
+ * `--nh-bm-cols` is read by the base stylesheet into `grid-template-columns`; set mobile-first per
+ * breakpoint.
  */
 function bookmarksRules(
   section: ResolvedBookmarksSection,
@@ -55,7 +51,7 @@ export function emitPageCss(page: ResolvedPage): string {
     if (section.kind === 'grid') {
       blocks.push(emitGridCss(gridConfigOf(section), section.layouts, boardSelector(section.id)))
     } else if (section.kind === 'bookmarks') {
-      blocks.push(bookmarksRules(section, page.grid.breakpoints as readonly Breakpoint[]))
+      blocks.push(bookmarksRules(section, page.grid.breakpoints))
     }
   }
   return blocks.join('\n')

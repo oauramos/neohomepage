@@ -1,7 +1,6 @@
 import { defineConfig } from 'vitest/config'
 
-// Deliberately separate from vite.config.ts: unit tests do not need the React or Tailwind
-// plugins, and loading them would make every test run pay for a CSS pipeline.
+// Separate from vite.config.ts so unit tests skip the React and Tailwind plugins.
 export default defineConfig({
   test: {
     environment: 'node',

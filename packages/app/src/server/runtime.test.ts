@@ -24,8 +24,7 @@ describe('cgroup v1 memory.limit_in_bytes', () => {
   })
 
   it('recognises the v1 unlimited sentinel', () => {
-    // v1 has no `max` keyword: unlimited is a number just under 2^63, and reading it as a real
-    // limit would make every check pass and hide a missing limit.
+    // v1 has no `max` keyword: unlimited is a number just under 2^63.
     expect(parseCgroupV1Limit('9223372036854771712')).toBeNull()
   })
 
@@ -41,7 +40,6 @@ describe('describeMemoryEnvironment', () => {
     expect(e.osTotalBytes).toBeGreaterThan(0)
     expect(e.v8HeapLimitBytes).toBeGreaterThan(0)
     expect(e.effectiveLimitBytes).toBeGreaterThan(0)
-    // With no cgroup limit, the effective limit must fall back to physical memory.
     if (e.cgroup.limitBytes === null) expect(e.effectiveLimitBytes).toBe(e.osTotalBytes)
     else expect(e.effectiveLimitBytes).toBe(e.cgroup.limitBytes)
     expect(e.heapLimitExceedsMemoryLimit).toBe(e.v8HeapLimitBytes > e.effectiveLimitBytes)

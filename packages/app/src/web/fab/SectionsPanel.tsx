@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BookmarkGroup, BookmarkLink, NavItem, Section } from '../../server/config/schema.ts'
-import { composeHref } from '../../shared/links.ts'
+import { SEARCH_ENGINES, type SearchEngine, composeHref } from '../../shared/links.ts'
 
 /**
- * The sections editor: what a page is made of, top to bottom.
- *
- * The draft is the page's sparse section list — what the user SET, with blanks where the page's
- * defaults apply — and every edit is written back whole after a short pause, because a section
- * list is an order as much as a set and the server validates the whole thing at once. A 422 is
- * shown in place and the draft kept, so a half-typed group title never loses the rest.
+ * Sections editor. The draft is the page's sparse section list (blanks mean the page default);
+ * every edit is written back whole after a pause, since the server validates the list as one.
  */
 
 type Breakpoint = { readonly id: string; readonly cols: number; readonly minWidth: number }
@@ -41,8 +37,6 @@ const DISPLAYS = [
   { id: 'icons', label: 'Icons' },
   { id: 'chips', label: 'Chips' },
 ] as const
-
-const ENGINES = ['duckduckgo', 'google', 'bing', 'brave', 'startpage', 'kagi'] as const
 
 /** Ids must start with a letter — they end up in CSS selectors — so the prefix is one. */
 function newId(prefix: string): string {
@@ -102,8 +96,8 @@ function blankLink(): BookmarkLink {
 }
 
 /**
- * A link is typed as a URL and stored as parts. The split happens here, in the browser, so the
- * request that reaches the server carries scheme, host, port and path — never a URL string.
+ * Splits a typed URL into the stored parts; the server only ever receives scheme, host, port and
+ * path.
  */
 function parseUrl(raw: string): Pick<BookmarkLink, 'base' | 'path'> | null {
   let url: URL
@@ -128,7 +122,6 @@ function move<T>(list: readonly T[], from: number, to: number): T[] {
   return next
 }
 
-/** The three small buttons every reorderable row has, in the same order everywhere. */
 function RowActions({
   label,
   onUp,
@@ -167,8 +160,7 @@ function LinkRows({
   links: readonly BookmarkLink[]
   onChange: (links: BookmarkLink[]) => void
 }) {
-  // What the user has typed per link, kept apart from the stored parts so an unfinished URL does
-  // not snap back to the last valid one on every keystroke.
+  // Raw text per link, kept apart from the stored parts so an unfinished URL does not snap back.
   const [typed, setTyped] = useState<Record<string, string>>({})
   const update = (index: number, patch: Partial<BookmarkLink>) =>
     onChange(links.map((link, i) => (i === index ? { ...link, ...patch } : link)))
@@ -314,11 +306,11 @@ function NavbarFields({
                   onChange={(event) =>
                     update(index, {
                       ...item,
-                      engine: event.target.value as (typeof ENGINES)[number],
+                      engine: event.target.value as SearchEngine,
                     })
                   }
                 >
-                  {ENGINES.map((engine) => (
+                  {SEARCH_ENGINES.map((engine) => (
                     <option key={engine} value={engine}>
                       {engine}
                     </option>
@@ -538,7 +530,7 @@ export function SectionsPanel({ pageId, onChanged }: { pageId: string; onChanged
     }
   }, [pageId])
 
-  /** Write the whole list after a pause; the last edit in a burst is the one that lands. */
+  /** Debounced; the last edit in a burst is the one saved. */
   const commit = (sections: Section[]) => {
     if (page === null) return
     setPage({ ...page, sections })

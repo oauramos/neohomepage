@@ -1,9 +1,6 @@
 /**
- * The catalog toolchain: `validate` and `test`.
- *
- * `test` runs every manifest's projection against its recorded fixtures **with the network made
- * impossible**, not merely unused. A widget whose test only passes while the contributor's LAN is
- * up is a broken widget, and the difference is invisible unless you take the network away.
+ * Catalog toolchain: `validate`, `test` and `requires`. `test` runs every manifest's projection
+ * against its recorded fixtures with the network blocked.
  */
 import { readdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -28,7 +25,8 @@ import {
 } from '@neohomepage/catalog-schema'
 import { decode } from '../src/server/decode/index.ts'
 
-const CATALOG_DIR = resolve(process.env.NEOHOMEPAGE_CATALOG_DIR ?? '../../catalog')
+const CATALOG_DIR =
+  process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolve(import.meta.dirname, '../../../catalog')
 
 /** Frozen so a fixture's expected output can never drift with the wall clock. */
 const FIXTURE_NOW = '2026-09-06T12:00:00.000Z'
@@ -61,8 +59,7 @@ function fail(message: string): never {
 }
 
 function sealNetwork(): void {
-  // Anything that reaches for the network during a catalog test is a bug in the DSL or in the
-  // runner, and it must be loud rather than slow.
+  // Throws rather than hangs so a manifest that needs the network fails loudly.
   const forbid = (name: string) => () => {
     throw new Error(`catalog tests must not touch the network (blocked ${name})`)
   }
@@ -102,11 +99,8 @@ function loadEntries(): Entry[] {
 }
 
 /**
- * One recorded upstream response and the projections run against it.
- *
- * Both manifest shapes reduce to this. A single-target widget has one probe per operation with a
- * single projection; a composite has one probe per source kind whose several emits all read the
- * SAME decoded response — which is the fan-out, tested as the fan-out rather than as N fetches.
+ * One recorded upstream response and the projections run against it: one per operation for a
+ * single-target widget, one per source kind for a composite, whose emits all read the same decode.
  */
 type Probe = {
   readonly name: string
@@ -141,10 +135,7 @@ function validate(entries: readonly Entry[]): number {
   for (const { slug, dir, manifest } of entries) {
     const found = auditManifest(manifest)
 
-    // The provenance README is not a nicety. Clean-room is a review gate with a paper trail —
-    // "written from the vendor's own documentation, here is which page" — and a widget without
-    // one cannot be reviewed for it. Nine of the first sixteen shipped without one because the
-    // requirement lived only in the contributor docs.
+    // Clean-room provenance is a review gate; a widget without a README cannot be reviewed for it.
     if (!existsSync(join(dir, 'README.md'))) {
       console.log(
         `  FAIL ${slug}  no README.md — every widget states which vendor documentation it was written from`,
@@ -177,13 +168,7 @@ function validate(entries: readonly Entry[]): number {
   return problems
 }
 
-/**
- * What the catalog exercises, as a set difference against what the app can do.
- *
- * Printed because "16 manifests" is not evidence of coverage: sixteen widgets that all speak JSON
- * over a header auth into a stat-grid would leave three quarters of the runtime untested while
- * looking like a full catalog.
- */
+/** Templates, auth kinds and decoders the catalog exercises, against all the app supports. */
 function coverage(entries: readonly Entry[]): number {
   const seen = {
     templates: new Set<string>(),
@@ -211,10 +196,7 @@ function coverage(entries: readonly Entry[]): number {
       `${line('decoders', seen.fetchKinds, DECODERS)}`,
   )
 
-  // Counted, not just printed. The README lists "the catalog covers what it claims" next to this
-  // command, and a footer reporting `decoders 2/3` while exiting 0 makes that claim false the
-  // moment someone deletes the only ICS widget. A capability with no widget exercising it is a
-  // capability nobody would notice breaking.
+  // Counted so an uncovered capability fails the run instead of only printing a footer.
   return (
     TEMPLATES.filter((t) => !seen.templates.has(t)).length +
     AUTH_KINDS.filter((k) => !seen.authKinds.has(k)).length +
@@ -234,12 +216,10 @@ function test(entries: readonly Entry[], write: boolean): number {
       continue
     }
 
-    // Defaults where they exist, and a sample value for anything required without one. Otherwise
-    // a manifest with a required option is untestable: its projection would run with null and
-    // fail the render contract for a reason that has nothing to do with the manifest.
-    const options = Object.fromEntries(
-      manifest.config.map((field) => [field.name, field.default ?? sampleFor(field)]),
-    ) as Record<string, Json>
+    // Required options without a default get a sample value, or the projection would run with null.
+    const options: Record<string, Json> = Object.fromEntries(
+      manifest.config.map((field) => [field.name, field.default ?? sampleFor(field)] as const),
+    )
 
     for (const probe of probesOf(manifest)) {
       const extension = FIXTURE_EXTENSION[probe.decode]
@@ -251,8 +231,7 @@ function test(entries: readonly Entry[], write: boolean): number {
         continue
       }
 
-      // Through the real decoder, so an .ics fixture proves the ICS path offline rather than a
-      // hand-written JSON approximation of what the decoder is assumed to emit.
+      // Through the real decoder, so an .ics fixture exercises the ICS path offline.
       let source: Json
       try {
         source = decode(probe.decode, readFileSync(upstreamPath, 'utf8'), { now: FIXTURE_NOW })
@@ -298,7 +277,7 @@ function test(entries: readonly Entry[], write: boolean): number {
         items.push(...result.value)
       }
       if (failed) continue
-      if (probe.concatItems) value = { items } as Json
+      if (probe.concatItems) value = { items }
 
       const shape = projectionSchema.safeParse(value)
       if (!shape.success) {
@@ -349,11 +328,8 @@ function main(): number {
       problems = validate(entries) + test(entries, flags.includes('--write'))
       break
     case 'requires': {
-      /**
-       * `requires` is derived and CI asserts it matches what the author declared — so an author
-       * needs a way to write the derived value rather than transcribing it. The assertion is what
-       * matters; hand-transcription is just friction that produces drift.
-       */
+      // `requires` is derived and CI asserts the declared value matches; --write saves
+      // transcribing it.
       const write = flags.includes('--write')
       for (const { slug, dir, manifest } of entries) {
         const derived = deriveRequires(manifest)

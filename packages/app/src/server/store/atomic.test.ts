@@ -44,7 +44,7 @@ describe('writeFileDurable', () => {
     const dir = await scratch()
     const path = join(dir, 'f.json')
     await writeFile(path, '{"original":true}\n')
-    // A directory where a file should go: the write must fail without destroying what is there.
+    // f.json is a file, so nothing can be created under it.
     await expect(writeFileDurable(join(dir, 'f.json', 'nested'), '{}')).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe('{"original":true}\n')
   })
@@ -65,9 +65,6 @@ describe('writeFilesDurable', () => {
   })
 
   it('is not a multi-file transaction, and does not pretend to be', async () => {
-    // Documented behaviour: a failure part-way leaves earlier files written. Callers get
-    // all-or-nothing by validating the whole prospective tree BEFORE calling this, which is what
-    // ConfigStore does — not by expecting a rollback that POSIX cannot provide.
     const dir = await scratch()
     const good = join(dir, 'good.json')
     const files = new Map([

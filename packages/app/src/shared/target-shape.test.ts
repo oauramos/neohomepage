@@ -78,8 +78,6 @@ describe('resolving a target shape', () => {
   })
 
   it('finds a source kind that exists only inside a composite', () => {
-    // A calendar's CalDAV binding is a target shaped like `caldav-feed`, which is not a catalog
-    // entry of its own. Without this the server could not tell that its password is a credential.
     expect(targetShapeFields(catalog, 'caldav-feed')?.map((f) => f.name)).toEqual(['password'])
     expect(targetShapeFields(catalog, 'ics-feed')).toEqual([])
   })
@@ -101,9 +99,6 @@ describe('routing values', () => {
   })
 
   it('stores a credential as a secret even when the caller called it a plain field', () => {
-    // The bug this exists to prevent, exactly: the browser used to decide the split, and a form
-    // that got it wrong wrote an API key into config/targets/*.json in plaintext — into the
-    // directory whose entire purpose is being committed to git.
     const routed = routeValues(fields, { fields: { apiKey: 'SECRET' } })
     expect(routed.secrets).toEqual({ apiKey: 'SECRET' })
     expect(routed.fields).toEqual({})
@@ -117,9 +112,7 @@ describe('routing values', () => {
   })
 
   it('honours the caller buckets when no manifest can speak for the shape', () => {
-    // A hand-made `custom` target has no shape in the catalog. Discarding its credential would
-    // leave an unexplained "credential unavailable"; the property that matters — a DECLARED
-    // secret cannot reach config — is unaffected, because there is nothing declared.
+    // null: a hand-made `custom` target has no shape in the catalog.
     expect(routeValues(null, { secrets: { token: 'SECRET' }, fields: { host: 'nas' } })).toEqual({
       fields: { host: 'nas' },
       secrets: { token: 'SECRET' },
@@ -128,8 +121,6 @@ describe('routing values', () => {
   })
 
   it('refuses to guess at an unclassified bag when the shape is unknown', () => {
-    // Writing it to config might commit a credential; writing it to the vault might hide a
-    // hostname. Neither, and say so.
     const routed = routeValues(null, { values: { apiKey: 'SECRET', host: 'nas' } })
     expect(routed.fields).toEqual({})
     expect(routed.secrets).toEqual({})

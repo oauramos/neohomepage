@@ -1,45 +1,44 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { Manifest } from '@neohomepage/catalog-schema'
 import type { AppContext } from '../context.ts'
 import {
   dashboardSchema,
-  layoutFileSchema,
   pageSchema,
   targetSchema,
   themeSchema,
   widgetSchema,
 } from '../config/schema.ts'
-import { currentSize, placeWidget, saveSectionLayout } from '../config/board.ts'
+import { currentSize, placeWidget, removeFromLayouts, saveSectionLayout } from '../config/board.ts'
 import { effectiveSections, sectionOf } from '../config/sections.ts'
 import { ConfigConflictError, ConfigInvalidError } from '../store/configstore.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
 import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
+import { isLoopbackHost } from '../fetcher/policy.ts'
 import { probe } from '../fetcher/probe.ts'
 import { loadSecrets } from '../secrets/vault.ts'
 import { env } from '../env.ts'
 
 /**
- * The write API.
- *
- * Everything here funnels into one `ConfigStore.transaction()`, which validates the whole
- * prospective tree before a byte reaches disk. A caller that cares about losing a concurrent edit
- * sends `If-Match`; a caller that does not gets last-write-wins, which is the right default for a
- * single admin clicking around.
- *
- * No endpoint accepts a URL, a path, a header or a method. A widget is named by id, a target by
- * host and port, and the request that eventually leaves the box is derived from a manifest.
+ * The write API: every mutation goes through one `ConfigStore.transaction()`, which validates the
+ * whole tree before writing (`If-Match` opts into conflict detection, otherwise last-write-wins).
+ * No endpoint accepts a URL, path, header or method; the outgoing request is derived from a manifest.
  */
 
 export type ApiOptions = {
   readonly context: AppContext
-  readonly catalog: () => ReadonlyMap<string, Manifest>
 }
 
 function ifMatch(header: string | undefined): { baseRevision?: string } {
   return header === undefined || header === '*' ? {} : { baseRevision: header.replaceAll('"', '') }
+}
+
+class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NotFoundError'
+  }
 }
 
 /** A short, CSS-safe, collision-resistant id. Prefixed so it can never be numeric-like. */
@@ -51,7 +50,6 @@ export function createApiRoutes(options: ApiOptions): Hono {
   const api = new Hono()
   const { context } = options
 
-  /** Turn a store error into the status a client can act on. */
   const handle = async <T>(work: () => Promise<T>) => {
     try {
       return { ok: true as const, value: await work() }
@@ -62,12 +60,15 @@ export function createApiRoutes(options: ApiOptions): Hono {
       if (error instanceof ConfigInvalidError) {
         return { ok: false as const, status: 422 as const, message: error.message }
       }
+      if (error instanceof NotFoundError) {
+        return { ok: false as const, status: 404 as const, message: error.message }
+      }
       throw error
     }
   }
 
   api.get('/catalog', (c) => {
-    const manifests = [...options.catalog().values()].map((manifest) => {
+    const manifests = [...context.catalog().values()].map((manifest) => {
       const view = manifestView(manifest)
       return {
         id: view.id,
@@ -88,25 +89,15 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * The form the editor renders for a widget type.
-   *
-   * Derived from the manifest rather than hand-written per widget: the same declaration validates
-   * the file on disk, types the MCP tool and generates this. A secret field is described but its
-   * value is never returned — see the write-only rule below.
+   * Editor form for a widget type, derived from its manifest; secret fields are described, never
+   * returned.
    */
   api.get('/catalog/:id/schema', (c) => {
-    const manifest = options.catalog().get(c.req.param('id'))
+    const manifest = context.catalog().get(c.req.param('id'))
     if (manifest === undefined) return c.json({ error: 'unknown widget type' }, 404)
     return c.json(manifestView(manifest))
   })
 
-  /**
-   * Create a widget and place it.
-   *
-   * Placement uses the same first-fit code the MCP tools call, so a widget an agent adds lands
-   * where a hand-added one would. A refusal from `maxRows` is a 409 with the reason, not a
-   * silently truncated board.
-   */
   api.post('/widgets', async (c) => {
     const body = (await c.req.json()) as {
       page?: string
@@ -120,7 +111,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
       /** Which grid section to land in; absent means the page's first one. */
       section?: string | null
     }
-    const manifest = body.type === undefined ? undefined : options.catalog().get(body.type)
+    const manifest = body.type === undefined ? undefined : context.catalog().get(body.type)
     if (manifest === undefined) return c.json({ error: 'unknown widget type' }, 400)
 
     const id = newId('w')
@@ -132,15 +123,13 @@ export function createApiRoutes(options: ApiOptions): Hono {
         (draft) => {
           const pageId = body.page ?? draft.dashboard.defaultPage
           const page = draft.pages.get(pageId)
-          if (page === undefined) throw new Error(`no page "${pageId}"`)
+          if (page === undefined) throw new NotFoundError(`no page "${pageId}"`)
 
           const widget = widgetSchema.parse({
             id,
             page: pageId,
             type: manifest.id,
             title: body.title ?? null,
-            // Stored only when the caller chose: null keeps "first grid section" a default the
-            // file does not have to spell out.
             section: body.section ?? null,
             targetId: body.targetId ?? null,
             bindings: body.bindings ?? {},
@@ -180,9 +169,9 @@ export function createApiRoutes(options: ApiOptions): Hono {
         'ui',
         (draft) => {
           const widget = draft.widgets.get(id)
-          if (widget === undefined) throw new Error(`no widget "${id}"`)
+          if (widget === undefined) throw new NotFoundError(`no widget "${id}"`)
           const page = draft.pages.get(widget.page)
-          if (page === undefined) throw new Error(`no page "${widget.page}"`)
+          if (page === undefined) throw new NotFoundError(`no page "${widget.page}"`)
           const updated = widgetSchema.parse({
             ...widget,
             ...(body.title === undefined ? {} : { title: body.title }),
@@ -190,13 +179,13 @@ export function createApiRoutes(options: ApiOptions): Hono {
             ...(body.look === undefined ? {} : { look: { ...widget.look, ...body.look } }),
             ...(body.targetId === undefined ? {} : { targetId: body.targetId }),
             ...(body.bindings === undefined ? {} : { bindings: body.bindings }),
-            // Merge rather than replace: a form that posts one field must not wipe the others.
+            // Merged so a form can post a single field.
             ...(body.config === undefined ? {} : { config: { ...widget.config, ...body.config } }),
           })
           draft.widgets.set(id, updated)
 
-          // A move keeps the tile's size and lets first-fit find it a spot in the new section:
-          // its old coordinates belong to a board it is no longer on.
+          // A moved tile keeps its size and is re-placed by first-fit; its old coordinates belong
+          // to another section's board.
           if (body.section !== undefined && sectionOf(widget, page) !== sectionOf(updated, page)) {
             const refused = placeWidget(draft, page, updated, currentSize(draft, page, id))
             if (refused.length > 0) {
@@ -219,12 +208,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
     return c.json({ revision: result.value.revision })
   })
 
-  /**
-   * Dashboard-level settings: the title, and the optional behaviour under `features`.
-   *
-   * `features` merges rather than replaces, so a panel that flips one toggle does not have to know
-   * or resend the others — the same rule the theme route follows, and for the same reason.
-   */
+  /** `features` merges so a panel can flip one toggle without resending the rest. */
   api.patch('/dashboard', async (c) => {
     const body = (await c.req.json()) as {
       title?: string
@@ -252,16 +236,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * Change the look: preset, scheme, token overrides, background.
-   *
-   * `cssVars` merges per bucket rather than replacing, so the design panel can send one slider's
-   * token without resending the palette — and sending `null` for a token DELETES the override
-   * rather than writing the string "null", which is what makes "reset this back to the preset" a
-   * thing the UI can express at all.
-   *
-   * The values themselves are not interpreted here. They are custom properties on `:root`, so the
-   * blast radius of a malformed one is a declaration the browser drops; `themeSchema` caps their
-   * length, and nothing in this payload can name a URL, a host or a path.
+   * `cssVars` merges per bucket; `null` for a token deletes the override. Values are not
+   * interpreted: they become custom properties on `:root`, and `themeSchema` caps their length.
    */
   api.patch('/theme', async (c) => {
     const body = (await c.req.json()) as {
@@ -276,17 +252,19 @@ export function createApiRoutes(options: ApiOptions): Hono {
         'ui',
         (draft) => {
           const current = draft.theme
-          const buckets = ['theme', 'light', 'dark'] as const
-          const cssVars = Object.fromEntries(
-            buckets.map((bucket) => {
-              const merged: Record<string, string> = { ...current.cssVars[bucket] }
-              for (const [token, value] of Object.entries(body.cssVars?.[bucket] ?? {})) {
-                if (value === null) delete merged[token]
-                else merged[token] = value
-              }
-              return [bucket, merged]
-            }),
-          ) as Record<'theme' | 'light' | 'dark', Record<string, string>>
+          const mergeBucket = (bucket: 'theme' | 'light' | 'dark'): Record<string, string> => {
+            const merged = { ...current.cssVars[bucket] }
+            for (const [token, value] of Object.entries(body.cssVars?.[bucket] ?? {})) {
+              if (value === null) delete merged[token]
+              else merged[token] = value
+            }
+            return merged
+          }
+          const cssVars = {
+            theme: mergeBucket('theme'),
+            light: mergeBucket('light'),
+            dark: mergeBucket('dark'),
+          }
 
           draft.theme = themeSchema.parse({
             ...current,
@@ -307,12 +285,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * A page as the editor edits it: the stored sections made explicit.
-   *
-   * The resolved page is dense — every column count filled in, every href composed — which is
-   * right for rendering and wrong for editing: a form should show what the user SET and leave the
-   * rest blank. So this returns the sparse config, with only the implicit navbar-and-grid pair
-   * materialised when the page declares nothing, because that is what the user is about to edit.
+   * The sparse stored page for editing, not the dense resolved one; only the implicit
+   * navbar-and-grid pair is materialised when the page declares no sections.
    */
   api.get('/pages/:id', async (c) => {
     const { tree } = await context.state()
@@ -332,12 +306,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * A page's title and its sections, replaced whole.
-   *
-   * Whole rather than patched because a section list is an ORDER as much as a set, and the editor
-   * that reorders, adds and removes in one drag has nothing sensible to say per section. The tree
-   * validation behind the transaction is what refuses a list that would strand a widget: a grid
-   * section that disappears while tiles still name it is a 422, not a vanished board.
+   * Sections are replaced whole because they are an ordered list; tree validation in the
+   * transaction refuses a list that would strand a widget.
    */
   api.patch('/pages/:id', async (c) => {
     const pageId = c.req.param('id')
@@ -348,15 +318,13 @@ export function createApiRoutes(options: ApiOptions): Hono {
         'ui',
         (draft) => {
           const page = draft.pages.get(pageId)
-          if (page === undefined) throw new Error(`no page "${pageId}"`)
+          if (page === undefined) throw new NotFoundError(`no page "${pageId}"`)
           const parsed = pageSchema.safeParse({
             ...page,
             ...(body.title === undefined ? {} : { title: body.title }),
             ...(body.sections === undefined ? {} : { sections: body.sections }),
           })
           if (!parsed.success) {
-            // A malformed section list is the caller's mistake, and 422 with the field named is
-            // what the editor needs to say so; a bare throw would be a 500 with a stack.
             throw new ConfigInvalidError([
               { path: `pages/${pageId}.json`, message: z.prettifyError(parsed.error) },
             ])
@@ -374,12 +342,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * Save geometry for one breakpoint.
-   *
-   * Marked `authored`, because a human dragged it. Derived tiers are regenerated from the
-   * authoritative one and must never be written from a resize event — react-grid-layout emits
-   * machine-generated layouts on every window change, and persisting those would dirty a
-   * git-tracked file every time someone opened the dashboard on a phone.
+   * Marks the breakpoint `authored`; derived tiers are regenerated from it and must never be
+   * saved from a resize event, since react-grid-layout emits layouts on every window change.
    */
   api.put('/pages/:id/layout', async (c) => {
     const pageId = c.req.param('id')
@@ -389,7 +353,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
       section?: string
       items?: LayoutItem[]
     }
-    if (body.breakpoint === undefined || body.items === undefined) {
+    const { breakpoint, section, items } = body
+    if (breakpoint === undefined || items === undefined) {
       return c.json({ error: 'breakpoint and items are required' }, 400)
     }
 
@@ -398,14 +363,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
         'ui',
         (draft) => {
           const page = draft.pages.get(pageId)
-          if (page === undefined) throw new Error(`no page "${pageId}"`)
-          saveSectionLayout(
-            draft,
-            page,
-            body.section,
-            body.breakpoint as string,
-            body.items as LayoutItem[],
-          )
+          if (page === undefined) throw new NotFoundError(`no page "${pageId}"`)
+          saveSectionLayout(draft, page, section, breakpoint, items)
         },
         ifMatch(c.req.header('if-match')),
       ),
@@ -417,14 +376,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
     return c.json({ revision: result.value.revision })
   })
 
-  /**
-   * Delete a widget, and everything that only existed for it.
-   *
-   * Four things outlive a naive delete and each one is invisible until it bites: the layout entry
-   * (a ghost in the editor), the target nothing points at any more, the secret that target owned,
-   * and the scheduler's poll for a widget that is gone. The last one is the expensive kind of
-   * invisible — the app keeps hitting a service for a tile nobody can see.
-   */
+  /** Deletes a widget with its layout entries, now-unreferenced targets and their secrets. */
   api.delete('/widgets/:id', async (c) => {
     const id = c.req.param('id')
     const orphaned: { targets: string[]; secrets: string[] } = { targets: [], secrets: [] }
@@ -434,23 +386,13 @@ export function createApiRoutes(options: ApiOptions): Hono {
         'ui',
         (draft) => {
           const widget = draft.widgets.get(id)
-          if (widget === undefined) throw new Error(`no widget "${id}"`)
+          if (widget === undefined) throw new NotFoundError(`no widget "${id}"`)
           draft.widgets.delete(id)
 
-          for (const [pageId, layout] of draft.layouts) {
-            const layouts = Object.fromEntries(
-              Object.entries(layout.layouts).map(([breakpoint, items]) => [
-                breakpoint,
-                items.filter((entry) => entry.i !== id),
-              ]),
-            )
-            draft.layouts.set(pageId, layoutFileSchema.parse({ ...layout, layouts }))
-          }
+          removeFromLayouts(draft, id)
 
-          // A target with no widgets left is dead weight, and leaving it means its credential
-          // stays on disk for a service nobody displays. Every target the widget referenced is
-          // considered — a composite binds several, and cleaning up only `targetId` would leave a
-          // deleted calendar's four API keys behind.
+          // Composite widgets bind several targets, so every reference is considered, not just
+          // `targetId`.
           const referenced = (candidate: {
             targetId: string | null
             bindings: Record<string, string[]>
@@ -480,7 +422,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
 
     if (!result.ok) return c.json({ error: result.message }, result.status)
     if (orphaned.secrets.length > 0) await context.deleteSecrets(orphaned.secrets)
-    // reload() re-derives the scheduler's subscriptions, which is what actually stops the poll.
+    // reload() re-derives the scheduler's subscriptions, which is what stops the poll.
     await context.reload()
     void context.requestPublish('ui')
     return c.json({ revision: result.value.revision, orphaned })
@@ -492,7 +434,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
       label?: string
       widgetType?: string
       base?: { scheme?: string; host?: string; port?: number; basePath?: string }
-      /** Everything the manifest declares, in one bag. The SERVER decides what is a credential. */
+      /** All manifest-declared values; the server decides which are credentials. */
       values?: Record<string, unknown>
       fields?: Record<string, string | number | boolean>
       secrets?: Record<string, string>
@@ -504,14 +446,9 @@ export function createApiRoutes(options: ApiOptions): Hono {
     const id = body.id ?? newId('t')
     const widgetType = body.widgetType ?? 'custom'
 
-    /**
-     * Route values by what the MANIFEST declares, never by which key the caller put them under.
-     *
-     * `fields` and `secrets` are still accepted so an existing client keeps working, but they are
-     * merged and re-split here. A caller that puts an API key in `fields` gets it stored as a
-     * secret anyway, because the field's kind is what decides — not the caller's opinion.
-     */
-    const declared = targetShapeFields(options.catalog(), widgetType)
+    // Values are routed by the manifest's field kinds, not by the key the caller used; `fields`
+    // and `secrets` stay accepted for older clients and are re-split here.
+    const declared = targetShapeFields(context.catalog(), widgetType)
     const routed = routeValues(declared, {
       ...(body.fields === undefined ? {} : { fields: body.fields }),
       ...(body.secrets === undefined ? {} : { secrets: body.secrets }),
@@ -519,8 +456,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
     })
     const secretNames = Object.keys(routed.secrets)
 
-    // Only the four keys `base` is allowed to have. The whole reason this is picked apart rather
-    // than spread is that spreading a caller's object once put a plaintext credential in config.
+    // Picked apart rather than spread: spreading the caller's object once put a plaintext
+    // credential in config.
     const base = {
       ...(body.base.scheme === undefined ? {} : { scheme: body.base.scheme }),
       host: body.base.host,
@@ -542,9 +479,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
               widgetType: body.widgetType ?? existing?.widgetType ?? 'custom',
               base: { ...existing?.base, ...base },
               fields: { ...existing?.fields, ...routed.fields },
-              // Only the REFERENCE is written to config. The value goes to the secrets directory,
-              // which is gitignored — and the split above is what makes "there is no code path
-              // that puts it here" a property of the code rather than a claim about it.
+              // Only the reference is written to config; the value goes to the gitignored secrets
+              // directory.
               secrets: {
                 ...existing?.secrets,
                 ...Object.fromEntries(
@@ -568,9 +504,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
     }
     await context.reload()
     void context.requestPublish('ui')
-    // `ignored` is reported rather than silently dropped: a client sending a field this shape does
-    // not declare has a bug, and the quiet version of that is a credential the user thinks is
-    // saved and a widget that will never authenticate.
+    // Unknown fields are reported so a client bug does not look like a saved credential.
     return c.json(
       {
         id,
@@ -582,11 +516,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
-   * Test a target before saving it.
-   *
-   * Runs server-side against a scratch credential, and returns whether it worked plus how long it
-   * took — never the response body. "It answered in 40ms" is what a person needs; the JSON a
-   * *arr instance returned is not, and echoing it is how credentials leak into a browser.
+   * Probes a target server-side and returns only success and duration, never the response body,
+   * which could leak credentials.
    */
   api.post('/targets/test', async (c) => {
     const body = (await c.req.json()) as {
@@ -599,7 +530,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
       fields?: Record<string, string | number | boolean>
       secrets?: Record<string, string>
     }
-    const manifest = body.type === undefined ? undefined : options.catalog().get(body.type)
+    const manifest = body.type === undefined ? undefined : context.catalog().get(body.type)
     if (manifest === undefined) return c.json({ error: 'unknown widget type' }, 400)
     if (body.base?.host === undefined || body.base.port === undefined) {
       return c.json({ error: 'base.host and base.port are required' }, 400)
@@ -613,7 +544,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
       target: {
         origin: `${body.base.scheme ?? 'http'}://${body.base.host}:${body.base.port}`,
         basePath: body.base.basePath ?? '',
-        allowLoopback: body.base.host === '127.0.0.1' || body.base.host === 'localhost',
+        allowLoopback: isLoopbackHost(body.base.host),
       },
       config: body.config ?? {},
       auth: { secrets: body.secrets ?? {}, config: body.fields ?? {} },
@@ -627,12 +558,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   api.get('/secrets', async (c) => {
-    // Names and whether each is set. Never a value, never a length — a length is a meaningful
-    // clue about a credential and there is no reason for a browser to have it.
-    //
-    // Asked name by name, from the names config declares. The obvious version — listing what the
-    // vault has resolved — returns nothing in a fresh process, which showed up as every saved
-    // credential looking unset after a restart.
+    // Names and whether each is set; never a value or a length. Asked name by name from config,
+    // because the vault's resolved set is empty in a fresh process.
     const vault = await loadSecrets(env.secretsDir)
     const { resolved } = await context.state()
     const secrets = resolved.targets

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { env } from '../server/env.ts'
+import type { Target } from '../server/config/schema.ts'
+import { isLoopbackHost } from '../server/fetcher/policy.ts'
 
 /**
- * The headless surface. Every capability the UI has must be reachable here first — it is what
- * makes each phase validatable with no browser, and it is the restore/backup entry point.
+ * Every capability the UI has must also be reachable here, so each phase is validatable without
+ * a browser.
  */
 type Command = {
   readonly name: string
@@ -102,20 +104,10 @@ async function runRuntime(): Promise<number> {
   return environment.heapLimitExceedsMemoryLimit ? 1 : 0
 }
 
-async function seedPaths() {
-  return {
-    dataDir: env.dataDir,
-    configDir: env.configDir,
-    assetsDir: env.assetsDir,
-    secretsDir: env.secretsDir,
-    stateDir: env.stateDir,
-  }
-}
-
 async function runInit(): Promise<number> {
   const { seedDataDirectory } = await import('../server/store/seed.ts')
   const { seedStarterConfig } = await import('../server/store/starter.ts')
-  const written = await seedDataDirectory(await seedPaths())
+  const written = await seedDataDirectory(env)
   const starter = await seedStarterConfig(env.configDir)
   console.log(`data directory ready at ${env.dataDir}`)
   for (const path of [...written, ...starter]) console.log(`  created ${path}`)
@@ -156,13 +148,11 @@ async function runResolve(argv: readonly string[]): Promise<number> {
   const { resolve: resolveTree } = await import('../server/resolve/resolve.ts')
   const { overridesSchema, EMPTY_OVERRIDES } = await import('../server/config/overrides.ts')
   const { readFile } = await import('node:fs/promises')
-  const { resolve: resolvePath } = await import('node:path')
 
   const store = new ConfigStore(env.configDir)
   const { tree } = await store.load()
 
-  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog')
-  const catalog = await loadCatalogDirectory(catalogDir)
+  const catalog = await loadCatalogDirectory(env.catalogDir)
   for (const entry of catalog.rejected)
     console.error(`catalog: skipped ${entry.slug} — ${entry.reason}`)
 
@@ -195,9 +185,7 @@ async function runResolve(argv: readonly string[]): Promise<number> {
 
 async function runPublish(argv: readonly string[]): Promise<number> {
   const { createContext } = await import('../server/context.ts')
-  const { resolve: resolvePath } = await import('node:path')
   const context = await createContext({
-    catalogDir: process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
     ...(process.env.NEOHOMEPAGE_WEB_DIST === undefined
       ? {}
       : { webDistDir: process.env.NEOHOMEPAGE_WEB_DIST }),
@@ -261,7 +249,6 @@ async function runFetch(argv: readonly string[]): Promise<number> {
   const { probe } = await import('../server/fetcher/probe.ts')
   const { isComposite } = await import('@neohomepage/catalog-schema')
   const { loadSecrets } = await import('../server/secrets/vault.ts')
-  const { resolve: resolvePath } = await import('node:path')
 
   const store = new ConfigStore(env.configDir)
   const { tree } = await store.load()
@@ -273,30 +260,18 @@ async function runFetch(argv: readonly string[]): Promise<number> {
     return 2
   }
 
-  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog')
-  const { manifests } = await loadCatalogDirectory(catalogDir)
+  const { manifests } = await loadCatalogDirectory(env.catalogDir)
   const manifest = manifests.get(widget.type)
   if (manifest === undefined) {
-    console.error(`widget type "${widget.type}" is not in the catalog at ${catalogDir}`)
+    console.error(`widget type "${widget.type}" is not in the catalog at ${env.catalogDir}`)
     return 2
   }
 
   const vault = await loadSecrets(env.secretsDir)
   const requested = argv.find((a) => a.startsWith('--operation='))?.split('=')[1]
 
-  /**
-   * Every (target, probe) pair this widget would fetch.
-   *
-   * A composite has one per bound target rather than one per operation, and `neo fetch` prints a
-   * line for each. That is the point of the command against real hardware: a calendar that says
-   * "✓" while three of its five sources are silently unbound has told you nothing.
-   */
-  const probes: {
-    label: string
-    target: NonNullable<ReturnType<typeof tree.targets.get>>
-    kind?: string
-    operation?: string
-  }[] = []
+  // One entry per fetch: a composite gets one per bound target, a plain widget one per operation.
+  const probes: { label: string; target: Target; kind?: string; operation?: string }[] = []
 
   if (isComposite(manifest)) {
     for (const [roleName, role] of Object.entries(manifest.roles)) {
@@ -353,8 +328,7 @@ async function runFetch(argv: readonly string[]): Promise<number> {
       target: {
         origin: `${entry.target.base.scheme}://${entry.target.base.host}:${entry.target.base.port}`,
         basePath: entry.target.base.basePath,
-        allowLoopback:
-          entry.target.base.host === '127.0.0.1' || entry.target.base.host === 'localhost',
+        allowLoopback: isLoopbackHost(entry.target.base.host),
         insecureSkipVerify: entry.target.tls.insecureSkipVerify,
       },
       config: widget.config,
@@ -375,33 +349,22 @@ async function runFetch(argv: readonly string[]): Promise<number> {
 }
 
 /**
- * `neo doctor`.
- *
- * Exit code is the contract: 0 means nothing is wrong, 1 means something needs attention. That is
- * what lets it go in a cron job or a health check, and it is the clause in the beta definition
- * that has to print `0 problems`.
- *
- * Warnings alone do not fail. A spare target and a large wallpaper are worth saying and not worth
- * paging anyone about; conflating them with a missing credential would train people to ignore
- * the exit code.
+ * Exit code is the contract: 0 when nothing is wrong, 1 when something needs attention, so it can
+ * run as a cron job or health check. Warnings alone do not fail.
  */
 async function runDoctorCommand(argv: readonly string[]): Promise<number> {
   const { ConfigStore } = await import('../server/store/configstore.ts')
   const { loadCatalogDirectory } = await import('../server/catalog/load.ts')
-  const { loadSecrets } = await import('../server/secrets/vault.ts')
+  const { loadSecrets, storedSecretNames } = await import('../server/secrets/vault.ts')
   const { resolve: resolveTree } = await import('../server/resolve/resolve.ts')
   const { runDoctor, unknownKeys } = await import('../server/doctor.ts')
-  const { storedSecretNames } = await import('../server/secrets/vault.ts')
-  const { resolve: resolvePath } = await import('node:path')
 
   const quiet = argv.includes('--quiet')
   const asJson = argv.includes('--json')
 
   const store = new ConfigStore(env.configDir)
   const { tree } = await store.load()
-  const { manifests } = await loadCatalogDirectory(
-    process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
-  )
+  const { manifests } = await loadCatalogDirectory(env.catalogDir)
   const vault = await loadSecrets(env.secretsDir)
   const resolved = resolveTree({
     tree,
@@ -448,14 +411,10 @@ async function runDoctorCommand(argv: readonly string[]): Promise<number> {
 async function runMcp(argv: readonly string[]): Promise<number> {
   const { createContext } = await import('../server/context.ts')
   const { buildDashboardServer, TOOL_NAMES } = await import('../server/mcp/server.ts')
-  const { resolve: resolvePath } = await import('node:path')
 
-  // `NEOHOMEPAGE_PUBLISH_MODE` is read here as well as in `main.ts`, and it has to be: this is a
-  // SECOND process holding its own store and its own publish mutex, so an install that turned
-  // auto-publish off to keep one process in charge of the generation directory was still getting
-  // a render — and a generation number — from whichever of the two got there first.
+  // Read here as well as in main.ts: this is a second process with its own store and publish
+  // mutex, and in manual mode it must not race the server for generation numbers.
   const context = await createContext({
-    catalogDir: process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolvePath('catalog'),
     ...(process.env.NEOHOMEPAGE_PUBLISH_MODE === 'manual'
       ? { publishMode: 'manual' as const }
       : {}),
@@ -468,20 +427,11 @@ async function runMcp(argv: readonly string[]): Promise<number> {
   }
 
   const { serveStdio } = await import('@modelcontextprotocol/server/stdio')
-  // A FACTORY, not an instance: the SDK builds a server per connection, and passing the instance
-  // typechecks as an error rather than failing at runtime, which is the good outcome.
+  // The SDK builds a server per connection, so it takes a factory, not an instance.
   await serveStdio(() => buildDashboardServer({ context, actor: 'mcp:stdio' }))
   return 0
 }
 
-/**
- * Refuse a flag this command does not implement.
- *
- * `neo backup --include-secrets` used to be documented, was never implemented, and was silently
- * discarded — so it wrote a perfectly ordinary archive, printed success, and left someone
- * believing their credentials were backed up. A command that accepts an option it does not honour
- * is worse than one that has no options.
- */
 class UsageError extends Error {
   constructor(message: string) {
     super(message)
@@ -526,14 +476,7 @@ async function runRestore(argv: readonly string[]): Promise<number> {
   return 0
 }
 
-/**
- * `neo catalog` — the same script `pnpm catalog:*` runs.
- *
- * It was listed in the help as `sync | verify | test | record | snapshot` and had no
- * implementation at all, so three of those five subcommands do not exist and `neo catalog test`
- * printed "not implemented yet" while `pnpm catalog:test` worked. Advertising a command surface
- * that does not match the one that exists is worse than advertising nothing.
- */
+/** Delegates to the same script `pnpm catalog:*` runs. */
 async function runCatalog(argv: readonly string[]): Promise<number> {
   const { resolve: resolvePath } = await import('node:path')
   const { spawnSync } = await import('node:child_process')
@@ -571,9 +514,7 @@ async function main(argv: readonly string[]): Promise<number> {
   try {
     return await command.run(rest)
   } catch (error) {
-    // A usage mistake is a message, not a stack trace. The trace is still available when
-    // something genuinely unexpected happens — it is only the argument errors that are quiet,
-    // because those are the ones where the reader is the person who mistyped.
+    // Usage mistakes print a message; anything else keeps its stack trace.
     if (error instanceof UsageError) {
       console.error(`neo ${command.name}: ${error.message}`)
       return 2

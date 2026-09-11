@@ -9,7 +9,7 @@ import {
 } from '../config/schema.ts'
 import { treeRevision, validateTree, type ConfigTree } from './tree.ts'
 
-function tree(overrides: Partial<{ [K in keyof ConfigTree]: ConfigTree[K] }> = {}): ConfigTree {
+function tree(overrides: Partial<ConfigTree> = {}): ConfigTree {
   return {
     dashboard: dashboardSchema.parse({ schemaVersion: 1 }),
     theme: themeSchema.parse({}),

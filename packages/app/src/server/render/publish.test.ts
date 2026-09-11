@@ -93,13 +93,11 @@ describe('the published document', () => {
 
   it('needs no JavaScript to be laid out', () => {
     const html = renderDocument({ resolved: resolved(), assets: '' })
-    // The only script is the inert state payload; everything visual is HTML and CSS.
     const scripts = [...html.matchAll(/<script[^>]*>/g)].map((m) => m[0])
     expect(scripts).toEqual(['<script id="__NEO_STATE__" type="application/json">'])
   })
 
   it('embeds no credential and no upstream data', () => {
-    // curl against a published page reveals the layout and the widget names, and nothing else.
     const html = renderDocument({ resolved: resolved(), assets: '' })
     expect(html).not.toContain('secret')
     expect(html).not.toContain('apiKey')
@@ -115,8 +113,7 @@ describe('the published document', () => {
   })
 
   it('escapes an embedded state payload that would close the script element', () => {
-    // A widget title is user-controlled, and `</script>` inside JSON ends the element whatever
-    // the JSON says.
+    // Widget titles are user-controlled.
     const hostile = resolved()
     const html = renderDocument({
       resolved: {
@@ -133,8 +130,7 @@ describe('the published document', () => {
   })
 
   it('sets data-theme only for an explicit choice, so "system" follows the OS', () => {
-    // Check the html tag, not the whole document: the stylesheet legitimately contains
-    // `:root[data-theme="dark"]` in every case, which is the point of emitting both.
+    // Only the html tag: the stylesheet always contains `:root[data-theme="dark"]`.
     const htmlTag = (document: string) => document.split('\n')[1] as string
     expect(htmlTag(renderDocument({ resolved: resolved(), assets: '' }))).not.toContain(
       'data-theme',
@@ -156,8 +152,6 @@ describe('theme emission', () => {
   })
 
   it('lets an explicit choice win in both directions', () => {
-    // Dark appears twice on purpose: under prefers-color-scheme guarded against an explicit
-    // light choice, and under [data-theme="dark"].
     const css = themeVariables(themeSchema.parse({}))
     expect(css).toContain('@media (prefers-color-scheme: dark){:root:not([data-theme="light"])')
     expect(css).toContain(':root[data-theme="dark"]')
@@ -173,9 +167,7 @@ describe('theme emission', () => {
     const css = themeVariables(
       themeSchema.parse({ surface: { background: '/a.png");}body{display:none}/*' } }),
     )
-    // The payload text survives — inside the quoted string, which is the correct outcome. What
-    // matters is that neither the quote nor the paren reaches the parser unescaped, so the
-    // declaration cannot be terminated early and the rest is never read as CSS.
+    // The text survives inside the quoted string; only the quote and the paren must be escaped.
     const declaration = css.slice(css.indexOf('background-image:url('))
     const url = declaration.slice(0, declaration.indexOf(');'))
     expect(url).toContain('\\22 ')
@@ -234,8 +226,7 @@ describe('publishing', () => {
       actor: 'test',
     })
 
-    // A resolved tree the renderer cannot handle: a widget id that is not CSS-selector safe, which
-    // the grid emitter refuses rather than interpolating.
+    // A widget id that is not CSS-selector safe; the grid emitter refuses it.
     const broken = resolved()
     const home = broken.pages[0] as (typeof broken.pages)[number]
     await expect(

@@ -7,14 +7,12 @@ import { InMemoryTransport } from '@modelcontextprotocol/server'
 import { Client } from '@modelcontextprotocol/client'
 
 /**
- * The MCP surface, driven through the SDK's own in-memory transport.
- *
- * Calling the handlers directly would test the handlers; going through a real client exercises
- * schema validation, the tool listing and the result envelope — which is where the failures that
- * only appear in an agent actually live.
+ * MCP surface driven through the SDK's in-memory transport, so schema validation, the tool listing
+ * and the result envelope are exercised.
  */
 
 const created: string[] = []
+let dataDir = ''
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let context: any
 let client: Client
@@ -29,8 +27,14 @@ async function callJson(name: string, args: Record<string, unknown> = {}) {
   return { isError: false as const, value: JSON.parse(text) as Record<string, unknown> }
 }
 
+function unwrap(result: Awaited<ReturnType<typeof callJson>>): Record<string, unknown> {
+  expect(result.isError, result.isError ? result.text : '').toBe(false)
+  if (result.isError) throw new Error(result.text)
+  return result.value
+}
+
 beforeEach(async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'neo-mcp-'))
+  dataDir = await mkdtemp(join(tmpdir(), 'neo-mcp-'))
   created.push(dataDir)
   process.env.NEOHOMEPAGE_DATA_DIR = dataDir
   process.env.NEOHOMEPAGE_CATALOG_DIR = join(import.meta.dirname, '../../../../../catalog')
@@ -96,18 +100,14 @@ describe('the tool surface', () => {
   })
 
   it('exports that same list, so --print-tools cannot go stale', async () => {
-    // `TOOL_NAMES` is what `neo mcp --print-tools` reports and what the docs are written from,
-    // and nothing connected it to the tools actually registered: adding one and forgetting the
-    // array left the CLI confidently naming a surface that was three tools short.
     const { TOOL_NAMES } = await import('./server.ts')
     const { tools } = await client.listTools()
     expect([...TOOL_NAMES].sort()).toEqual(tools.map((tool) => tool.name).sort())
   })
 
   it('gives every tool an OBJECT input schema with no root-level combinator', async () => {
-    // Two verified constraints in one assertion. A non-object input schema is silently dropped by
-    // some SDK paths, and Claude Code flattens root-level anyOf/oneOf — merging the properties of
-    // every branch, which would quietly mangle a discriminated union over widget types.
+    // Some SDK paths drop a non-object input schema, and Claude Code flattens a root-level
+    // anyOf/oneOf by merging every branch's properties.
     const { tools } = await client.listTools()
     for (const tool of tools) {
       const schema = tool.inputSchema as Record<string, unknown>
@@ -119,23 +119,19 @@ describe('the tool surface', () => {
   })
 
   it('exposes no tool that could read a secret', async () => {
-    // Tool results land in a model context that may be shipped to a third-party API, so there is
-    // no read path at any scope — not a permission, an absence.
+    // Tool results land in a model context that may be shipped to a third-party API.
     const { tools } = await client.listTools()
     const names = tools.map((tool) => tool.name)
     expect(names.some((name) => /secret|credential|password|token/i.test(name))).toBe(false)
   })
 
   it('exposes no tool that takes a raw URL', async () => {
-    // An agent names a widget, or a host and a port. It cannot name a URL, a path, a header or a
-    // method — the same invariant the browser is held to.
     const { tools } = await client.listTools()
     for (const tool of tools) {
       const properties = Object.keys(
         (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
       )
-      // A bookmark's path is where the VIEWER'S browser goes when the link is clicked; the server
-      // never fetches it, so it is the one path that is not a request leaving the box.
+      // A bookmark path is followed by the viewer's browser; the server never fetches it.
       const allowed = tool.name === 'add_bookmark' ? ['path'] : []
       expect(
         properties.filter(
@@ -184,39 +180,31 @@ describe('writing', () => {
       port: 8989,
       secrets: { apiKey: 'AGENT-SUPPLIED-SECRET' },
     })
-    expect(added.isError).toBe(false)
-    const id = added.isError === false ? (added.value.id as string) : ''
+    const id = unwrap(added).id as string
 
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const target = await readFile(join(dataDir, 'config', 'targets', `${id}.json`), 'utf8')
     expect(target).toContain('$secret')
     expect(target).not.toContain('AGENT-SUPPLIED-SECRET')
 
-    // And no tool can read it back.
     const listed = await callJson('list_targets')
     expect(JSON.stringify(listed)).not.toContain('AGENT-SUPPLIED-SECRET')
   })
 
   it('adds a widget and places it the same way the editor would', async () => {
     const added = await callJson('add_widget', { type: 'sonarr-queue' })
-    expect(added.isError).toBe(false)
-    const id = added.isError === false ? (added.value.id as string) : ''
+    const id = unwrap(added).id as string
 
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const layout = JSON.parse(
       await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8'),
     ) as { layouts: Record<string, { i: string; x: number; y: number }[]> }
-    // First widget on an empty board goes to the origin — the same first-fit result a person
-    // clicking "add" gets, because it is literally the same function.
     expect(layout.layouts.lg?.[0]).toMatchObject({ i: id, x: 0, y: 0 })
   })
 
   it('merges config on update rather than replacing it', async () => {
     const added = await callJson('add_widget', { type: 'sonarr-queue', config: { maxItems: 5 } })
-    const id = added.isError === false ? (added.value.id as string) : ''
+    const id = unwrap(added).id as string
     await callJson('update_widget', { id, title: 'Renamed' })
 
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const widget = JSON.parse(
       await readFile(join(dataDir, 'config', 'widgets', `${id}.json`), 'utf8'),
     ) as { title: string; config: Record<string, unknown> }
@@ -226,7 +214,7 @@ describe('writing', () => {
 
   it('refuses a stale baseRevision instead of clobbering a concurrent edit', async () => {
     const before = await callJson('describe_dashboard')
-    const stale = before.isError === false ? (before.value.revision as string) : ''
+    const stale = unwrap(before).revision as string
 
     await callJson('add_widget', { type: 'sonarr-queue' })
     const conflicted = await callJson('add_widget', { type: 'sonarr-queue', baseRevision: stale })
@@ -236,18 +224,16 @@ describe('writing', () => {
 
   it('removes a widget and its layout entries', async () => {
     const added = await callJson('add_widget', { type: 'sonarr-queue' })
-    const id = added.isError === false ? (added.value.id as string) : ''
+    const id = unwrap(added).id as string
     await callJson('remove_widget', { id })
 
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const layout = await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8')
     expect(layout).not.toContain(id)
   })
 
   it('refuses a blocked address even with a valid-looking credential', async () => {
-    // The credential is supplied deliberately: without one the request fails on the missing
-    // credential first and never reaches the address check, so the earlier version of this test
-    // was passing for the wrong reason and proving nothing about egress.
+    // The credential is needed so the call reaches the address check instead of failing on
+    // missing-credential first.
     const result = await callJson('test_target', {
       type: 'sonarr-queue',
       host: '169.254.169.254',
@@ -276,7 +262,6 @@ describe('writing', () => {
 describe('attribution', () => {
   it('records the agent as the actor, so its edits are traceable', async () => {
     await callJson('add_widget', { type: 'sonarr-queue' })
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const audit = await readFile(join(dataDir, 'config', '.audit.jsonl'), 'utf8')
     expect(audit).toContain('"actor":"mcp:test"')
   })
@@ -285,8 +270,7 @@ describe('attribution', () => {
 describe('composite widget types', () => {
   it('describes the roles an agent has to fill', async () => {
     const result = await callJson('get_widget_schema', { type: 'unified-calendar' })
-    expect(result.isError).toBe(false)
-    const schema = (result as { value: Record<string, unknown> }).value as unknown as {
+    const schema = unwrap(result) as unknown as {
       shape: string
       roles: { name: string; min: number; kinds: { name: string }[] }[]
     }
@@ -301,8 +285,6 @@ describe('composite widget types', () => {
   })
 
   it('refuses to create one with an unfilled role', async () => {
-    // A tile bound to nothing that reports success is worse than an error: the agent moves on and
-    // the user finds an empty widget later with no explanation.
     const result = await callJson('add_widget', { type: 'unified-calendar' })
     expect(result.isError).toBe(true)
     expect(result.isError === true ? result.text : '').toMatch(/role "calendars"/)
@@ -316,38 +298,22 @@ describe('composite widget types', () => {
       port: 5232,
       basePath: '/bins.ics',
     })
-    expect(target.isError).toBe(false)
-    const targetId = (target as { value: { id: string } }).value.id
+    const targetId = unwrap(target).id as string
 
     const created = await callJson('add_widget', {
       type: 'unified-calendar',
       bindings: { calendars: [targetId] },
     })
-    expect(created.isError).toBe(false)
-    const widgetId = (created as { value: { id: string } }).value.id
+    const widgetId = unwrap(created).id as string
 
     const listed = await callJson('list_widgets')
-    const widgets = (listed as { value: { widgets: { id: string; type: string }[] } }).value.widgets
+    const widgets = unwrap(listed).widgets as { id: string; type: string }[]
     expect(widgets.find((one) => one.id === widgetId)?.type).toBe('unified-calendar')
   })
 })
 
-/**
- * The design surface.
- *
- * These tools exist so "make it look like that site" is a thing an agent can do, which means a
- * palette now arrives from outside the repository for the first time. Most of what follows is
- * about that: what happens to a colour on the way in, what happens when the colours a brand
- * publishes cannot be read on a dashboard, and what the tool says it did.
- */
-
 const themeFile = async () =>
-  JSON.parse(
-    await readFile(
-      join(process.env.NEOHOMEPAGE_DATA_DIR as string, 'config', 'theme.json'),
-      'utf8',
-    ),
-  ) as {
+  JSON.parse(await readFile(join(dataDir, 'config', 'theme.json'), 'utf8')) as {
     mode?: string
     preset?: string
     cssVars?: {
@@ -358,7 +324,7 @@ const themeFile = async () =>
     surface?: { background?: string | null; blur?: number; overlayOpacity?: number }
   }
 
-/** The colours Apple publishes, which is the request this whole surface was built for. */
+/** Apple's published brand palette. */
 const APPLE_LIGHT = {
   background: '#ffffff',
   foreground: '#1d1d1f',
@@ -376,15 +342,14 @@ describe('reading the look', () => {
     expect(result.isError).toBe(false)
     if (result.isError) return
     expect(result.value.mode).toBe('system')
-    // Under "system" the page carries both palettes and the viewer's OS chooses. A server that
-    // reported one "effective scheme" would be guessing, and an agent would then write into it.
+    // Under "system" both palettes ship and the OS chooses; the server must not guess one.
     expect(result.value.modeNote).toMatch(/both palettes/)
     expect((result.value.palette as Record<string, Record<string, string>>).light?.accent).toMatch(
       /^#[0-9a-f]{6}$/,
     )
     expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
     expect((result.value.contrast as Record<string, { passes: boolean }>).dark?.passes).toBe(true)
-    // The labels are what stop an agent putting a brand's page grey on `muted`, which is an inset.
+    // The token labels tell an agent that `muted` is an inset, not a page background.
     expect(JSON.stringify(result.value.colorTokens)).toMatch(/muted — Inset/)
   })
 
@@ -407,8 +372,7 @@ describe('changing the look', () => {
     expect(result.isError).toBe(false)
 
     const theme = await themeFile()
-    // Hex would make every ratio in the panel and in the contrast suite come back null, so the
-    // conversion happens on the way in and the file only ever holds the checkable form.
+    // Contrast ratios are only computable from OKLCH, so conversion happens on the way in.
     expect(theme.cssVars?.light?.accent).toMatch(/^oklch\(/)
     expect(JSON.stringify(theme)).not.toContain('#0071e3')
     expect(theme.cssVars?.dark?.accent).toBeUndefined()
@@ -436,8 +400,7 @@ describe('changing the look', () => {
       to: string
       why: string
     }[]
-    // `#86868b` on `#f5f5f7` is 3.1:1. A brand picks it for a wordmark, not for a 4.5:1 floor on
-    // an inset grey, so the label darkens — and the report says by how much and why.
+    // `#86868b` on `#f5f5f7` is 3.1:1, below the 4.5:1 floor, so `muted-foreground` is darkened.
     expect(adjusted.map((entry) => entry.token)).toContain('muted-foreground')
     expect(adjusted.every((entry) => /:1, below/.test(entry.why))).toBe(true)
     expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(true)
@@ -448,7 +411,7 @@ describe('changing the look', () => {
     expect(result.isError).toBe(false)
     if (result.isError) return
     expect(result.value.adjusted).toEqual([])
-    // The verdict is still reported. "Off" means it does not repair, not that it stops looking.
+    // "off" skips the repair, not the contrast report.
     expect((result.value.contrast as Record<string, { passes: boolean }>).light?.passes).toBe(false)
   })
 
@@ -474,17 +437,14 @@ describe('changing the look', () => {
     if (result.isError) return
     expect(result.value.dryRun).toBe(true)
     expect(result.value.revision).toBeUndefined()
-    // Same code path as the write, so what it shows is what a write would do — and nothing landed.
     expect(result.value.preset).toBe('nord')
     expect(await themeFile()).toEqual(before)
   })
 
   it('unpins a colour from the shared bucket so the write is visible', async () => {
-    // `cssVars.theme` resolves LAST, above both schemes. A colour pinned there — which the theme
-    // import box can do — made every later colour write a silent no-op: the caller asked for blue,
-    // the board stayed red, and the tool reported success.
+    // `cssVars.theme` resolves above both schemes, so a colour pinned there would make a scheme
+    // write a silent no-op.
     await callJson('set_theme', { colors: { light: { accent: '#ff0000' } } })
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const path = join(dataDir, 'config', 'theme.json')
     const pinned = JSON.parse(await readFile(path, 'utf8')) as Record<string, never>
     const shared = {
@@ -550,14 +510,13 @@ describe('changing the look', () => {
       blur: 8,
       overlayOpacity: 0.3,
     })
-    // The console presets nominate their own, exactly as picking one in the panel does.
     await callJson('set_theme', { preset: '32bit' })
     expect((await themeFile()).surface?.background).toBe('gradient:neogeo-scan')
   })
 
   it('refuses a stale baseRevision here too', async () => {
     const before = await callJson('describe_theme')
-    const stale = before.isError === false ? (before.value.revision as string) : ''
+    const stale = unwrap(before).revision as string
     await callJson('set_theme', { preset: 'nord' })
     const conflicted = await callJson('set_theme', { preset: 'terminal', baseRevision: stale })
     expect(conflicted.isError).toBe(true)
@@ -570,14 +529,11 @@ describe('what a repair may not do', () => {
     await callJson('set_theme', { colors: { light: { accent: '#0071e3' } } })
     const before = (await themeFile()).cssVars?.light ?? {}
     await callJson('set_theme', { reset: ['shape'] })
-    // A request to put the corner radius back should not come out having pinned palette
-    // overrides: the repair pass runs on a colour change, not on any change at all.
+    // The repair pass runs only on a colour change.
     expect((await themeFile()).cssVars?.light).toEqual(before)
   })
 
   it('answers a standalone fit call instead of calling it nothing', async () => {
-    // "Check the palette and repair it" is a request. Answering it with "nothing to change"
-    // made the same call succeed or fail depending on state the caller could not see.
     const result = await callJson('set_theme', { fit: 'aa' })
     expect(result.isError).toBe(false)
     if (result.isError) return
@@ -585,7 +541,6 @@ describe('what a repair may not do', () => {
   })
 
   it('clears the shared-bucket pin as well, or "back to the preset" is not back', async () => {
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const path = join(dataDir, 'config', 'theme.json')
     await writeFile(
       path,
@@ -599,10 +554,8 @@ describe('what a repair may not do', () => {
   })
 
   it('unpins what it repairs, or it reports a fix the board never shows', async () => {
-    // The fit is solved from the RESOLVED palette, so a token pinned in the shared bucket is what
-    // it measured. Writing the repair into the scheme bucket and leaving the pin would have
-    // printed a ratio for a colour that never reached the page.
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
+    // The fit measures the resolved palette, so a token pinned in the shared bucket must be
+    // unpinned or the repair never reaches the page.
     await writeFile(
       join(dataDir, 'config', 'theme.json'),
       JSON.stringify({
@@ -620,8 +573,7 @@ describe('what a repair may not do', () => {
   })
 
   it('paints a preset that overrides nothing with the colours it actually gets', async () => {
-    // "Default" sets no colour of its own — it IS the defaults — so reading its own maps reported
-    // a palette of five nulls to anyone browsing the presets.
+    // The default preset overrides no colour, so its swatch has to come from the resolved defaults.
     const result = await callJson('search_presets', { query: 'default' })
     expect(result.isError).toBe(false)
     if (result.isError) return
@@ -630,7 +582,6 @@ describe('what a repair may not do', () => {
   })
 
   it('takes an image that exists and stores the path itself', async () => {
-    const dataDir = process.env.NEOHOMEPAGE_DATA_DIR as string
     const { saveBackground } = await import('../assets/store.ts')
     // A one-pixel PNG, so the store sniffs a real type from real magic bytes.
     const png = Buffer.from(
@@ -641,8 +592,8 @@ describe('what a repair may not do', () => {
 
     const result = await callJson('set_theme', { backdropImage: asset.id })
     expect(result.isError).toBe(false)
-    // The caller names an id; the path is built here, so there is no input that reaches the
-    // filesystem or the url() in the published stylesheet.
+    // The path is built from the id server-side; no caller input reaches the filesystem or the
+    // stylesheet url().
     expect((await themeFile()).surface?.background).toBe(`/assets/backgrounds/${asset.id}`)
   })
 })

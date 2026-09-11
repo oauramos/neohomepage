@@ -1,11 +1,10 @@
-import type { BookmarkDisplay, Page, SearchEngine, Theme } from '../server/config/schema.ts'
+import type { BookmarkDisplay, Page, Theme } from '../server/config/schema.ts'
+import type { SearchEngine } from './links.ts'
 import type { LayoutItem } from './grid-geometry.ts'
 
 /**
- * The dense, fully-evaluated dashboard.
- *
- * These types live in shared, not next to resolve(), because the browser renders the same
- * structure the publish step does and neither side may import the other's module tree.
+ * The fully-evaluated dashboard. Lives in shared because both the browser and the publish step
+ * render it.
  */
 
 export type ResolvedWidget = {
@@ -24,13 +23,8 @@ export type ResolvedWidget = {
   /** Absent from the catalog: renders as a labelled placeholder instead of vanishing. */
   readonly unsupported: boolean
   /**
-   * Where a bookmark points: the bound target's origin plus the configured path, for the
-   * link-tile template only; null for everything else.
-   *
-   * Resolved here rather than read out of the projection, because a projection only exists once
-   * a fetch has succeeded — and a bookmark is a link first and a liveness check second. Most real
-   * services answer `GET /` with a redirect to a login page, a 401, or a self-signed certificate,
-   * and none of those is a reason for the link to vanish from the tile.
+   * Bound target origin plus configured path, for the link-tile template only; null otherwise.
+   * Resolved from config rather than the projection so the link survives a failed fetch.
    */
   readonly href: string | null
   /** The cached icon for this widget's type, as a page-relative URL, or null until it is cached. */
@@ -87,9 +81,8 @@ export type ResolvedNavbarSection = {
 }
 
 /**
- * A grid section carries a complete grid config of its own — the page's, with this section's
- * column counts and row cap applied — so the renderer, the CSS emitter and the editor never have
- * to know which numbers were overridden and which were inherited.
+ * Carries a complete grid config (the page's with this section's column counts and row cap
+ * applied) so consumers never need to know which values were inherited.
  */
 export type ResolvedGridSection = {
   readonly id: string
@@ -133,11 +126,8 @@ export type ResolvedTarget = {
   /** Origin only — never a full URL, and never anything a manifest supplied. */
   readonly origin: string
   /**
-   * Field name to secret NAME. Never a value, and never a length.
-   *
-   * Carried here so a client can be told "this target needs a credential called X and it is not
-   * set" without another round trip, and so the editor can show a saved secret as saved. A name
-   * is not a secret; a length would be, which is why one is here and the other never is.
+   * Field name to secret NAME, never a value or a length: lets a client report a missing
+   * credential and the editor show a saved one.
    */
   readonly secretRefs: Readonly<Record<string, string>>
   readonly minIntervalMs: number

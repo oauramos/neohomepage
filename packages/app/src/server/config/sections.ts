@@ -1,13 +1,6 @@
 import { sectionSchema, type Page, type Section, type Widget } from './schema.ts'
 
-/**
- * The sections a page has, whether or not it declares any.
- *
- * A page with an empty `sections` is every page that existed before sections did: a header
- * carrying the title over one grid. Materialising that pair here — once, for the resolver, the
- * validator and the write API alike — is what lets those files stay untouched on disk while
- * every consumer sees one shape.
- */
+/** A page's sections; an empty `sections` means the pre-sections default of a title header over one grid. */
 export function effectiveSections(page: Page): readonly Section[] {
   if (page.sections.length > 0) return page.sections
   return [
@@ -23,14 +16,31 @@ export function gridSectionIds(page: Page): readonly string[] {
 }
 
 /**
- * Which grid section a widget sits in.
- *
- * `null` — the value every widget written before sections existed carries — means the first
- * grid section, so an old config lands where it always did. A section id that is not a grid
- * section on the page is refused by the validator; this only has to answer for valid trees.
+ * Grid section a widget sits in; `null` (every pre-sections widget) means the first grid section.
+ * A section id that is not a grid section is refused by the validator, so the fallback only ever
+ * serves an invalid tree.
  */
 export function sectionOf(widget: Widget, page: Page): string | undefined {
   const grids = gridSectionIds(page)
   if (widget.section !== null && grids.includes(widget.section)) return widget.section
   return grids[0]
+}
+
+/** Column counts and row cap of one grid section, falling back to the page's grid. */
+export function sectionGeometry(
+  page: Page,
+  sectionId: string | undefined,
+): { cols: Record<string, number>; maxRows: number | null } {
+  const section = effectiveSections(page).find(
+    (candidate) => candidate.id === sectionId && candidate.kind === 'grid',
+  )
+  const cols = Object.fromEntries(
+    page.grid.breakpoints.map((breakpoint) => [
+      breakpoint.id,
+      section?.kind === 'grid' ? (section.cols[breakpoint.id] ?? breakpoint.cols) : breakpoint.cols,
+    ]),
+  )
+  const maxRows =
+    section?.kind === 'grid' ? (section.maxRows ?? page.grid.maxRows) : page.grid.maxRows
+  return { cols, maxRows }
 }

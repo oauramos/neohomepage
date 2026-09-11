@@ -10,15 +10,8 @@ const run = promisify(execFile)
 const CLI = resolve(import.meta.dirname, 'neo.ts')
 const created: string[] = []
 
-/**
- * These run the CLI in a real `node` child, not through vitest's transform.
- *
- * That distinction is the entire point. Node executes TypeScript in strip-only mode: it erases
- * types but does not GENERATE code, so parameter properties, enums and namespaces are unavailable.
- * Vitest transpiles and accepts all three, so a codebase can typecheck, pass every unit test, and
- * still fail instantly at `node src/server/main.ts`. That happened here. An eslint rule now bans
- * the constructs; this proves the binary actually starts.
- */
+// Runs the CLI in a real `node` child, not through vitest's transform: Node only strips types,
+// so enums, parameter properties and namespaces that vitest accepts would fail here.
 async function neo(args: string[], dataDir: string) {
   return run(process.execPath, [CLI, ...args], {
     env: { ...process.env, NEOHOMEPAGE_DATA_DIR: dataDir },

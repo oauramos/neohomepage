@@ -17,8 +17,7 @@ describe('templates', () => {
   })
 
   it('supports the composite form real services need', () => {
-    // Proxmox wants `PVEAPIToken=root@pam!neo=<token>`, which is why `header` takes a value
-    // template rather than being a bare secret slot.
+    // Proxmox's `PVEAPIToken=<user>=<token>` is why `header` takes a value template.
     expect(fillTemplate('PVEAPIToken={{config:user}}={{secret:token}}', context)).toBe(
       'PVEAPIToken=root@pam!neo=PVE-TOKEN',
     )

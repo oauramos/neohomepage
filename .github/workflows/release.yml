@@ -1,7 +1,6 @@
 name: Release
 
-# The image is built, smoke-tested and measured here, and nowhere else. A container that is only
-# ever built on a laptop is a container whose base image drifts silently between releases.
+# The container image is built, smoke-tested, measured and published here, and nowhere else.
 
 on:
   push:
@@ -17,8 +16,7 @@ permissions:
   contents: read
   packages: write
 
-# Never two releases at once: `imagetools create` is last-write-wins on a tag, so two tags pushed
-# together would race and `latest` would end up pointing at whichever finished second.
+# `imagetools create` is last-write-wins on a tag, so two releases at once would race for `latest`.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -26,14 +24,11 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
-  # Compressed. The plan's ceiling, and the number a person on a slow connection actually waits on.
   MAX_COMPRESSED_MB: 90
 
 jobs:
   smoke:
-    # Build for THIS runner's architecture only, and prove the thing runs before spending several
-    # minutes emulating another one. A multi-arch build that succeeds and produces an image that
-    # exits on boot is a slow way to learn nothing.
+    # Native-architecture build and boot check before the multi-arch build spends minutes on it.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -52,9 +47,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/data"
-          # Deliberately as the image ships it: no extra env, no writable root, no capabilities.
-          # Exactly as compose.yaml runs it, including the three capabilities the entrypoint
-          # needs to make a bind-mounted /data writable and then give up root.
+          # Same flags as compose.yaml; the entrypoint needs these three capabilities to chown a
+          # bind-mounted /data and then drop root.
           docker run -d --name neo \
             -p 7575:7575 \
             -v "${RUNNER_TEMP}/data:/data" \
@@ -76,30 +70,20 @@ jobs:
           curl -fsS http://127.0.0.1:7575/ | grep -q 'neo-root' || {
             echo "::error::the served page is not a board"; exit 1; }
 
-          # The whole backup story, checked on the real image: the data directory is seeded, and
-          # the two directories that must never be committed are already excluded.
           test -f "${RUNNER_TEMP}/data/.gitignore" || { echo "::error::no .gitignore was seeded"; exit 1; }
           grep -q 'secrets/' "${RUNNER_TEMP}/data/.gitignore" || { echo "::error::secrets/ is not ignored"; exit 1; }
           grep -q 'state/' "${RUNNER_TEMP}/data/.gitignore" || { echo "::error::state/ is not ignored"; exit 1; }
 
-          # The SERVER must be unprivileged, and it must be PID 1.
-          #
-          # Checked on the process, not with `docker exec id -u`: the entrypoint starts as root to
-          # fix the bind mount's ownership and then execs to uid 1000, so `docker exec` reports
-          # root and would pass this for entirely the wrong reason.
-          # BusyBox ps has no -p, so pick PID 1 out of the table rather than asking for it.
+          # Check PID 1's owner rather than `docker exec id -u`: the entrypoint starts as root and
+          # execs to uid 1000, so exec would report root. BusyBox ps has no -p.
           owner="$(docker exec neo sh -c "ps -o pid,user | awk '\$1==1{print \$2}'" | tr -d ' ')"
           test "$owner" = "node" || {
             echo "::error::the server runs as ${owner}, not the unprivileged user"; exit 1; }
 
-          # A bind mount whose host directory is owned by someone else is the first thing every
-          # new user hits, and it used to kill the container on boot.
           test -d "${RUNNER_TEMP}/data/config" || {
             echo "::error::the bind-mounted data directory was never written to"; exit 1; }
 
-          # Development dependencies must not be in a production image. This shipped TypeScript,
-          # Playwright and Prettier once, because `pnpm install --prod` over a full install prunes
-          # nothing.
+          # `pnpm install --prod` over a full install prunes nothing, so dev dependencies can leak in.
           packages="$(docker exec neo sh -c 'ls /app/node_modules/.pnpm | wc -l' | tr -d ' ')"
           echo "production packages: ${packages}"
           test "$packages" -lt 60 || {
@@ -108,7 +92,6 @@ jobs:
             exit 1
           }
 
-          # Health, as the image itself defines it.
           for i in $(seq 1 40); do
             status="$(docker inspect --format '{{.State.Health.Status}}' neo)"
             [ "$status" = "healthy" ] && break
@@ -120,11 +103,8 @@ jobs:
             sleep 2
           done
 
-          # SIGTERM, not SIGKILL: a container that ignores it gets killed mid-write.
-          #
-          # `docker stop` exits 0 either way, so timing it and printing the number asserts
-          # nothing — it passes just as happily on an image that ignored the signal for the whole
-          # 15-second grace period. Exit 137 is the tell: that is 128+9, the process was SIGKILLed.
+          # `docker stop` exits 0 even when the grace period expires; container exit code 137
+          # (128+SIGKILL) is what shows SIGTERM was ignored.
           start=$(date +%s)
           docker stop -t 15 neo >/dev/null
           elapsed=$(( $(date +%s) - start ))
@@ -150,15 +130,8 @@ jobs:
             exit 1
           fi
 
-  # One architecture per NATIVE runner, then a manifest list stitched from the digests.
-  #
-  # Emphatically not `--platform linux/amd64,linux/arm64` under QEMU on one runner, which is the
-  # obvious way to write this and does not work: pnpm 12 is a Rust binary on tokio, and tokio's
-  # I/O driver panics under qemu-user with `Bad file descriptor` before it installs anything. That
-  # was found by building this image on an arm64 laptop, where the amd64 leg failed exactly this
-  # way — in CI it would have been the arm64 leg, on the first tagged release.
-  #
-  # Native runners are also several times faster than emulation, so this costs nothing.
+  # One native runner per architecture, stitched into a manifest list. Not QEMU on one runner:
+  # pnpm is a tokio binary and tokio's I/O driver panics under qemu-user (`Bad file descriptor`).
   build:
     needs: smoke
     if: github.event_name == 'push' || inputs.push
@@ -193,11 +166,8 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          # By digest, with no TAG — but the exporter still needs to know which repository to
-          # push the blob to. `push-by-digest` without `name=` fails with "tag is needed when
-          # pushing to registry", on both legs, before a byte reaches the registry. The tags
-          # belong to the manifest list the next job assembles; tagging here would leave whichever
-          # architecture finished last holding `latest`.
+          # `push-by-digest` still needs `name=` or the exporter fails with "tag is needed when
+          # pushing to registry". Tags are applied to the manifest list in the publish job.
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
@@ -206,8 +176,7 @@ jobs:
 
       - name: Record the digest
         run: |
-          # Stripped in the shell, not in a GitHub expression — `${x#prefix}` is bash, and the
-          # expression language silently is not bash.
+          # `${x#prefix}` is bash; the GitHub expression language has no equivalent.
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
@@ -239,11 +208,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
-          # `latest=auto` is what actually applies `latest`, and it applies it only to a semver
-          # tag with no prerelease suffix — so `v0.2.0` becomes latest and `v0.2.0-rc.1` does not.
-          # The explicit `type=raw,value=latest,enable={{is_default_branch}}` that used to be here
-          # was dead code: on a tag push `is_default_branch` is false, so the rule never fired and
-          # `latest` was being applied by a default nobody had written down.
+          # `latest=auto` applies `latest` only to a semver tag with no prerelease suffix:
+          # `v0.2.0` yes, `v0.2.0-rc.1` no.
           flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
@@ -254,18 +220,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Two digests, one per matrix leg. Anything else means a leg failed silently or an
-          # artifact went missing, and assembling a one-architecture list under `latest` would
-          # publish it to every compose.yaml in the wild.
+          # One digest per matrix leg; a missing one would publish a single-architecture `latest`.
           count="$(ls -1 | wc -l | tr -d ' ')"
           test "$count" -eq 2 || { echo "::error::expected 2 digests, found ${count}"; exit 1; }
 
           tags="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
           test -n "$tags" || { echo "::error::the metadata action produced no tags"; exit 1; }
 
-          # Assemble under a throwaway tag first and inspect THAT. The release tags are applied
-          # only once both platforms are confirmed present — otherwise the check runs after
-          # `latest` is already live and pulled, and turning the job red afterwards fixes nothing.
+          # Assemble under a throwaway tag and verify both platforms before the release tags go live.
           probe="${REGISTRY}/${IMAGE}:verify-${GITHUB_RUN_ID}"
           docker buildx imagetools create -t "$probe" \
             $(printf "${REGISTRY}/${IMAGE}@sha256:%s " *)
@@ -282,9 +244,8 @@ jobs:
       - name: A stranger can pull it
         run: |
           set -euo pipefail
-          # A package first published by GITHUB_TOKEN is created PRIVATE even on a public
-          # repository, so the release goes green while every `docker compose up -d` in the
-          # documentation gets `denied`. Logging out and pulling is the only way to find out.
+          # A package first published by GITHUB_TOKEN is private even on a public repository;
+          # only an anonymous pull catches it.
           version="$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
           docker logout ghcr.io
           docker pull "$version" || {

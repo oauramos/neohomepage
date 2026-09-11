@@ -12,20 +12,9 @@ import {
 } from './format.ts'
 
 /**
- * The interpreter.
- *
- * Two properties are load-bearing and every operator below preserves them:
- *
- *  TOTAL — no data shape produces an exception. A missing path, a string where a number was
- *  expected, a division by zero: all yield null. This is what makes "one broken widget degrades to
- *  a stale badge" true rather than aspirational, because a manifest cannot take the page down.
- *
- *  TERMINATING — no recursion, no user functions, no loops over anything but a finite array that
- *  has already been truncated. Static analysis rejects a too-complex tree at install time; the
- *  fuel budget here is the backstop for a tree that is cheap to describe and expensive to run.
- *
- * Limit violations do throw, deliberately, and only `runProjection` catches them — an exhausted
- * budget is a manifest bug worth surfacing, not a null to be silently rendered.
+ * Projection interpreter. Every operator is total (bad data yields null, never a throw) and
+ * terminating (no recursion or user functions; arrays are truncated and a fuel budget backstops
+ * the tree). Only limit violations throw, and only `runProjection` catches them.
  */
 
 export type EvalLimits = {
@@ -136,8 +125,8 @@ function compareValues(cmp: Comparison, left: Json, right: Json): boolean {
         JSON.stringify(left) === JSON.stringify(right))
     return cmp === 'eq' ? equal : !equal
   }
-  // Ordering only means something for two numbers or two strings. Anything else is false rather
-  // than JavaScript's surprising coercions ([] < 1, null >= 0, and so on).
+  // Ordering is defined only for two numbers or two strings; anything else is false rather than
+  // JavaScript's coercions ([] < 1, null >= 0).
   if (typeof left === 'number' && typeof right === 'number') {
     return cmp === 'lt'
       ? left < right
@@ -164,13 +153,7 @@ function sortKeyValue(item: Json, key: SortKey): Json {
   return key.path === '$' ? item : walkPath(item, key.path.split('.'))
 }
 
-/**
- * Coerce a sort key to something orderable, or null when it cannot be ordered under this type.
- *
- * Collapsing "absent" and "unparseable" into one null is what keeps the direction flip honest: a
- * row with `airDate: "soon"` under a date sort is exactly as unknown as a row with no airDate, and
- * both must sink in ascending *and* descending order.
- */
+/** Absent and unparseable keys both become null so they sink in both sort directions. */
 function coerceSortKey(value: Json, type: NonNullable<SortKey['type']>): number | string | null {
   if (value === null || value === undefined) return null
   if (type === 'numeric') return toNumber(value)
@@ -183,10 +166,8 @@ function coerceSortKey(value: Json, type: NonNullable<SortKey['type']>): number 
 }
 
 /**
- * Final ordering for one key, direction already applied.
- *
- * The caller must NOT flip the result: unorderable values sort last in BOTH directions. Flipping
- * the whole comparator would float every incomplete row to the top of a descending sort.
+ * Direction is applied here; callers must not flip the result, or unorderable values would float
+ * to the top of a descending sort.
  */
 function compareSorted(a: Json, b: Json, key: SortKey): number {
   const type = key.type ?? 'string'
@@ -211,7 +192,7 @@ function evaluate(node: Node, scope: Scope, machine: Machine): Json {
 
   switch (node.op) {
     case 'get':
-      return node.path === '$' ? ((scope.get('$') as Json) ?? null) : resolvePath(scope, node.path)
+      return resolvePath(scope, node.path)
 
     case 'const':
       return node.value as Json
@@ -270,7 +251,7 @@ function evaluate(node: Node, scope: Scope, machine: Machine): Json {
       const out: Json[] = []
       for (const child of node.of) {
         const value = evaluate(child, scope, machine)
-        if (isJsonArray(value)) out.push(...value)
+        if (isJsonArray(value)) out.push(...asArray(machine, value))
         else if (value !== null) out.push(value)
         if (out.length > machine.limits.maxArray) return out.slice(0, machine.limits.maxArray)
       }
@@ -280,8 +261,7 @@ function evaluate(node: Node, scope: Scope, machine: Machine): Json {
     case 'lookup': {
       const left = asArray(machine, evaluate(node.over, scope, machine))
       const right = asArray(machine, evaluate(node.in, scope, machine))
-      // Hash join rather than a nested scan: sonarr joins a queue against a series list, and the
-      // quadratic version is what makes a 500-episode library melt a Pi.
+      // Hash join; a nested scan is quadratic over a large library.
       const index = new Map<string, Json>()
       for (const row of right) {
         const key = JSON.stringify(walkPath(row, node.onRight.split('.')) ?? null)
@@ -400,8 +380,8 @@ function evaluate(node: Node, scope: Scope, machine: Machine): Json {
     case 'targetUrl': {
       const suffix = evaluate(node.path, scope, machine)
       if (typeof suffix !== 'string' || machine.ctx.targetBaseUrl === undefined) return null
-      // The manifest names a path, never a host. The base comes from the target the user bound,
-      // so a catalog entry cannot point a deep link at somewhere else.
+      // The manifest supplies only a path; the host comes from the bound target so a catalog
+      // entry cannot deep-link elsewhere.
       const base = machine.ctx.targetBaseUrl.replace(/\/+$/, '')
       const path = suffix.startsWith('/') ? suffix : `/${suffix}`
       if (path.includes('..') || path.includes('//')) return null
@@ -459,8 +439,8 @@ export function runProjection(node: Node, ctx: EvalContext): ProjectionResult {
     return { ok: true, value }
   } catch (error) {
     if (error instanceof ProjectionLimitError) return { ok: false, reason: error.message }
-    // An unexpected throw is a bug in the interpreter, not in the data. Surface it as a failed
-    // projection so one widget degrades instead of the whole page, but keep the message.
+    // An unexpected throw is an interpreter bug; report it as a failed projection so only this
+    // widget degrades.
     return {
       ok: false,
       reason: `projection failed: ${error instanceof Error ? error.message : String(error)}`,

@@ -54,7 +54,7 @@ function tree(overrides: Partial<ConfigTree> = {}): ConfigTree {
 const widget = (id: string, extra: Record<string, unknown> = {}) =>
   widgetSchema.parse({ id, page: 'home', type: 'sonarr-queue', ...extra })
 
-/** The first grid section of the first page — where every pre-sections config puts its widgets. */
+/** First grid section of the first page. */
 const mainGrid = (r: ReturnType<typeof resolve>) => {
   const section = r.pages[0]?.sections.find((candidate) => candidate.kind === 'grid')
   if (section === undefined || section.kind !== 'grid') throw new Error('no grid section')
@@ -84,8 +84,7 @@ describe('purity', () => {
     const t = tree({ widgets: new Map([['w1', widget('w1')]]), layouts })
     const before = JSON.stringify([...t.layouts])
     resolve({ tree: t, catalog: CATALOG, generatedAt: NOW })
-    // correctBounds mutates its argument; without cloneLayout this assertion fails and the next
-    // save would persist machine-derived geometry into a git-tracked file.
+    // correctBounds mutates its argument; cloneLayout keeps derived geometry out of the saved file.
     expect(JSON.stringify([...t.layouts])).toBe(before)
   })
 
@@ -132,7 +131,6 @@ describe('precedence layers', () => {
   })
 
   it('lets a local override relocate a target without touching the shared config', () => {
-    // The laptop-versus-NAS case: the same repository, a different address for the same service.
     const target = targetSchema.parse({
       id: 'tSonarr',
       label: 'Sonarr',
@@ -247,8 +245,7 @@ describe('layout derivation', () => {
   })
 
   it('never produces a zero-width item, however narrow the target', () => {
-    // A 1-column tier scaling a 1-of-12 widget rounds to 0 without the clamp, and RGL then
-    // silently creates a 1x1 nobody asked for.
+    // Scaling a 1-of-12 widget to one column rounds w to 0 without the clamp.
     const derived = deriveLayout([{ i: 'a', x: 11, y: 0, w: 1, h: 2 }], 12, 1)
     expect(derived[0]?.w).toBe(1)
     expect(derived[0]?.x).toBe(0)
@@ -376,7 +373,6 @@ describe('sections', () => {
     expect(bottom?.kind === 'grid' && bottom.widgetIds).toEqual(['w2'])
     expect(top?.kind === 'grid' && top.layouts.lg?.map((i) => i.i)).toEqual(['w1'])
     expect(bottom?.kind === 'grid' && bottom.layouts.lg?.map((i) => i.i)).toEqual(['w2'])
-    // The narrower section derives its other tiers from ITS column count, not the page's.
     expect(
       bottom?.kind === 'grid' && bottom.grid.breakpoints.find((b) => b.id === 'lg')?.cols,
     ).toBe(6)
@@ -423,7 +419,7 @@ describe('sections', () => {
       'https://login.tailscale.com/admin/',
       'http://10.0.0.5:81/',
     ])
-    // Dense: every breakpoint gets a column count, the unspecified ones from the grid's width.
+    // Unspecified breakpoints get a column count derived from the grid's width.
     expect(section.columns).toEqual({ sm: 1, md: 2, lg: 3 })
   })
 

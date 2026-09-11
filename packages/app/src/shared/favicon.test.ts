@@ -18,8 +18,7 @@ describe('the tab icon', () => {
   })
 
   it('matches the copy in the dev and fallback shell', () => {
-    // index.html cannot import a module, so the value is written twice. This is what stops the
-    // two from drifting into a page whose icon changes depending on which path served it.
+    // index.html cannot import a module, so the value is duplicated there.
     const html = readFileSync(join(import.meta.dirname, '../../index.html'), 'utf8')
     expect(html).toContain(FAVICON_HREF)
   })

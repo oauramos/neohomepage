@@ -1,12 +1,6 @@
 /**
- * The tab icon, inline.
- *
- * A data URI rather than a file, because every page load was fetching `/favicon.ico` and getting
- * a 404 — a wasted request and a console error on a page whose whole point is being opened fifty
- * times a day. Inline also means the icon survives the fallback path, where no static assets are
- * being served at all.
- *
- * Four tiles on a dark ground: the board, at 16 pixels.
+ * Tab icon as an inline data URI: avoids the 404 on `/favicon.ico` and survives the fallback
+ * path, which serves no static assets.
  */
 export const FAVICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +

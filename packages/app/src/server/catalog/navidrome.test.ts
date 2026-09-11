@@ -3,11 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { manifestSchema, runProjection } from '@neohomepage/catalog-schema'
 
-/**
- * The one Navidrome shape the recorded fixture cannot hold: nothing playing. Subsonic answers
- * `"nowPlaying": {}` — an object where a list is expected — and the projection must read that as
- * an empty list rather than fail, because "nobody is listening" is the tile's usual state.
- */
+// The idle fixture holds Subsonic's `"nowPlaying": {}`: an object where a list is expected.
 const dir = join(import.meta.dirname, '../../../../../catalog/navidrome-playing')
 
 describe('navidrome-playing', () => {

@@ -246,6 +246,31 @@
 - axe now scans all seven presets in both schemes on a board with a bookmark tile, which is what
   caught the two presets whose solid accent fill was painting its label in the fill colour.
 
+### Cleanup
+
+- **A pass over the whole codebase.** Dead exports, parameters and CSS rules removed; duplicated
+  helpers folded into one (`removeFromLayouts`, `isLoopbackHost`, `readSecretsFile`, `exists`,
+  `useFocusTrap`, the e2e fixtures, the test HTTP stubs); comments cut to what the code cannot
+  say for itself. Behaviour is unchanged except where the pass found a bug:
+  - `requestPublish` lost the first caller's promise when a second edit landed inside the debounce
+    window; the window now shares one promise and publishes once.
+  - The DSL `concat` copied every child before truncating, so a large upstream array could throw
+    on spread; each child is capped first. `sort` coerces each key once instead of on every
+    comparison.
+  - A composite manifest smuggling a secret was reported at a doubled path.
+  - Saving a layout for an unknown breakpoint returned 500; it is a 422 with the reason.
+  - The poll scheduler ran the queue in batches of `concurrency` and waited for the slowest
+    fetch in each batch before starting the next; workers now pull from the queue until it is
+    empty.
+  - Backing out of the add-widget form kept a stale "could not connect" error above the catalog.
+  - Booting without baked state and with the first `/api/state` failing left a blank container
+    around a still-mounted React tree; the app now stays up with the placeholder state.
+- **Typechecking covers everything.** `packages/catalog-schema` tests, the e2e specs and the
+  Vite, Vitest and Playwright configs were outside every `tsconfig`; they are in now, and the
+  catalog-schema build has its own `tsconfig.build.json`.
+- `pnpm catalog:docs` formats its output through Prettier, so the stale-docs check in CI compares
+  like with like.
+
 ## 0.1.0 — first release
 
 The first tagged release. Beta: everything below works and has a check that proves it, but this

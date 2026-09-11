@@ -4,14 +4,9 @@ import process from 'node:process'
 import v8 from 'node:v8'
 
 /**
- * What the runtime believes about the memory it is allowed to use.
- *
- * This exists because of one specific failure mode on the primary deployment target: inside an
- * unprivileged LXC or a memory-limited container, V8 may size its default heap from the HOST's
- * RAM rather than the cgroup limit. When that happens the process happily grows past the limit
- * and the kernel OOM-kills it instead of V8 running a GC — and on a Proxmox node that can take
- * neighbouring services down with it. If `heapLimitExceedsMemoryLimit` is true,
- * --max-old-space-size is mandatory rather than advisory.
+ * Inside an unprivileged LXC or memory-limited container V8 may size its heap from the host's
+ * RAM rather than the cgroup limit, so the kernel OOM-kills the process before V8 runs a GC.
+ * When `heapLimitExceedsMemoryLimit` is true, --max-old-space-size is mandatory.
  */
 export type MemoryEnvironment = {
   readonly platform: NodeJS.Platform
@@ -20,13 +15,10 @@ export type MemoryEnvironment = {
   /** Physical memory the OS reports. Inside a container this is usually the HOST's. */
   readonly osTotalBytes: number
   readonly cgroup: CgroupLimit
-  /** The ceiling V8 will let the old space reach before it gives up. */
   readonly v8HeapLimitBytes: number
-  /** --max-old-space-size, if it was passed. */
   readonly maxOldSpaceMb: number | null
-  /** The tightest real limit we can see: the cgroup limit if there is one, else physical memory. */
+  /** The cgroup limit if set, else physical memory. */
   readonly effectiveLimitBytes: number
-  /** True when V8 would let the heap alone outgrow the memory we are actually allowed. */
   readonly heapLimitExceedsMemoryLimit: boolean
 }
 
@@ -50,7 +42,6 @@ export function parseCgroupV2Max(raw: string): number | null {
 export function parseCgroupV1Limit(raw: string): number | null {
   const parsed = Number(raw.trim())
   if (!Number.isFinite(parsed) || parsed <= 0) return null
-  // v1 encodes "unlimited" as an enormous number rather than a keyword.
   return parsed >= V1_UNLIMITED_THRESHOLD ? null : parsed
 }
 

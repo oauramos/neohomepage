@@ -1,17 +1,8 @@
 import { useEffect, useState } from 'react'
 
 /**
- * Fade the floating controls when nothing is happening, and bring them back near their corner.
- *
- * A dashboard is often left open on a wall, where two buttons are the only chrome and the only
- * thing that dates the picture. Hiding them is therefore a real want — but hiding a control is one
- * keystroke away from removing it, so this only ever changes OPACITY, and three things override it:
- * the pointer entering either bottom corner, any keyboard interaction, and focus landing inside a
- * control. That last one is what keeps the page tabbable: a button you cannot see but can still
- * focus reappears the moment you reach it.
- *
- * `prefers-reduced-motion` is respected by the CSS transition rather than here — the state machine
- * is the same either way, only the fade is not.
+ * Fades the floating controls when idle. Only opacity changes, and focus landing inside a control
+ * wakes them, so the page stays tabbable. `prefers-reduced-motion` is handled by the CSS transition.
  */
 export function useAutoHide(enabled: boolean, delayMs: number): boolean {
   const [hidden, setHidden] = useState(false)
@@ -45,7 +36,8 @@ export function useAutoHide(enabled: boolean, delayMs: number): boolean {
     }
     const onKey = () => wake()
     const onFocus = (event: FocusEvent) => {
-      if ((event.target as HTMLElement | null)?.closest('.nh-fab, .nh-modal') !== null) wake()
+      if (event.target instanceof Element && event.target.closest('.nh-fab, .nh-modal') !== null)
+        wake()
     }
 
     window.addEventListener('pointermove', onPointerMove, { passive: true })

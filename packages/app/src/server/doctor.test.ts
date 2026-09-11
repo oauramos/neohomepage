@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { manifestSchema, type Manifest } from '@neohomepage/catalog-schema'
 import { runDoctor, type DoctorInput, type Finding } from './doctor.ts'
-import { dashboardSchema, targetSchema, widgetSchema } from './config/schema.ts'
+import {
+  dashboardSchema,
+  networkSchema,
+  targetSchema,
+  themeSchema,
+  widgetSchema,
+} from './config/schema.ts'
 import type { ConfigTree } from './store/tree.ts'
 import type { Env } from './env.ts'
 
@@ -25,9 +31,10 @@ beforeEach(async () => {
     assetsDir: join(dataDir, 'assets'),
     secretsDir: join(dataDir, 'secrets'),
     stateDir: join(dataDir, 'state'),
+    catalogDir: join(dataDir, 'catalog'),
     host: '127.0.0.1',
     port: 7575,
-  } as Env
+  }
   for (const dir of [env.configDir, env.assetsDir, env.secretsDir, env.stateDir]) {
     await mkdir(dir, { recursive: true })
   }
@@ -63,10 +70,10 @@ function tree(overrides: Partial<ConfigTree> = {}): ConfigTree {
     layouts: new Map(),
     targets: new Map(),
     widgets: new Map(),
-    theme: {},
-    network: {},
+    theme: themeSchema.parse({}),
+    network: networkSchema.parse({}),
     ...overrides,
-  } as unknown as ConfigTree
+  }
 }
 
 const target = (overrides: Record<string, unknown> = {}) =>
@@ -98,8 +105,6 @@ const codes = (findings: readonly Finding[]) => findings.map((one) => one.code)
 
 describe('credentials', () => {
   it('names a missing credential AND the target that wants it', async () => {
-    // The most common support question, and the one a restored backup always produces. "Which of
-    // my four API keys is the blank widget waiting for" is the whole value of this line.
     const findings = await check({
       tree: tree({ targets: new Map([['t1', target()]]), widgets: new Map([['w1', widget()]]) }),
       hasSecret: () => false,
@@ -112,8 +117,6 @@ describe('credentials', () => {
   })
 
   it('is satisfied by a credential that only exists in the environment', async () => {
-    // The recommended arrangement. A check that enumerated a list instead of asking by name would
-    // report every one of these missing, which is exactly the bug that produced this test.
     const findings = await check({
       tree: tree({ targets: new Map([['t1', target()]]), widgets: new Map([['w1', widget()]]) }),
       hasSecret: (name) => name === 't1.apiKey',
@@ -146,8 +149,6 @@ describe('widgets and targets', () => {
   })
 
   it('reports a credential sitting in config as a plain field, and says to rotate it', async () => {
-    // Only reachable from an older release or a hand-edited file now that the write path routes
-    // by manifest — but if it IS there, the value is in git history and rotating is the only fix.
     const findings = await check({
       tree: tree({
         targets: new Map([['t1', target({ fields: { apiKey: 'leaked' } })]]),
@@ -181,7 +182,6 @@ describe('git hygiene', () => {
   })
 
   it('catches secrets/ and state/ being tracked, and says to rotate', async () => {
-    // Committing secrets/ is irreversible: git does not forget, so "remove it" is not the fix.
     await exec('git', ['init', '-q'], { cwd: dataDir })
     await exec('git', ['config', 'user.email', 'test@example.invalid'], { cwd: dataDir })
     await exec('git', ['config', 'user.name', 'Test'], { cwd: dataDir })

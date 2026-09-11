@@ -1,16 +1,18 @@
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { setTimeout as setNodeTimeout, clearTimeout as clearNodeTimeout } from 'node:timers'
 import type { Manifest, SingleManifest, SourceKind } from '@neohomepage/catalog-schema'
 import { isComposite } from '@neohomepage/catalog-schema'
 import { IconStore, type IconFetch } from './assets/icons.ts'
 import { loadCatalogDirectory } from './catalog/load.ts'
+import type { Target } from './config/schema.ts'
 import { effectiveSections } from './config/sections.ts'
 import { fetchUpstream } from './fetcher/client.ts'
 import { overridesSchema, EMPTY_OVERRIDES, type Overrides } from './config/overrides.ts'
 import { env } from './env.ts'
 import { executeOperation, executeSource } from './fetcher/execute.ts'
+import { isLoopbackHost } from './fetcher/policy.ts'
 import { composeSources, type SourcePart } from '../shared/compose.ts'
+import type { ResolvedWidget } from '../shared/resolved.ts'
 import { EventHub } from './http/events.ts'
 import {
   assetsFingerprint,
@@ -21,18 +23,16 @@ import {
 import { resolve as resolveTree, type Resolved } from './resolve/resolve.ts'
 import { PollScheduler } from './scheduler/scheduler.ts'
 import { fetchKey } from './scheduler/key.ts'
-import { loadSecrets } from './secrets/vault.ts'
+import { loadSecrets, readSecretsFile, secretsFile } from './secrets/vault.ts'
+import { writeFileDurable } from './store/atomic.ts'
 import { ConfigStore } from './store/configstore.ts'
 import { ConfigWatcher } from './store/watcher.ts'
 import { Generations } from './store/generations.ts'
 import type { ConfigTree } from './store/tree.ts'
 
 /**
- * Everything long-lived, wired together.
- *
- * One process holds one store, one scheduler, one event hub and one publish mutex. The mutex
- * matters: an agent making twelve edits must produce one render, not twelve concurrent ones on a
- * box with two cores.
+ * Everything long-lived wired together: one store, one scheduler, one event hub and one publish
+ * mutex per process.
  */
 
 export type PublishMode = 'auto' | 'manual'
@@ -53,7 +53,6 @@ export type AppContext = {
   catalog(): ReadonlyMap<string, Manifest>
   requestPublish(actor: string, mode?: PublishMode): Promise<PublishResult | null>
   publishNow(actor: string, label?: string): Promise<PublishResult>
-  /** The icon cache: what is on disk, and where a cached slug is served from. */
   icons(): IconStore
   shutdown(): Promise<void>
 }
@@ -61,18 +60,16 @@ export type AppContext = {
 export type ContextOptions = {
   readonly catalogDir?: string
   readonly webDistDir?: string
-  /** Auto-publish debounce. Twelve rapid edits become one render. */
   readonly publishDebounceMs?: number
   readonly publishMode?: PublishMode
   /**
-   * How an icon slug becomes bytes. Defaults to the real CDN fetch — except under vitest, where
-   * a test that adds a Sonarr widget must not reach the internet for Sonarr's logo. `null`
-   * disables fetching outright; cached icons are still served.
+   * Defaults to the CDN fetch, or null under vitest; null disables fetching but cached icons are
+   * still served.
    */
   readonly iconFetch?: IconFetch | null
 }
 
-/** One icon over the same client every widget uses, so the egress policy is the same policy. */
+/** Goes through fetchUpstream so icons follow the same egress policy as widgets. */
 const fetchIconFromCdn: IconFetch = async (url, maxBytes) => {
   try {
     const response = await fetchUpstream({
@@ -87,11 +84,9 @@ const fetchIconFromCdn: IconFetch = async (url, maxBytes) => {
   }
 }
 
-/** Every icon slug the config names: each widget's manifest, each bookmark, each navbar link. */
 function iconSlugs(tree: ConfigTree, catalog: ReadonlyMap<string, Manifest>): Set<string> {
   const slugs = new Set<string>()
-  // The whole catalog, not only the placed types: the picker shows an icon per type, and
-  // sixteen small files once is cheaper than a picker of initials.
+  // Whole catalog, not only placed types: the picker shows an icon per type.
   for (const manifest of catalog.values()) slugs.add(manifest.icon)
   for (const page of tree.pages.values()) {
     for (const section of effectiveSections(page)) {
@@ -113,8 +108,13 @@ function iconSlugs(tree: ConfigTree, catalog: ReadonlyMap<string, Manifest>): Se
 async function readOverrides(path: string): Promise<Overrides> {
   try {
     return overridesSchema.parse(JSON.parse(await readFile(path, 'utf8')))
-  } catch {
-    // Absent or unreadable is the normal case: this file is per-machine and optional.
+  } catch (error) {
+    // The file is optional; one that exists but does not parse is a hand edit gone wrong, so warn.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(
+        `overrides: ignoring ${path} — ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
     return EMPTY_OVERRIDES
   }
 }
@@ -125,6 +125,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
   const hub = new EventHub()
   const debounceMs = options.publishDebounceMs ?? 800
   const mode: PublishMode = options.publishMode ?? 'auto'
+  const secretsPath = secretsFile(env.secretsDir)
 
   const scheduler = new PollScheduler({
     now: () => Date.now(),
@@ -149,12 +150,15 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
   let releases: (() => void)[] = []
 
   let publishing: Promise<PublishResult> | null = null
-  let debounce: ReturnType<typeof setNodeTimeout> | null = null
+  let debounce: {
+    timer: ReturnType<typeof setNodeTimeout>
+    fire: () => void
+    actor: string
+    result: Promise<PublishResult>
+  } | null = null
 
-  /**
-   * A hand edit, or a `git pull`, must show up without a restart — and must not be mistaken for
-   * the app's own write. The guard is the revision we just produced, not a time window.
-   */
+  // The app's own writes are recognised by the revision they produced (watcher.expect), not by
+  // a time window.
   const watcher = new ConfigWatcher({
     directory: env.configDir,
     onChange: async () => {
@@ -168,31 +172,34 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     },
   })
 
-  async function rebuild(): Promise<void> {
+  async function rebuild(): Promise<{ tree: ConfigTree; resolved: Resolved; revision: string }> {
     const loaded = await store.load()
     tree = loaded.tree
     revision = loaded.revision
 
     const overrides = await readOverrides(store.paths.overrides)
-    resolved = resolveTree({
+    const next = resolveTree({
       tree: loaded.tree,
       catalog,
       overrides,
       icons: icons.available(),
-      // Stamped once per resolve so two runs over identical inputs differ only here, which keeps
-      // the publish step's no-op detection meaningful.
+      // The only field that differs between resolves of identical inputs; publish's no-op
+      // detection relies on that.
       generatedAt: new Date().toISOString(),
     })
+    resolved = next
 
-    await resubscribe(loaded.tree, resolved as Resolved)
+    await resubscribe(loaded.tree, next)
     void fetchMissingIcons(loaded.tree)
+    return { tree: loaded.tree, resolved: next, revision: loaded.revision }
   }
 
-  /**
-   * Icons arrive after the fact: the page renders with an initial where an icon is not cached
-   * yet, the fetch runs behind the render, and a rebuild (plus a publish) follows once something
-   * has landed. One pass at a time — a burst of edits must not start a burst of fetches.
-   */
+  async function current(): Promise<{ tree: ConfigTree; resolved: Resolved; revision: string }> {
+    return tree !== null && resolved !== null ? { tree, resolved, revision } : rebuild()
+  }
+
+  // Runs behind the render: the page shows initials until icons land, then a rebuild and publish
+  // follow. One pass at a time so a burst of edits does not start a burst of fetches.
   async function fetchMissingIcons(current: ConfigTree): Promise<void> {
     if (iconFetch === null || fetchingIcons) return
     fetchingIcons = true
@@ -211,21 +218,16 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     }
   }
 
-  /**
-   * Point the scheduler at exactly the fetches the current config needs.
-   *
-   * Releasing every previous subscription before taking new ones means a widget that was deleted
-   * stops being polled, and one that survived keeps its cached projection because the key is the
-   * same.
-   */
-  async function resubscribe(current: ConfigTree, current_resolved: Resolved): Promise<void> {
+  // Re-registers every fetch the config needs; a surviving widget keeps its cached projection
+  // because its key is unchanged.
+  async function resubscribe(current: ConfigTree, built: Resolved): Promise<void> {
     for (const release of releases) release()
     releases = []
 
     const vault = await loadSecrets(env.secretsDir)
     const live = new Set<string>()
 
-    for (const widget of current_resolved.widgets) {
+    for (const widget of built.widgets) {
       if (widget.unsupported) continue
       const manifest = catalog.get(widget.type)
       if (manifest === undefined) continue
@@ -246,9 +248,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
                 const binding = {
                   origin: source.origin,
                   basePath: source.target.base.basePath,
-                  allowLoopback:
-                    source.target.base.host === '127.0.0.1' ||
-                    source.target.base.host === 'localhost',
+                  allowLoopback: isLoopbackHost(source.target.base.host),
                   insecureSkipVerify: source.target.tls.insecureSkipVerify,
                 }
                 const auth = { secrets, config: source.target.fields }
@@ -290,18 +290,12 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
   }
 
   /**
-   * Every upstream fetch one widget needs, with the target and code path for each.
-   *
-   * Single-source widgets produce one entry per declared operation; a composite produces one per
-   * bound target per role. Both go through the same registration below, which is what keeps the
-   * "two widgets on the same Sonarr share one fetch" property true for composites too: the key is
-   * derived from what is requested, never from who asked.
+   * One upstream fetch a widget needs. The key derives from what is requested, not from the
+   * widget, so two widgets on the same target share one fetch.
    */
-  type BoundTarget = NonNullable<ReturnType<ConfigTree['targets']['get']>>
-
   type WidgetSource = {
     readonly key: string
-    readonly target: BoundTarget
+    readonly target: Target
     readonly origin: string
   } & (
     | { readonly kind: SourceKind }
@@ -309,13 +303,13 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
   )
 
   function widgetSources(
-    widget: Resolved['widgets'][number],
+    widget: ResolvedWidget,
     manifest: Manifest,
     current: ConfigTree,
   ): WidgetSource[] {
     const sources: WidgetSource[] = []
 
-    const bind = (target: BoundTarget) => {
+    const bind = (target: Target) => {
       const origin = `${target.base.scheme}://${target.base.host}:${target.base.port}`
       return { origin, revision: `${origin}${target.base.basePath}` }
     }
@@ -325,9 +319,8 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
         for (const targetId of widget.bindings[roleName] ?? []) {
           const target = current.targets.get(targetId)
           if (target === undefined) continue
-          // The target's own shape decides which source kind applies. A Sonarr bound into a
-          // calendar role is fetched as a Sonarr; there is no place for the user to get this
-          // wrong, and no place for a manifest to name a path for a service it was not given.
+          // The target's type decides the source kind, so a manifest cannot name a path for a
+          // service it was not given.
           const kind = role.kinds[target.widgetType]
           if (kind === undefined) continue
           const { origin, revision } = bind(target)
@@ -335,8 +328,8 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
             key: fetchKey({
               targetId: target.id,
               targetRevision: revision,
-              // The manifest id is part of the operation identity because two composites over the
-              // same upstream project different items from it, so their cached values differ.
+              // Includes the manifest id: two composites over the same upstream project
+              // different items from it.
               operation: `${manifest.id}:${roleName}:${target.widgetType}`,
               params: widget.config,
             }),
@@ -372,7 +365,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
   }
 
   /** The cache keys a widget reads, in binding order. Empty when it is not fetchable yet. */
-  function widgetKeys(widget: Resolved['widgets'][number]): string[] {
+  function widgetKeys(widget: ResolvedWidget): string[] {
     if (tree === null) return []
     const manifest = catalog.get(widget.type)
     if (manifest === undefined) return []
@@ -386,9 +379,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     hub,
 
     async reload() {
-      const loadedCatalog = await loadCatalogDirectory(
-        options.catalogDir ?? join(process.cwd(), 'catalog'),
-      )
+      const loadedCatalog = await loadCatalogDirectory(options.catalogDir ?? env.catalogDir)
       catalog = loadedCatalog.manifests
       for (const rejected of loadedCatalog.rejected) {
         console.warn(`catalog: skipped ${rejected.slug} — ${rejected.reason}`)
@@ -396,25 +387,18 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       await rebuild()
     },
 
-    async state() {
-      if (resolved === null) await rebuild()
-      return { resolved: resolved as Resolved, revision, tree: tree as ConfigTree }
+    state() {
+      return current()
     },
 
-    /**
-     * Refresh one widget now.
-     *
-     * The caller names a WIDGET, never a URL. The server resolves it to a fetch key and the key to
-     * a request — which is the whole invariant, stated as an endpoint.
-     */
+    /** Callers name a widget, never a URL; the server resolves it to fetch keys. */
     async refreshWidget(widgetId: string) {
-      if (resolved === null) await rebuild()
-      const widget = (resolved as Resolved).widgets.find((candidate) => candidate.id === widgetId)
+      const widget = (await current()).resolved.widgets.find(
+        (candidate) => candidate.id === widgetId,
+      )
       if (widget === undefined) return false
       const keys = widgetKeys(widget)
       if (keys.length === 0) return false
-      // A composite refreshes all of its bindings, in parallel: asking for "the calendar" and
-      // getting only the first of five calendars refreshed would be a puzzling button.
       await Promise.all(keys.map((key) => scheduler.refreshNow(key)))
       return true
     },
@@ -424,50 +408,26 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     },
 
     /**
-     * Store secret values.
-     *
-     * The only writer of the secrets directory, and the reason config can never contain a
-     * credential: the write API hands values here and puts a `$secret` reference in the tree.
-     * Mode 0600, in a directory the seeder already excluded from git.
+     * The only writer of the secrets directory; the write API stores values here and puts a
+     * `$secret` reference in the tree.
      */
     async writeSecrets(values) {
-      const { readFile } = await import('node:fs/promises')
-      const { join } = await import('node:path')
-      const { writeFileDurable } = await import('./store/atomic.ts')
-      const path = join(env.secretsDir, 'secrets.json')
-
-      let existing: Record<string, unknown> = {}
-      try {
-        const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          existing = parsed as Record<string, unknown>
-        }
-      } catch {
-        // First secret on a fresh install.
-      }
-      await writeFileDurable(path, `${JSON.stringify({ ...existing, ...values }, null, 2)}\n`, {
-        mode: 0o600,
-      })
+      // Unreadable on a fresh install.
+      const existing = (await readSecretsFile(env.secretsDir)) ?? {}
+      await writeFileDurable(
+        secretsPath,
+        `${JSON.stringify({ ...existing, ...values }, null, 2)}\n`,
+        { mode: 0o600 },
+      )
     },
 
-    /** Remove secrets whose owning target is gone. */
     async deleteSecrets(names) {
-      const { readFile } = await import('node:fs/promises')
-      const { join } = await import('node:path')
-      const { writeFileDurable } = await import('./store/atomic.ts')
-      const path = join(env.secretsDir, 'secrets.json')
-
-      let existing: Record<string, unknown> = {}
-      try {
-        const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          existing = parsed as Record<string, unknown>
-        }
-      } catch {
-        return
-      }
+      const existing = await readSecretsFile(env.secretsDir)
+      if (existing === null) return
       for (const name of names) delete existing[name]
-      await writeFileDurable(path, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 })
+      await writeFileDurable(secretsPath, `${JSON.stringify(existing, null, 2)}\n`, {
+        mode: 0o600,
+      })
     },
 
     widgetData() {
@@ -495,8 +455,8 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
         }
 
         const parts = keys.map((key) => partFor(key))
-        // Nothing has answered yet on any binding: leave the widget out entirely so the client
-        // shows its loading state, exactly as a single-source widget does before its first fetch.
+        // Omitted until a binding answers so the client shows its loading state, as for a
+        // single-source widget before its first fetch.
         if (parts.every((part) => part.pending)) continue
         const composed = composeSources(manifest.compose, parts)
         data[widget.id] = {
@@ -509,64 +469,68 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
     },
 
     /**
-     * Whether the config on disk is ahead of what is published.
-     *
-     * This is what the editor's badge counts. It compares the current config revision with the one
-     * recorded in the served generation, so a hand-edit outside the app shows up too.
+     * Whether the config on disk or the app bundle is ahead of the served generation; drives the
+     * editor's badge.
      */
     async pending() {
-      if (resolved === null) await rebuild()
-      const current = await generations.current()
-      if (current === null) return { pending: true, generation: null, revision }
-      const meta = await generations.meta(current)
-      // Two ways to be out of date: the config moved, or the app did. The second is what an
-      // upgrade looks like — same config, different bundle filenames — and missing it leaves the
-      // published page loading a script the new build deleted.
+      await current()
+      const generation = await generations.current()
+      if (generation === null) return { pending: true, generation: null, revision }
+      const meta = await generations.meta(generation)
+      // An upgrade changes bundle filenames with the same config; missing it leaves the published
+      // page loading a script the new build deleted.
       const assetsHash = assetsFingerprint(await currentAssetTags(options.webDistDir))
       return {
         pending:
           meta === null || meta.configRevision !== revision || meta.assetsHash !== assetsHash,
-        generation: current,
+        generation,
         revision,
       }
     },
 
-    /**
-     * Publish, honouring the configured mode.
-     *
-     * In manual mode this returns null and leaves the badge to do its work; in auto mode it
-     * debounces, so twelve edits from an agent produce one render rather than twelve.
-     */
+    /** Returns null in manual mode; in auto mode debounces so a burst of edits renders once. */
     async requestPublish(actor: string, requestedMode: PublishMode = mode) {
       if (requestedMode === 'manual') return null
-      if (debounce !== null) clearNodeTimeout(debounce)
-      await new Promise<void>((settle) => {
-        debounce = setNodeTimeout(() => {
-          debounce = null
-          settle()
-        }, debounceMs)
+      // One promise per debounce window, shared by every caller in it; the last actor wins.
+      if (debounce !== null) {
+        clearNodeTimeout(debounce.timer)
+        debounce.timer = setNodeTimeout(debounce.fire, debounceMs)
+        debounce.actor = actor
+        return debounce.result
+      }
+      let fire: () => void = () => {}
+      const armed = new Promise<void>((settle) => {
+        fire = settle
       })
-      return context.publishNow(actor)
+      const result = armed.then(() => {
+        const latest = debounce?.actor ?? actor
+        debounce = null
+        return context.publishNow(latest)
+      })
+      debounce = { timer: setNodeTimeout(fire, debounceMs), fire, actor, result }
+      return result
     },
 
     async publishNow(actor: string, label?: string) {
-      // One render at a time. Two concurrent publishes would race for the generation number and
-      // the pointer, on a box that cannot afford either one twice.
+      // Serialises publishes: concurrent ones would race for the generation number and pointer.
       if (publishing !== null) return publishing
       publishing = (async () => {
-        await rebuild()
-        watcher.expect(revision)
+        const built = await rebuild()
+        watcher.expect(built.revision)
         const result = await publish({
-          resolved: resolved as Resolved,
+          resolved: built.resolved,
           stateDir: env.stateDir,
           configDir: env.configDir,
-          configRevision: revision,
+          configRevision: built.revision,
           actor,
           ...(options.webDistDir === undefined ? {} : { webDistDir: options.webDistDir }),
           ...(label === undefined ? {} : { label }),
         })
         await generations.prune(10)
-        hub.broadcast({ type: 'published', data: { generation: result.generation, revision } })
+        hub.broadcast({
+          type: 'published',
+          data: { generation: result.generation, revision: built.revision },
+        })
         return result
       })()
       try {
@@ -586,17 +550,12 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
       scheduler.stop()
       hub.closeAll()
       await watcher.stop()
-      if (debounce !== null) clearNodeTimeout(debounce)
+      if (debounce !== null) clearNodeTimeout(debounce.timer)
     },
   }
 
-  /**
-   * One cache key can feed several widgets, and a composite is fed by several keys.
-   *
-   * So an update fans out to every widget that reads the key, and each is re-composed before it
-   * is broadcast — the browser receives finished widget state, never a fragment it would have to
-   * know how to merge.
-   */
+  // A key update fans out to every widget reading it, re-composed so the browser receives
+  // finished widget state rather than a fragment.
   scheduler.onUpdate((key, entry) => {
     if (resolved === null) return
     for (const widget of resolved.widgets) {

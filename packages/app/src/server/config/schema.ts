@@ -1,16 +1,10 @@
 import { z } from 'zod'
 import { parseIconRef } from '../assets/icons.ts'
+import { SEARCH_ENGINES } from '../../shared/links.ts'
 
 /**
- * The on-disk config tree.
- *
- * Sparse by design: a file stores only what differs from the schema default, so a one-field change
- * is a one-line diff in the user's git repository. The dense, fully-evaluated form lives in
- * state/resolved.json and is never written by hand.
- *
- * Every file schema uses `.catchall(z.unknown())`. That is deliberate: someone who tries a newer
- * release and rolls back must not silently lose the fields the newer version added. Unknown keys
- * survive a read/write round trip; `neo doctor` reports them rather than the loader deleting them.
+ * The on-disk config tree; files store only what differs from the defaults. Every file schema uses
+ * `.catchall(z.unknown())` so a rollback to an older release keeps fields a newer one added.
  */
 
 /** Ids are interpolated into CSS selectors and file names, so the shape is constrained at rest. */
@@ -30,29 +24,14 @@ export const dashboardSchema = z
     pages: z.array(idSchema).min(1).default(['home']),
     catalog: z
       .object({
-        /**
-         * Where the catalog is actually served from today.
-         *
-         * One GitHub Pages site per repository, so the catalog ships inside the docs site rather
-         * than on a subdomain. A `*.github.io/<repo>/` URL is normally a thing to avoid baking in
-         * precisely because it cannot move — but the pointer file carries `movedTo`, so when this
-         * gets a custom domain or its own repository the old URL keeps answering and says where
-         * the payload went. That is what the two-file pointer design is for.
-         */
+        // Served from the docs GitHub Pages site; the pointer file's `movedTo` lets this URL keep
+        // answering if the catalog moves.
         url: z.url().default('https://oauramos.github.io/neohomepage/catalog/v1/latest.json'),
         pinnedRelease: z.string().max(64).nullable().default(null),
         autoUpdate: z.boolean().default(true),
       })
       .prefault({}),
-    /**
-     * Optional behaviour, off by default.
-     *
-     * A dashboard is a thing people leave open on a wall, and the two floating buttons are the only
-     * chrome on it. `autoHideControls` fades them once you stop interacting and brings them back
-     * when the pointer nears their corner — useful on a wall display, wrong on a laptop, so it is a
-     * choice rather than a default. Keyboard focus always overrides it: a control that cannot be
-     * tabbed to is not hidden, it is gone.
-     */
+    // `autoHideControls` fades the floating buttons when idle; keyboard focus always overrides it.
     features: z
       .object({
         autoHideControls: z.boolean().default(false),
@@ -73,11 +52,8 @@ export const breakpointSchema = z
   .catchall(z.unknown())
 
 /**
- * Where a bookmark or a navbar link points, as parts rather than a URL string.
- *
- * The same keys as a target's `base`, for the same reason: nothing in config, in the API or in an
- * MCP tool call is ever a URL. The server composes one at render time, and the path is held to
- * the two rules the `targetUrl` opcode applies to a deep link.
+ * Where a bookmark or navbar link points, as parts: nothing in config, the API or MCP is ever a
+ * URL. The server composes one at render time, applying the `targetUrl` opcode's path rules.
  */
 export const linkBaseSchema = z
   .object({
@@ -100,11 +76,7 @@ export const linkPathSchema = z
     'must not contain ".." or "//"',
   )
 
-/**
- * An icon is named, never linked: `nextcloud` (dashboard-icons), `si-nextcloud` (Simple Icons),
- * `mdi-router-network` (Material Design Icons), with an optional `-#rrggbb`. The server fetches
- * it; a name is not a URL.
- */
+/** Icon name, never a URL: `nextcloud` (dashboard-icons), `si-*` (Simple Icons), `mdi-*` (MDI), optional `-#rrggbb`. */
 export const iconSlugSchema = z
   .string()
   .max(90)
@@ -137,29 +109,12 @@ export const bookmarkGroupSchema = z
 
 export type BookmarkGroup = z.infer<typeof bookmarkGroupSchema>
 
-/** The four ways a bookmark group can be drawn. A closed set: each one is CSS this build ships. */
+/** Closed set: each display is CSS this build ships. */
 export const BOOKMARK_DISPLAYS = ['list', 'cards', 'icons', 'chips'] as const
 export type BookmarkDisplay = (typeof BOOKMARK_DISPLAYS)[number]
 
-/** Where a search box sends its query. Closed, because an engine is a URL and a URL is not config. */
-export const SEARCH_ENGINES = [
-  'duckduckgo',
-  'google',
-  'bing',
-  'brave',
-  'startpage',
-  'kagi',
-] as const
-export type SearchEngine = (typeof SEARCH_ENGINES)[number]
-
-/**
- * What a navbar is made of, in order. Each item is one thing the user asked for in the header:
- * the dashboard title, a line of text, a row of links, a clock, a search box, or a spacer that
- * pushes what follows to the far edge.
- */
 export const navItemSchema = z.discriminatedUnion('kind', [
-  // `boxed` draws the item in a muted box, the way a boxed reading is drawn on a tile. Off by
-  // default, and absent from the search box (already a box) and the spacer (nothing to box).
+  // `boxed` draws the item in a muted box; the search box is already one and the spacer is empty.
   z
     .object({ id: idSchema, kind: z.literal('title'), boxed: z.boolean().default(false) })
     .catchall(z.unknown()),
@@ -202,12 +157,8 @@ export const navItemSchema = z.discriminatedUnion('kind', [
 export type NavItem = z.infer<typeof navItemSchema>
 
 /**
- * A page is a stack of sections, each one of three kinds.
- *
- * A `navbar` is the header; a `grid` is a free board of widgets with its own column count and row
- * cap; `bookmarks` is named groups of links laid out in columns and drawn in one of four styles.
- * Every per-breakpoint number here is a record keyed by breakpoint id and SPARSE: an absent key
- * falls back to the page's grid for a grid section, and to a built-in default for bookmarks.
+ * Per-breakpoint records (`cols`, `columns`) are sparse: an absent key falls back to the page's
+ * grid for a grid section and to a built-in default for bookmarks.
  */
 export const sectionSchema = z.discriminatedUnion('kind', [
   z
@@ -246,11 +197,8 @@ export const pageSchema = z
     id: idSchema,
     title: z.string().min(1).max(64).default('Home'),
     icon: z.string().max(64).nullable().default(null),
-    /**
-     * Empty means the page every install had before sections existed: a header carrying the title
-     * over one grid. The resolver synthesises exactly that, so no file on disk needs a migration
-     * and a page that never opened the sections panel never grows the key.
-     */
+    // Empty means the pre-sections default (title header over one grid), synthesised by the
+    // resolver so files on disk need no migration.
     sections: z.array(sectionSchema).max(24).default([]),
     grid: z
       .object({
@@ -259,12 +207,8 @@ export const pageSchema = z
         containerPadding: z
           .tuple([z.int().min(0).max(64), z.int().min(0).max(64)])
           .default([16, 16]),
-        /**
-         * A real cap, not a decorative field: with it set, the auto-placer refuses when the grid
-         * is full and says so, instead of pushing a widget below the fold on a wall display.
-         */
+        // When set, the auto-placer refuses a full grid instead of pushing a widget below the fold.
         maxRows: z.int().min(1).max(200).nullable().default(null),
-        /** Three authored tiers. Every extra one is another place the board can silently desync. */
         breakpoints: z
           .array(breakpointSchema)
           .min(1)
@@ -297,11 +241,8 @@ export const layoutFileSchema = z
   .object({
     page: idSchema,
     layouts: z.record(idSchema, z.array(layoutItemSchema)).default({}),
-    /**
-     * `origin` is what stops react-grid-layout dirtying a git-tracked file on every window
-     * resize: it emits machine-generated layouts for breakpoints nobody authored, and those are
-     * regenerated from the authoritative tier rather than persisted.
-     */
+    // `derived` layouts are regenerated from the authoritative tier, not persisted, so
+    // react-grid-layout's per-resize output does not dirty a git-tracked file.
     meta: z
       .record(
         idSchema,
@@ -334,36 +275,25 @@ export const targetSchema = z
         scheme: z.enum(['http', 'https']).default('http'),
         host: z.string().min(1).max(253),
         port: z.int().min(1).max(65535),
-        /**
-         * A prefix on every request to this target, and for an iCalendar feed the whole path.
-         *
-         * Shape-checked here rather than only at request time: the executor's origin-and-pathname
-         * assertion already refuses a traversal (the URL parser normalises `/a/../b` and the
-         * comparison then fails), but failing at write time with a message beats a widget that
-         * silently never loads.
-         */
+        // Prefix on every request to this target (for an iCalendar feed, the whole path). Checked
+        // at write time so a traversal fails with a message rather than a widget that never loads.
         basePath: z
           .string()
           .max(120)
           .default('')
           .refine(
-            // Unreserved characters, plus percent-escapes: a Google Calendar feed lives at
-            // /calendar/ical/<user>%40gmail.com/private-<token>/basic.ics, and refusing `%40`
-            // refused every Google calendar. An escape is still one opaque path character — the
-            // URL parser keeps it as written, so the origin-and-pathname check holds.
+            // Percent-escapes are allowed because Google Calendar feeds contain `%40`; the URL
+            // parser keeps them as written, so the origin-and-pathname check still holds.
             (value) => value === '' || /^\/(?:[A-Za-z0-9._~\-/]|%[0-9A-Fa-f]{2})*$/.test(value),
             'must be an absolute path containing only unreserved URL characters or %XX escapes',
           )
           .refine((value) => !value.split('/').includes('..'), 'must not contain ".."'),
       })
-      // Strict, unlike every other object here. The document-level catchall exists so a rollback
-      // does not silently drop fields a newer release added; `base` is a closed shape of four
-      // keys, and an unknown key in it has only ever meant a caller spread something it should
-      // not have. Once that something was a plaintext API key.
+      // Strict, unlike the rest: an unknown key here has only ever meant a caller spread
+      // something it should not have, once a plaintext API key.
       .strict(),
     /** Field name to secret reference. Values live in secrets/, never here. */
     secrets: z.record(z.string().max(32), secretRefSchema).default({}),
-    /** Non-secret target fields the manifest declares. */
     fields: z
       .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
       .prefault({}),
@@ -389,11 +319,7 @@ export const widgetSchema = z
     title: z.string().max(64).nullable().default(null),
     /** The grid section this widget sits in; null means the page's first grid section. */
     section: idSchema.nullable().default(null),
-    /**
-     * How this tile draws its readings, where it differs from the dashboard's default: boxed or
-     * bare, centred or not. `inherit` — the default — follows the theme's `stat-*` tokens, so a
-     * file only grows this key when someone chose for one tile.
-     */
+    // `inherit` follows the theme's `stat-*` tokens.
     look: z
       .object({
         stats: z.enum(['inherit', 'plain', 'boxed']).default('inherit'),
@@ -401,13 +327,8 @@ export const widgetSchema = z
       })
       .prefault({}),
     targetId: idSchema.nullable().default(null),
-    /**
-     * Composite widgets only: role name -> the targets bound to it, in the order the user chose.
-     *
-     * Separate from `targetId` rather than a generalisation of it. Almost every widget binds one
-     * target, and forcing those through a role map would make the common config file harder to
-     * read and every existing file a migration, to express something only the calendar needs.
-     */
+    // Composite widgets only: role name -> bound targets, in order. Kept separate from `targetId`
+    // so single-target widgets need no role map.
     bindings: z.record(z.string().max(32), z.array(idSchema).max(16)).prefault({}),
     operations: z.array(z.string().max(32)).default([]),
     config: z.record(z.string().max(32), z.unknown()).default({}),
@@ -453,16 +374,3 @@ export const networkSchema = z
   .catchall(z.unknown())
 
 export type Network = z.infer<typeof networkSchema>
-
-/** Every file kind, so the store, the seeder and `neo doctor` all agree on what exists. */
-export const FILE_SCHEMAS = {
-  dashboard: dashboardSchema,
-  page: pageSchema,
-  layout: layoutFileSchema,
-  target: targetSchema,
-  widget: widgetSchema,
-  theme: themeSchema,
-  network: networkSchema,
-} as const
-
-export type FileKind = keyof typeof FILE_SCHEMAS

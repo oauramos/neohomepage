@@ -17,8 +17,6 @@ describe('first fit', () => {
   })
 
   it('fills a gap rather than appending below it', () => {
-    // Appending at the bottom is easier and looks broken: the hole is usually exactly where the
-    // user expected the new widget to land.
     const layout = [item('a', 0, 0, 4, 2), item('b', 8, 0, 4, 2)]
     const result = place({ layout, cols: 12, maxRows: null, id: 'c', w: 4, h: 2 })
     expect(result.ok && result.item).toEqual(item('c', 4, 0, 4, 2))
@@ -69,8 +67,6 @@ describe('first fit', () => {
   })
 
   it('does not mutate the layout it was given', () => {
-    // correctBounds mutates its argument, so anything that touches RGL has to clone; a placement
-    // that rewrote the caller's array would corrupt the config being edited.
     const layout = [item('a', 0, 0, 4, 2)]
     const before = JSON.stringify(layout)
     place({ layout, cols: 12, maxRows: null, id: 'b', w: 4, h: 2 })
@@ -92,8 +88,6 @@ describe('maxRows is a real cap', () => {
   })
 
   it('refuses and says why when the canvas is full', () => {
-    // On a wall display, a widget pushed below the fold is a widget that does not exist. Refusing
-    // with a legible reason is the entire point of the setting.
     const layout = [item('a', 0, 0, 12, 4)]
     const result = place({ layout, cols: 12, maxRows: 4, id: 'b', w: 6, h: 2 })
     expect(result.ok).toBe(false)
@@ -160,8 +154,6 @@ describe('fanning a new widget across breakpoints', () => {
   })
 
   it('narrows the widget to fit a narrow tier rather than dropping it', () => {
-    // A widget that exists on desktop and not on a phone is invisible with no error, which reads
-    // as data loss.
     const { layouts } = fanOut({ sm: [] }, ['sm'], cols, null, { id: 'a', w: 8, h: 3 })
     expect(layouts.sm?.[0]?.w).toBe(2)
   })

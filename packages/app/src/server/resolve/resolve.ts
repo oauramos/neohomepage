@@ -11,22 +11,9 @@ import { EMPTY_OVERRIDES } from '../config/overrides.ts'
 import type { ConfigTree } from '../store/tree.ts'
 
 /**
- * The compiler.
- *
- * Sparse declarations on disk become one dense, fully-evaluated tree. This is the idea worth
- * stealing from NixOS: the files hold only what the user chose, the schema and the widget
- * manifests hold the defaults, and a single pure function produces the thing everything else
- * reads. Nothing downstream — the renderer, the scheduler, the API — ever has to ask "was this
- * set, or is it a default?"
- *
- * Four layers, lowest precedence first:
- *   1. manifest defaults      what the widget's author declared
- *   2. discovered             reserved and empty; Docker label discovery slots in here later
- *   3. user config            config/*.json, what the UI and MCP write
- *   4. local overrides        config/overrides.local.json, gitignored and machine-specific
- *
- * Pure: no clock, no filesystem, no network. `generatedAt` is passed in so two runs over the same
- * inputs produce byte-identical output, which is what lets the publish step skip a no-op render.
+ * Resolves sparse config into one dense tree: manifest defaults < user config < local overrides.
+ * Pure; `generatedAt` is an input so equal inputs give byte-identical output and publish can skip
+ * a no-op render.
  */
 
 import type {
@@ -50,7 +37,7 @@ export type ResolveInput = {
   readonly generatedAt: string
 }
 
-/** Where a cached icon is served from. The store names the file; this only has to agree on the key. */
+/** URL of a cached icon; the key must match the file name the icon store uses. */
 function iconUrl(
   reference: string | null | undefined,
   icons: ReadonlySet<string> | undefined,
@@ -71,9 +58,8 @@ function manifestDefaults(manifest: Manifest | undefined): Record<string, unknow
 }
 
 /**
- * A bookmark's destination, built the way the `targetUrl` opcode builds a deep link: the bound
- * target's origin, then a path that must be absolute and free of `..` and `//`. The same two
- * rules, so a link tile cannot say anything about a target that its projection could not.
+ * Deep link into the bound target under the same path rules as the `targetUrl` opcode: absolute,
+ * no `..` or `//`.
  */
 function linkHref(
   template: string,
@@ -119,9 +105,8 @@ function resolveWidget(
     template,
     icon: manifest?.icon ?? 'question-mark',
     targetId: widget.targetId,
-    // A composite's bindings are only meaningful for the roles its manifest declares; a role that
-    // was removed by a catalog update leaves its targets in config (nothing is deleted behind the
-    // user's back) but stops being fetched.
+    // Only roles the manifest declares are bound; a removed role's targets stay in config but
+    // stop being fetched.
     bindings:
       manifest !== undefined && isComposite(manifest)
         ? Object.fromEntries(
@@ -135,7 +120,6 @@ function resolveWidget(
         : widget.operations.length > 0
           ? widget.operations
           : Object.keys(manifest?.operations ?? {}),
-    // A user's explicit interval wins, but never below what the manifest says the service tolerates.
     pollIntervalMs: Math.max(
       manifest?.poll.minIntervalMs ?? 15_000,
       widget.poll.intervalMs ?? manifest?.poll.defaultIntervalMs ?? 60_000,
@@ -165,12 +149,8 @@ function resolveTarget(target: Target, overrides: Overrides): ResolvedTarget {
 }
 
 /**
- * Produce a layout for a breakpoint nobody has authored.
- *
- * `correctBounds` mutates its argument — verified against react-grid-layout 2.2.4 — so the clone
- * is not defensive style, it is what keeps this function pure. Without it, resolving would rewrite
- * the parsed config object and the next save would persist machine-derived geometry into a
- * git-tracked file.
+ * Layout for a breakpoint nobody authored, scaled from the authoritative one. `correctBounds`
+ * mutates its argument (react-grid-layout 2.2.4); the clone keeps the parsed config untouched.
  */
 export function deriveLayout(
   authored: readonly LayoutItem[],
@@ -196,7 +176,7 @@ function resolveLink(link: BookmarkLink, icons: ReadonlySet<string> | undefined)
     icon: link.icon,
     iconUrl: iconUrl(link.icon, icons),
     iconMode: ref === null ? 'image' : iconMode(ref),
-    iconColor: ref?.color === null || ref === null ? null : `#${ref.color}`,
+    iconColor: ref === null || ref.color === null ? null : `#${ref.color}`,
   }
 }
 
@@ -228,18 +208,13 @@ function resolveNavItem(item: NavItem, icons: ReadonlySet<string> | undefined): 
   }
 }
 
-/** Groups per row when a bookmarks section says nothing: a third of the grid's columns, at least one. */
 function defaultBookmarkColumns(gridCols: number): number {
   return Math.max(1, Math.min(12, Math.round(gridCols / 3)))
 }
 
 /**
- * One section, dense.
- *
- * A grid section gets the page grid with its own column counts and row cap substituted in, and
- * its slice of the page's layout file: the file is flat per breakpoint, and a section's layout is
- * the entries whose widget lives in it. Coordinates are therefore per section — every board
- * starts at row zero — which is also what the editor renders, one grid per section.
+ * The page layout file is flat per breakpoint; a grid section's layout is the entries whose
+ * widget lives in it, so coordinates are per section.
  */
 function resolveSection(
   section: Section,
@@ -319,18 +294,17 @@ export function resolve(input: ResolveInput): Resolved {
   const { tree, catalog, generatedAt } = input
   const overrides = input.overrides ?? EMPTY_OVERRIDES
   const diagnostics: string[] = []
+  const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, 'en-US')
 
-  // Targets first: a widget's href is derived from the target it binds.
   const targets = [...tree.targets.values()]
-    .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
+    .sort(byId)
     .map((target) => resolveTarget(target, overrides))
   const targetsById = new Map(targets.map((target) => [target.id, target]))
 
-  const widgets = [...tree.widgets.values()]
-    .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
-    .map((widget) =>
-      resolveWidget(widget, catalog, targetsById, overrides, diagnostics, input.icons),
-    )
+  const configWidgets = [...tree.widgets.values()].sort(byId)
+  const widgets = configWidgets.map((widget) =>
+    resolveWidget(widget, catalog, targetsById, overrides, diagnostics, input.icons),
+  )
 
   const pages: ResolvedPage[] = []
   for (const pageId of tree.dashboard.pages) {
@@ -338,9 +312,7 @@ export function resolve(input: ResolveInput): Resolved {
     if (page === undefined) continue
 
     const layoutFile = tree.layouts.get(pageId)
-    const pageWidgets = [...tree.widgets.values()]
-      .filter((w) => w.page === pageId)
-      .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
+    const pageWidgets = configWidgets.filter((w) => w.page === pageId)
     const sections = effectiveSections(page).map((section) =>
       resolveSection(
         section,
@@ -352,7 +324,7 @@ export function resolve(input: ResolveInput): Resolved {
       ),
     )
 
-    // A widget with no placement anywhere is invisible with no error, which reads as data loss.
+    // An unplaced widget is silently invisible; report it.
     for (const widget of pageWidgets) {
       const placed = sections.some(
         (section) =>
@@ -374,12 +346,12 @@ export function resolve(input: ResolveInput): Resolved {
   }
 
   for (const widget of widgets) {
-    if (widget.targetId !== null && !targets.some((t) => t.id === widget.targetId)) {
+    if (widget.targetId !== null && !targetsById.has(widget.targetId)) {
       diagnostics.push(`widget "${widget.id}" points at missing target "${widget.targetId}"`)
     }
     for (const [role, bound] of Object.entries(widget.bindings)) {
       for (const targetId of bound) {
-        if (!targets.some((t) => t.id === targetId)) {
+        if (!targetsById.has(targetId)) {
           diagnostics.push(
             `widget "${widget.id}" binds missing target "${targetId}" to role "${role}"`,
           )

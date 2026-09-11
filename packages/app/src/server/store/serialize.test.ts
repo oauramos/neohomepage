@@ -18,11 +18,9 @@ describe('key ordering', () => {
   })
 
   it('refuses numeric-like keys instead of silently reordering them', () => {
-    // JS pins integer-like keys to the front in ascending order, whatever you sort. A serialiser
-    // that ignores this is not deterministic, and the failure is invisible in review.
+    // JS pins integer-like keys to the front in ascending order regardless of sorting.
     expect(() => serialize({ '2': 'b', '1': 'a' })).toThrow(NumericKeyError)
     expect(() => serialize({ widgets: { '10': {} } })).toThrow(NumericKeyError)
-    // Prefixed ids are the supported alternative, and must keep working.
     expect(() => serialize({ widgets: { w10: {}, w2: {} } })).not.toThrow()
   })
 
@@ -47,8 +45,7 @@ describe('dropping defaults', () => {
   })
 
   it('only drops at the top level, so a nested field that matches a default survives', () => {
-    // Dropping recursively would delete a deliberate `{ poll: { intervalMs: 60000 } }` just
-    // because it matches the manifest default, and the user would lose it on the next write.
+    // Recursive dropping would delete a deliberate nested value that happens to match a default.
     const out = JSON.parse(
       serialize({ poll: { intervalMs: 60000 } }, { defaults: { intervalMs: 60000 } }),
     )
@@ -117,16 +114,11 @@ describe('recursive schema ordering', () => {
   })
 
   it('orders nested array items by their own schema, not alphabetically', () => {
-    // Alphabetical would give `h, i, w, x, y`, which is deterministic but unreadable in a diff.
     const out = serialize(
       { page: 'home', layouts: { lg: [{ h: 3, i: 'w1', w: 4, x: 0, y: 0 }] }, meta: {} },
       { schema: file },
     )
-    const item = out.slice(out.indexOf('['), out.indexOf(']'))
-    expect(item.indexOf('"i"')).toBeLessThan(item.indexOf('"x"'))
-    expect(item.indexOf('"x"')).toBeLessThan(item.indexOf('"y"'))
-    expect(item.indexOf('"y"')).toBeLessThan(item.indexOf('"w"'))
-    expect(item.indexOf('"w"')).toBeLessThan(item.indexOf('"h"'))
+    expect(Object.keys(JSON.parse(out).layouts.lg[0])).toEqual(['i', 'x', 'y', 'w', 'h'])
   })
 
   it('orders values inside a record by the record value schema', () => {
@@ -134,8 +126,7 @@ describe('recursive schema ordering', () => {
       { page: 'home', layouts: {}, meta: { lg: { cols: 12, origin: 'authored' } } },
       { schema: file },
     )
-    const meta = out.slice(out.indexOf('"meta"'))
-    expect(meta.indexOf('"origin"')).toBeLessThan(meta.indexOf('"cols"'))
+    expect(Object.keys(JSON.parse(out).meta.lg)).toEqual(['origin', 'cols'])
   })
 
   it('orders nested objects reached through optional and default wrappers', () => {
@@ -145,7 +136,7 @@ describe('recursive schema ordering', () => {
         .prefault({ rowHeight: 56, margin: [] }),
     })
     const out = serialize({ grid: { margin: [1, 2], rowHeight: 40 } }, { schema })
-    expect(out.indexOf('"rowHeight"')).toBeLessThan(out.indexOf('"margin"'))
+    expect(Object.keys(JSON.parse(out).grid)).toEqual(['rowHeight', 'margin'])
   })
 
   it('still sorts keys the schema does not name, so unknown fields stay deterministic', () => {

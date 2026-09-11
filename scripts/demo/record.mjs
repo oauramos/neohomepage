@@ -1,18 +1,7 @@
 /**
- * Record the README demos: the design panel recolouring a live board, and the grid editor moving
- * a tile.
- *
- * The recording is of the product, not of a mockup. `harness.mjs` boots the real server on a
- * throwaway data directory in front of one stub per widget, so every number on screen came
- * through the real fetcher and projection from that widget's own recorded fixture.
- *
- * Two things are added that a user would not see, both so the recording is readable:
- *
- *  - A cursor. Playwright's video does not composite the pointer, so without one every click looks
- *    like the UI acting on its own. It is drawn by the page from real mouse events rather than
- *    positioned from here, which means it cannot drift out of sync with what is being clicked.
- *  - Pacing. `page.mouse.move(x, y, {steps})` dispatches its steps as fast as the process can, and
- *    at 20fps that is one frame — a teleport. `glide` spreads the same path over real time.
+ * Records the README demos against the harness board: the design panel recolouring a live board,
+ * and the grid editor moving a tile. Playwright's video does not composite the pointer, so the
+ * page draws one from the mouse events it receives, and `glide` paces moves over real time.
  *
  *   node scripts/demo/record.mjs
  *   node scripts/demo/record.mjs --only=design
@@ -30,24 +19,17 @@ const OUT = resolve(ROOT, 'media')
 const WORK = resolve(ROOT, 'media/.frames')
 
 const VIEWPORT = { width: 1280, height: 800 }
-/** GitHub renders a README image at about 890px, so 880 is never upscaled and never wasted. */
+/** GitHub renders README images at about 890px wide, so the GIF is never upscaled. */
 const GIF_WIDTH = 840
 const FPS = 12
-/**
- * 96 rather than 256. The board is flat surfaces and text, so the rest of the palette buys no
- * visible fidelity and costs hundreds of kilobytes — real weight on a README someone opens on a
- * phone. The clip that decides this is the layout one: a tile crossing the board changes most of
- * the frame most of the time, so it is the one with nothing to gain from inter-frame diffing.
- */
+/** 96 colours suffice for flat surfaces and text; 256 costs hundreds of kilobytes for no gain. */
 const GIF_COLOURS = 96
 
 const only = process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) ?? null
 
 /**
- * The pointer, drawn by the page from the events it actually receives.
- *
- * Filled white with a dark outline because it has to stay visible against seven presets, three of
- * which are near-black and one of which is near-white.
+ * Pointer drawn by the page from real mouse events; white with a dark outline so it stays visible
+ * on near-black and near-white presets.
  */
 const CURSOR = `(() => {
   const layer = document.createElement('div')
@@ -145,13 +127,7 @@ async function dragTo(page, dx, dy, ms = 900) {
   await page.mouse.up()
 }
 
-/**
- * A scene starts from the theme a fresh install shows, whatever ran before it.
- *
- * Without this the clips inherit each other: recording both in one pass left the layout demo in
- * the Terminal preset the design demo had just switched to, and `--only=layout` produced something
- * different again. Two clips of the same product should open on the same board.
- */
+/** Opens the board on the fresh-install theme so scenes do not inherit each other's preset. */
 async function openBoard(context, baseURL) {
   const page = await context.newPage()
   await page.addInitScript(CURSOR)
@@ -168,15 +144,14 @@ async function openBoard(context, baseURL) {
   return page
 }
 
-/** Colour: the panel, three presets, and one slider the board follows in real time. */
+/** Colour: the design panel, dark mode, two presets, and one slider the board follows live. */
 async function design(context, baseURL) {
   const page = await openBoard(context, baseURL)
 
   await clickAt(page, page.locator('button.nh-fab-design'))
   await wait(page, 700)
 
-  // Scheme first. Six of the seven presets are far more distinct from each other in the dark, and
-  // a demo that stays light spends three clicks showing changes the viewer has to hunt for.
+  // Dark first: the presets differ far more from each other in dark mode.
   await clickAt(page, page.locator('.nh-seg-item', { hasText: 'Dark' }).first())
   await wait(page, 900)
 
@@ -199,12 +174,7 @@ async function design(context, baseURL) {
   return page
 }
 
-/**
- * Layout: edit mode, a tile moved by its handle, and the board reflowing under it.
- *
- * One gesture rather than a tour. Resizing was in an earlier cut and had to go: it doubled the
- * clip and the file, and the second drag taught nothing the first had not.
- */
+/** Layout: edit mode, one tile dragged by its handle, and the board reflowing under it. */
 async function layout(context, baseURL) {
   const page = await openBoard(context, baseURL)
 
@@ -214,13 +184,11 @@ async function layout(context, baseURL) {
   await clickAt(page, page.locator('button.nh-button', { hasText: 'Edit layout' }))
   await wait(page, 900)
 
-  // Pi-hole out of the right column and into the left: the two tiles it passes have to get out of
-  // the way, which is the part that shows this is a grid rather than a list.
+  // Pi-hole crosses two tiles on its way to the left column, so the reflow is visible.
   const handle = page.locator('.nh-editor-cell', { hasText: 'Pi-hole' }).locator('.nh-drag-handle')
   const grip = await centre(handle)
   await glide(page, grip.x, grip.y)
-  // Aimed at the top row rather than level with it: dropped level, RGL settles the tile into the
-  // slot below the one it was aimed at, and the clip ends on a board where nothing obviously moved.
+  // Aimed slightly above the row: dropped level, RGL settles the tile one slot below.
   await dragTo(page, -840, -34, 1050)
   await wait(page, 1800)
   return page
@@ -254,17 +222,9 @@ async function stills(context, baseURL) {
 }
 
 /**
- * webm to mp4, then mp4 to GIF — in that order, and the order is the point.
- *
- * Playwright's VP8 output carries encoder noise that is invisible to the eye and expensive to a
- * GIF: LZW compresses runs of identical indices, and noise breaks every run. Passing through x264
- * first smooths it, and the same clip at the same size comes out about 30% smaller with no
- * difference anyone can see on a board made of flat panels and text.
- *
- * One palette for the whole clip rather than per frame: the flat surfaces quantise to
- * adjacent-but-different colours frame to frame otherwise, and a tile nobody touched shimmers for
- * the length of the clip. Undithered for the same reason the boot animation is — dithering a flat
- * field is visible noise, and here it also costs 40% more bytes.
+ * webm -> mp4 -> GIF. The x264 pass smooths VP8 encoder noise that breaks GIF's LZW runs (~30%
+ * smaller). One palette for the whole clip and no dithering, or flat surfaces shimmer frame to
+ * frame.
  */
 async function encode(webm, name) {
   const mp4 = join(OUT, `${name}.mp4`)
@@ -317,6 +277,9 @@ async function encode(webm, name) {
 }
 
 const scenes = { design, layout }
+if (only !== null && only !== 'stills' && !Object.hasOwn(scenes, only)) {
+  throw new Error(`--only must be one of stills, ${Object.keys(scenes).join(', ')}`)
+}
 
 await mkdir(OUT, { recursive: true })
 await rm(WORK, { recursive: true, force: true })

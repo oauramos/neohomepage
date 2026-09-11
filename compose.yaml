@@ -1,20 +1,9 @@
-# neohomepage
-#
-# The smallest thing that works, plus the two lines that stop it hurting: a memory limit, and a
-# credential supplied by the environment rather than committed alongside the config.
-#
-#   docker compose up -d
-#
-# Then open http://<this-host>:7575 and add a service from the editor. Nothing here needs editing
-# to add a widget — that is the point of the project.
+# `docker compose up -d`, then open http://<this-host>:7575.
 
 services:
   neohomepage:
-    # Multi-arch (amd64 + arm64). Pin a version instead of `latest` if you want upgrades to be
-    # deliberate: ghcr.io/oauramos/neohomepage:0.1.0
-    #
-    # To run from a checkout instead — for hacking on it — swap `image:` for `build: .` and
-    # `docker compose up -d --build` from the repository root.
+    # Multi-arch (amd64 + arm64). Pin a version (ghcr.io/oauramos/neohomepage:0.1.0) for
+    # deliberate upgrades. To run from a checkout, swap `image:` for `build: .`.
     image: ghcr.io/oauramos/neohomepage:latest
     container_name: neohomepage
     restart: unless-stopped
@@ -22,27 +11,19 @@ services:
       - '7575:7575'
 
     volumes:
-      # ONE directory, and it is the backup. `git init` it once and `git push` is your backup:
-      # config/ and assets/ are committed, secrets/ and state/ are excluded by a .gitignore the
-      # app writes on first boot. See docs/guide/backup.
+      # The only state, and the backup: `git init` it. config/ and assets/ are committed; secrets/
+      # and state/ are excluded by a .gitignore the app writes on first boot. See docs/guide/backup.
       - ./data:/data
 
     environment:
-      # Reads are open; writes need this. Leave both unset and the dashboard is editable by anyone
-      # who can reach the port — reasonable on a trusted LAN, and a decision rather than an
-      # accident. Set both and the editor asks for them.
+      # Reads are open; writes need these. Unset, the dashboard is editable by anyone who can
+      # reach the port.
       # NEOHOMEPAGE_USERNAME: neo
       # NEOHOMEPAGE_PASSWORD: change-me-at-least-eight-characters
 
-      # The recommended place for service credentials.
-      #
-      # Config stores `{"$secret": "t3a91f.apiKey"}` — a reference, never a value — and this is
-      # where the value comes from. Keeping them here rather than in the data directory is what
-      # makes restore a `git clone` and this file: the repository never sees a key, so it can be
-      # public, and losing the machine loses nothing.
-      #
-      # The name is the secret's, uppercased with dots and dashes as underscores. `neo doctor`
-      # prints the exact variable for every credential it cannot find.
+      # Service credentials. Config stores `{"$secret": "t3a91f.apiKey"}`, a reference; the value
+      # comes from the variable named after it, uppercased with dots and dashes as underscores.
+      # `neo doctor` prints the exact name for every credential it cannot find.
       # NEOHOMEPAGE_SECRET_T3A91F_APIKEY: your-sonarr-api-key
       #
       # Or point at a file, for a Docker secret or a mounted credential:
@@ -50,9 +31,8 @@ services:
 
       TZ: Etc/UTC
 
-    # 320 MB against a measured steady state around 90 MB. The headroom is for a publish render
-    # and for the page cache; the image already caps V8's old space at 192 MB, so the container
-    # hits an OOM error it reports rather than a kernel kill that takes its neighbours with it.
+    # 320 MB against a ~90 MB steady state; the image caps V8's old space at 192 MB, so the
+    # process reports an OOM instead of being kernel-killed.
     mem_limit: 320m
     memswap_limit: 320m
     # Two vCPUs is the target box. This is a ceiling, not a reservation.
@@ -66,35 +46,13 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    # Three capabilities, each for one job, all of them used once at startup and then gone.
-    #
-    # `./data` above is a BIND mount, and a bind mount carries the ownership of the host directory
-    # — which is whoever ran `mkdir`, or root if Docker created it. No chown at image build time
-    # can reach that, so the entrypoint fixes it on first boot and drops to an unprivileged user.
-    # CHOWN to take ownership, SETUID and SETGID to give it up again.
-    #
-    # If you would rather have no root in the picture at all, remove this whole `cap_add` block
-    # and add `user: "1000:1000"`. The entrypoint detects that and does nothing but start the
-    # server. Two ways to give it a directory it can already write:
-    #
-    #   - a named volume (`neohomepage-data:/data` plus a top-level `volumes:` key) — it inherits
-    #     the image's ownership, so this needs nothing else. You lose `git init` on a real path.
-    #   - a bind mount you own: `mkdir -p data && sudo chown -R 1000:1000 data` on the host.
+    # CHOWN lets the entrypoint take ownership of the bind-mounted ./data on first boot; SETUID and
+    # SETGID let it drop to an unprivileged user. For no root at all, remove this block and set
+    # `user: "1000:1000"` on a directory that uid already owns (a named volume, or a host chown -R).
     cap_add:
       - CHOWN
       - SETUID
       - SETGID
-
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:7575/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
 
     logging:
       driver: json-file

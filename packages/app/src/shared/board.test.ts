@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ProjectionEnvelope } from '@neohomepage/catalog-schema'
 import { dashboard, isTemplate, TEMPLATES, widgetTile } from './board.ts'
@@ -30,7 +31,7 @@ const envelope = (overrides: Partial<ProjectionEnvelope> = {}): ProjectionEnvelo
     ...overrides,
   }) as ProjectionEnvelope
 
-const html = (node: unknown) => renderToStaticMarkup(node as never)
+const html = (node: ReactNode) => renderToStaticMarkup(node)
 
 describe('a widget with no data', () => {
   it('renders a placeholder when nothing has been fetched yet', () => {
@@ -38,9 +39,7 @@ describe('a widget with no data', () => {
   })
 
   it('renders a placeholder when the projection is null, rather than crashing', () => {
-    // This is the regression. A widget that has never succeeded carries `projection: null` with
-    // an error code, and the renderer used to read `.stats` straight off it — taking the entire
-    // page down on first paint, before any service had answered.
+    // A widget that has never succeeded carries `projection: null` with an error code.
     const failed = {
       projection: null,
       meta: { fetchedAt: null, ageMs: 0, state: 'error', errorCode: 'refused' },
@@ -51,7 +50,6 @@ describe('a widget with no data', () => {
     }
     const rendered = html(widgetTile(widget(), failed))
     expect(rendered).toContain('Unavailable')
-    // The code reaches the reader through the chip; nothing else about the failure does.
     expect(rendered).toContain('refused')
   })
 
@@ -70,8 +68,6 @@ describe('templates', () => {
   })
 
   it('renders a template this build does not have as a labelled placeholder', () => {
-    // A manifest from a newer catalog naming a template we cannot draw must say so, not render
-    // an empty tile that looks like a bug in the service.
     const rendered = html(widgetTile(widget({ template: 'timeline' }), envelope()))
     expect(rendered).toContain('Unsupported layout')
   })
@@ -105,8 +101,6 @@ describe('templates', () => {
   })
 
   it('clamps a gauge whose reading exceeds its total', () => {
-    // A service reporting used > total is not hypothetical, and a bar wider than its track looks
-    // like a rendering bug rather than a data one.
     const rendered = html(
       widgetTile(
         widget({ template: 'gauge-set' }),
@@ -139,8 +133,7 @@ describe('templates', () => {
   })
 
   it('keeps the link when the probe failed, and shows the failure in the chip', () => {
-    // Most services answer `/` with a redirect to a login page. That is a fact about the probe,
-    // not a reason for the bookmark to stop being one.
+    // Probing `/` usually hits a redirect to a login page.
     const failed = {
       projection: null,
       meta: { fetchedAt: null, ageMs: 0, state: 'error', errorCode: 'redirect' },
@@ -187,10 +180,8 @@ describe('formatted times', () => {
         } as unknown as Partial<ProjectionEnvelope>),
       ),
     )
-    // React serialises the prop as `dateTime`. HTML attribute names are ASCII case-insensitive,
-    // so the browser parses it to `datetime` and `el.dateTime` reads correctly — verified in a
-    // real browser rather than assumed, which is why the assertion is case-insensitive rather
-    // than "fixed" by fighting React's serialisation.
+    // React serialises the prop as `dateTime`; HTML attribute names are case-insensitive, so the
+    // browser reads it fine and the match is case-insensitive too.
     expect(rendered).toMatch(/datetime="2026-09-06T14:00:00\.000Z"/i)
     expect(rendered).toContain('<time')
     expect(rendered).toContain('in 2 hours')

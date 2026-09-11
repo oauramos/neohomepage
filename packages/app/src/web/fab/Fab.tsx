@@ -1,19 +1,14 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { useFocusTrap } from '../useFocusTrap.ts'
 
 /**
- * The editor entry point: a button in the bottom-left corner.
- *
- * Bottom-left rather than bottom-right on purpose — the right corner is where every chat widget,
- * cookie banner and scroll-to-top button already lives, and a dashboard is something people leave
- * open next to other things.
- *
- * The badge counts unpublished changes. It is the whole reason the manual publish path is
- * discoverable rather than hunted for.
+ * Editor entry point: a bottom-left button with a badge for unpublished changes. Bottom-left
+ * because the right corner is where chat widgets and cookie banners already live.
  */
 
 export type Tab = 'widgets' | 'sections' | 'edit' | 'theme' | 'config' | 'about'
 
-/** Sixteen-pixel line icons, drawn here so the editor ships no icon font and fetches nothing. */
+/** Inline line icons so the editor ships no icon font. */
 const ICONS: Record<Tab, ReactNode> = {
   widgets: (
     <>
@@ -94,63 +89,11 @@ export function Fab({
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const titleId = useId()
 
-  /**
-   * Escape closes, Tab stays inside.
-   *
-   * Escape returns focus to the button that opened the dialog — otherwise a keyboard user is
-   * dropped at the top of the document with no idea where they were.
-   *
-   * The trap is not optional decoration. `aria-modal="true"` tells a screen reader the rest of the
-   * page is inert; it does nothing whatsoever about Tab. Without this, focus walks out of the
-   * dialog and onto a board the user has just been told is not there, and the only way back is
-   * shift-tabbing past everything they passed on the way out.
-   */
-  useEffect(() => {
-    if (!open) return
-
-    const focusable = (): HTMLElement[] => {
-      const dialog = dialogRef.current
-      if (dialog === null) return []
-      return [
-        ...dialog.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
-            'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-        // Hidden elements are still matched by the selector; a disabled-looking control that is
-        // merely `display: none` would otherwise become a stop where nothing appears to happen.
-      ].filter((element) => element.offsetParent !== null || element === document.activeElement)
-    }
-
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false)
-        buttonRef.current?.focus()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const stops = focusable()
-      if (stops.length === 0) return
-      const first = stops[0] as HTMLElement
-      const last = stops[stops.length - 1] as HTMLElement
-      const active = document.activeElement
-
-      // Both directions. A trap that only wraps forwards sends the user out of the back of the
-      // dialog the first time they shift-tab, which is the more common way to go looking for a
-      // control you have just passed.
-      if (event.shiftKey && (active === first || active === dialogRef.current)) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKey)
-    dialogRef.current?.focus()
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  useFocusTrap(open, dialogRef, () => {
+    setOpen(false)
+    // Return focus to the opener so a keyboard user is not dropped at the top of the document.
+    buttonRef.current?.focus()
+  })
 
   const publish = async () => {
     setPublishing(true)
@@ -200,9 +143,6 @@ export function Fab({
               <span className="nh-modal-status" data-neo-connected={connected}>
                 {connected ? 'live' : 'reconnecting'}
               </span>
-              {/* Publishing belongs next to the state it acts on — the "live" pill and the
-                  unpublished-changes dot — rather than in a footer the panel has to be scrolled to
-                  reach. It keeps its accessible name; only the label became a glyph. */}
               <button
                 type="button"
                 className="nh-modal-action"

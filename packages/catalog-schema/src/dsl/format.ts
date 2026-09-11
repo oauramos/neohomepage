@@ -1,14 +1,10 @@
 import type { Json } from '../json.ts'
 
 /**
- * Terminal formatting. Locale is pinned to en-US and never taken from the host, so a recorded
- * fixture produces the same bytes on a contributor's machine, in CI, and on the user's NAS.
- *
- * Time-relative formats return `{ v, iso }` rather than a bare string. A published generation is
- * static HTML: without the raw instant travelling alongside the rendered text, a page rendered
- * three hours ago would keep insisting the episode airs "in 5 minutes" forever.
+ * Locale is pinned to en-US so recorded fixtures are byte-identical on every machine. Time formats
+ * return `{ v, iso }` so a statically published page can re-render the text from the raw instant.
  */
-export type FormattedTime = { readonly v: string; readonly iso: string; readonly rel: true }
+type FormattedTime = { readonly v: string; readonly iso: string; readonly rel: true }
 
 const NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
 const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' })

@@ -1,11 +1,8 @@
 import { z } from 'zod'
 
 /**
- * The universal render contract.
- *
- * Every widget, whatever it integrates with, projects into this one shape. That is what fixes the
- * number of React components while leaving the number of integrations unbounded: five templates
- * render Projection, and a new service is a JSON file rather than a component.
+ * The universal render contract: every widget projects into this one shape, so a fixed set of
+ * templates renders an unbounded set of integrations.
  */
 
 const timeValue = z.object({ v: z.string(), iso: z.string(), rel: z.literal(true) })
@@ -57,12 +54,8 @@ export const projectionSchema = z.object({
 export type Projection = z.infer<typeof projectionSchema>
 
 /**
- * Runtime envelope: what the browser actually receives for one widget.
- *
- * `projection` is nullable, and saying so is the point. A widget that has never succeeded has no
- * projection to show — only an error code — and a type that claimed otherwise produced exactly one
- * bug: the renderer read `.stats` off null and took the whole page down on first paint, before any
- * service had answered.
+ * What the browser receives for one widget; `projection` is null until the widget has
+ * succeeded once.
  */
 export type ProjectionEnvelope = {
   readonly projection: Projection | null

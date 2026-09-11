@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join, normalize } from 'node:path'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { stream } from 'hono/streaming'
 import type { AppContext } from '../context.ts'
 import { env } from '../env.ts'
@@ -31,13 +31,7 @@ import {
 } from './auth.ts'
 import { formatEvent, KEEPALIVE_FRAME } from './events.ts'
 
-/**
- * The HTTP surface.
- *
- * `GET /` serves a file. Not a render, not a cache lookup with a fallback — a file that was
- * written when the config last changed. That is what makes the dashboard's time-to-first-byte
- * independent of how many services it displays or whether any of them are up.
- */
+/** HTTP routes. `GET /` serves the last published generation as a static file. */
 
 export type AppOptions = {
   readonly context: AppContext
@@ -45,13 +39,30 @@ export type AppOptions = {
   readonly auth?: AuthConfig
 }
 
+// Frames queued to a socket before its subscriber is dropped; a synchronous fan-out is bounded by
+// the widget count, so a healthy client never gets near this.
+const MAX_QUEUED_FRAMES = 64
+
 async function readFileIfExists(path: string): Promise<string | null> {
   try {
-    const { readFile } = await import('node:fs/promises')
     return await readFile(path, 'utf8')
   } catch {
     return null
   }
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
+  }
+}
+
+function streamFile(c: Context, path: string) {
+  return stream(c, async (writable) => {
+    for await (const chunk of createReadStream(path)) await writable.write(chunk as Uint8Array)
+  })
 }
 
 export function createApp(options: AppOptions): Hono {
@@ -60,13 +71,7 @@ export function createApp(options: AppOptions): Hono {
   const auth = options.auth ?? readAuthConfig()
   assertAuthUsable(auth)
 
-  /**
-   * One gate in front of every mutating request.
-   *
-   * Registered before the routes rather than repeated in each handler, so a route added later is
-   * protected by default. There is a test that enumerates the router and fails if any non-GET
-   * route escapes this.
-   */
+  // Registered before the routes so a route added later is protected by default.
   app.use('*', async (c, next) => {
     const decision = checkWrite(
       auth,
@@ -78,8 +83,7 @@ export function createApp(options: AppOptions): Hono {
         contentType: c.req.header('content-type'),
         cookie: c.req.header('cookie'),
         forwardedUser: c.req.header('remote-user') ?? c.req.header('x-forwarded-user'),
-        // Only the SOCKET address, never a forwarded-for header: reading the header here would
-        // let anyone claim to be the trusted proxy, which is the failure the list exists to stop.
+        // Socket address only: a forwarded-for header would let anyone claim to be the trusted proxy.
         remoteAddress: (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)
           ?.incoming?.socket?.remoteAddress,
       },
@@ -92,8 +96,7 @@ export function createApp(options: AppOptions): Hono {
   app.get('/api/auth', (c) =>
     c.json({
       mode: auth.mode,
-      // Whether THIS request could write. The editor uses it to show a sign-in prompt instead of
-      // letting someone fill in a form that will be refused on submit.
+      // Whether this request could write, so the editor can prompt for sign-in up front.
       authenticated:
         auth.mode === 'none' ||
         verifySession(auth, readCookie(c.req.header('cookie'), SESSION_COOKIE), Date.now()),
@@ -104,8 +107,7 @@ export function createApp(options: AppOptions): Hono {
     if (auth.mode !== 'password') return c.json({ error: 'password login is not enabled' }, 400)
     const body = (await c.req.json()) as { username?: string; password?: string }
     if (!checkPassword(auth, body.username ?? '', body.password ?? '')) {
-      // One message for both a wrong username and a wrong password: distinguishing them tells an
-      // attacker which half to keep guessing.
+      // Same message for a wrong username and a wrong password, so neither can be guessed alone.
       return c.json({ error: 'incorrect username or password' }, 401)
     }
     const secure =
@@ -122,19 +124,13 @@ export function createApp(options: AppOptions): Hono {
   app.get('/api/health', (c) =>
     c.json({
       ok: true,
-      // Deliberately reports nothing about paths, versions or configured services: this endpoint
-      // is reachable without authentication.
+      // Reachable without authentication, so nothing about paths, versions or services.
       uptimeSeconds: Math.round(process.uptime()),
     }),
   )
 
-  /**
-   * The published page.
-   *
-   * Falls back to the SPA shell when no generation exists yet — a first boot, or a render that
-   * failed before anything was ever published. The shell fetches the same state and renders the
-   * same component tree, so the two paths cannot look different.
-   */
+  // Falls back to the SPA shell when nothing has been published yet; the shell renders the same
+  // component tree from the same state.
   app.get('/', async (c) => {
     const generation = await context.generations.current()
     if (generation !== null) {
@@ -167,21 +163,13 @@ export function createApp(options: AppOptions): Hono {
   app.get('/_app/*', async (c) => {
     if (options.webDistDir === undefined) return c.notFound()
     const requested = decodeURIComponent(c.req.path.slice('/_app/'.length))
-    // Normalising and then re-checking the prefix is what stops `..` escaping the dist directory.
+    // Normalise, then re-check the prefix so `..` cannot escape the dist directory.
     const resolvedPath = normalize(join(options.webDistDir, requested))
     if (!resolvedPath.startsWith(normalize(options.webDistDir))) return c.notFound()
-    try {
-      const info = await stat(resolvedPath)
-      if (!info.isFile()) return c.notFound()
-    } catch {
-      return c.notFound()
-    }
+    if (!(await isFile(resolvedPath))) return c.notFound()
     c.header('Cache-Control', 'public, max-age=31536000, immutable')
     c.header('Content-Type', contentType(resolvedPath))
-    return stream(c, async (writable) => {
-      const readable = createReadStream(resolvedPath)
-      for await (const chunk of readable) await writable.write(chunk as Uint8Array)
-    })
+    return streamFile(c, resolvedPath)
   })
 
   app.get('/api/state', async (c) => {
@@ -196,13 +184,8 @@ export function createApp(options: AppOptions): Hono {
     })
   })
 
-  /**
-   * Refresh one widget.
-   *
-   * The client names a widget id. It cannot name a URL, a path, a header or a method — the server
-   * derives all four from the widget's target and its manifest. That is the invariant the whole
-   * egress design rests on, and this is the only shape of request that can reach an upstream.
-   */
+  // The client names only a widget id; URL, path, headers and method come from the widget's
+  // manifest. This is the only request shape that can reach an upstream.
   app.post('/api/widgets/:id/refresh', async (c) => {
     const ok = await context.refreshWidget(c.req.param('id'))
     if (!ok) return c.json({ error: 'unknown widget' }, 404)
@@ -218,42 +201,23 @@ export function createApp(options: AppOptions): Hono {
     })
   })
 
-  /**
-   * Serve an uploaded background.
-   *
-   * `data/assets/` has been created, backed up and walked by doctor since v1 with nothing serving
-   * it, which is why setting a background by hand produced a 404 and a still-white page. This is
-   * that route — and it is deliberately narrow: only the backgrounds subdirectory, and only ids in
-   * the shape the store emits. There is no path to traverse because there is no path from the
-   * client, only an id that must match a 32-hex-plus-known-extension pattern.
-   */
+  // Only the backgrounds subdirectory, and only ids in the shape the store emits
+  // (32 hex + known extension); no client-supplied path is ever joined.
   app.get('/assets/backgrounds/:id', async (c) => {
     const id = c.req.param('id')
     if (!isAssetId(id)) return c.notFound()
     const path = join(env.assetsDir, BACKGROUNDS_SUBDIR, id)
-    try {
-      const info = await stat(path)
-      if (!info.isFile()) return c.notFound()
-    } catch {
-      return c.notFound()
-    }
+    if (!(await isFile(path))) return c.notFound()
     // Content addressed, so the bytes behind an id can never change: cache them forever.
     c.header('Cache-Control', 'public, max-age=31536000, immutable')
     c.header('Content-Type', assetMime(id))
-    // An image served from the dashboard's own origin is still a file a stranger uploaded. This
-    // stops a browser from second-guessing the type and running it as something else.
+    // A stranger uploaded this file: stop the browser sniffing it as something else.
     c.header('X-Content-Type-Options', 'nosniff')
-    return stream(c, async (writable) => {
-      const readable = createReadStream(path)
-      for await (const chunk of readable) await writable.write(chunk as Uint8Array)
-    })
+    return streamFile(c, path)
   })
 
-  /**
-   * A cached service icon. Served with a sandboxing policy on top of the type check the store
-   * made when it saved the file: an SVG is a document, and one that ever slipped through must not
-   * be able to run anything on this origin even when opened directly.
-   */
+  // CSP on top of the store's type check: an SVG that slipped through must not run anything on
+  // this origin when opened directly.
   app.get('/assets/icons/:slug', async (c) => {
     const file = context.icons().fileFor(c.req.param('slug'))
     if (file === null) return c.json({ error: 'unknown icon' }, 404)
@@ -270,13 +234,8 @@ export function createApp(options: AppOptions): Hono {
     c.json({ assets: await listBackgrounds(env.assetsDir) }),
   )
 
-  /**
-   * Upload one image as raw bytes.
-   *
-   * Raw rather than multipart: multipart carries a filename, and a filename is the one field here
-   * that would be attacker-controlled text on its way to a path. Not accepting it is simpler than
-   * sanitising it.
-   */
+  // Raw bytes rather than multipart: a multipart filename would be attacker-controlled text on
+  // its way to a path.
   app.post('/api/assets/backgrounds', async (c) => {
     const declared = Number(c.req.header('content-length') ?? '0')
     if (declared > MAX_ASSET_BYTES) {
@@ -296,34 +255,35 @@ export function createApp(options: AppOptions): Hono {
     return removed ? c.json({ ok: true }) : c.json({ error: 'unknown asset' }, 404)
   })
 
-  /**
-   * Live updates.
-   *
-   * One connection per tab. The first frame is the current state, so a client that connects late
-   * does not sit blank waiting for something to change.
-   */
+  // One SSE connection per tab; the first frame is the current state so a late client is not blank.
   app.get('/api/events', (c) => {
     if (context.hub.atCapacity) {
-      // Refusing is better than accepting and degrading everyone already connected.
       return c.text('too many event subscribers', 503)
     }
 
     c.header('Content-Type', 'text/event-stream')
     c.header('Cache-Control', 'no-cache, no-transform')
     c.header('Connection', 'keep-alive')
-    // Nginx buffers text/event-stream by default, which turns live updates into batches minutes
-    // apart. This is the header that stops it.
+    // Nginx buffers text/event-stream by default; this header disables it.
     c.header('X-Accel-Buffering', 'no')
 
     return stream(c, async (writable) => {
       let closed = false
+      let queued = 0
       const { release } = context.hub.add({
         send: (event) => {
           if (closed) throw new Error('closed')
-          void writable.write(formatEvent(event))
+          // StreamingApi.write() never rejects, so backlog is the only signal a stalled tab gives.
+          if (queued >= MAX_QUEUED_FRAMES) throw new Error('subscriber stopped reading')
+          queued++
+          void writable.write(formatEvent(event)).finally(() => {
+            queued--
+          })
         },
         close: () => {
           closed = true
+          // Drops queued frames; the browser's EventSource reconnects and gets a fresh hello.
+          writable.abort()
         },
       })
 
@@ -347,7 +307,7 @@ export function createApp(options: AppOptions): Hono {
     })
   })
 
-  app.route('/api', createApiRoutes({ context, catalog: () => context.catalog() }))
+  app.route('/api', createApiRoutes({ context }))
 
   return app
 }

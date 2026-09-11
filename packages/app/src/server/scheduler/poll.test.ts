@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { Json } from '@neohomepage/catalog-schema'
 import { ProjectionCache } from './cache.ts'
 import { PollScheduler, type FetchOutcome } from './scheduler.ts'
 
-/**
- * Time is injected, so an hour of idle decay costs a millisecond to test. Nothing here waits.
- */
+/** Injected clock and timers, so no test waits. */
 function harness(options: { concurrency?: number } = {}) {
   let now = 1_700_000_000_000
   const timers: { at: number; callback: () => void }[] = []
@@ -29,22 +28,17 @@ function harness(options: { concurrency?: number } = {}) {
     advance(ms: number) {
       now += ms
     },
-    get now() {
-      return now
-    },
     async tick() {
       await scheduler.tick()
     },
   }
 }
 
-const ok = (projection: unknown): FetchOutcome => ({ ok: true, projection: projection as never })
+const ok = (projection: Json): FetchOutcome => ({ ok: true, projection })
 const fail = (code: string): FetchOutcome => ({ ok: false, code })
 
 describe('sharing one fetch across subscribers', () => {
   it('runs a key once per interval no matter how many widgets want it', async () => {
-    // Two widgets on the same Sonarr queue is one request. Client-side polling would make it one
-    // request per widget per tab.
     const h = harness()
     let calls = 0
     const spec = {
@@ -91,7 +85,7 @@ describe('idle decay', () => {
     await h.tick()
     expect(calls).toBe(2)
 
-    // Now unobserved: the next poll should be an idle interval away, not a normal one.
+    // Unobserved now: a normal interval is not enough.
     h.advance(60_000)
     await h.tick()
     expect(calls).toBe(2)
@@ -100,8 +94,7 @@ describe('idle decay', () => {
     await h.tick()
     expect(calls).toBe(3)
 
-    // A viewer returns: fetch now, not at the decayed interval, or the first thing they see is a
-    // ten-minute-old number.
+    // A returning viewer triggers an immediate fetch.
     h.scheduler.register(spec)
     await h.tick()
     expect(calls).toBe(4)
@@ -167,7 +160,6 @@ describe('failures', () => {
       execute: async () => (calls++, fail('refused')),
     })
 
-    // Three failures at the normal interval, then it stretches.
     for (let i = 0; i < 3; i++) {
       await h.tick()
       h.advance(60_000)
@@ -200,7 +192,6 @@ describe('failures', () => {
 
 describe('change notification', () => {
   it('announces only real content changes', async () => {
-    // Most polls return the same numbers. Waking every browser for them is pure cost.
     const h = harness()
     const seen: string[] = []
     h.scheduler.onUpdate((key) => seen.push(key))
@@ -240,7 +231,6 @@ describe('change notification', () => {
 
 describe('concurrency', () => {
   it('never exceeds the in-flight budget', async () => {
-    // Forty widgets must not open forty sockets at once on a 2-vCPU box.
     const h = harness({ concurrency: 2 })
     let active = 0
     let peak = 0
@@ -263,10 +253,18 @@ describe('concurrency', () => {
     }
 
     const running = h.tick()
-    // Release in waves; the scheduler must never have had more than two open at once.
-    while (settle.length > 0) (settle.shift() as () => void)()
+    // Yield between waves so a freed slot can pick up the next key.
+    let released = 0
+    for (let i = 0; i < 100 && released < 10; i++) {
+      await new Promise((resolve) => setImmediate(resolve))
+      while (settle.length > 0) {
+        ;(settle.shift() as () => void)()
+        released++
+      }
+    }
     await running
     expect(peak).toBeLessThanOrEqual(2)
+    expect(released).toBe(10)
   })
 })
 

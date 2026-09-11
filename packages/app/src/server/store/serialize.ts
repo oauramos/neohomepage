@@ -1,13 +1,8 @@
 import { z } from 'zod'
 
 /**
- * Deterministic JSON serialisation.
- *
- * The config directory is meant to live in git, so a one-field change must be a one-line diff.
- * Three rules get there, and all three are tested: keys come out in the schema's declaration
- * order — recursively, so a layout item reads `i, x, y, w, h` rather than the alphabetical
- * `h, i, w, x, y` — every value equal to its schema default is dropped, and the file ends with
- * exactly one LF.
+ * Deterministic JSON serialisation for config files kept in git: keys in schema declaration order
+ * (recursively), values equal to their schema default dropped, exactly one trailing LF.
  */
 
 export type SerializeOptions = {
@@ -15,15 +10,13 @@ export type SerializeOptions = {
   readonly schema?: z.ZodType
   /** Fallback ordering for a value with no schema. */
   readonly keyOrder?: readonly string[]
-  /** Top-level values matching these are omitted, keeping files sparse. */
+  /** Top-level values equal to these are omitted. */
   readonly defaults?: Readonly<Record<string, unknown>>
 }
 
 /**
- * JavaScript pins integer-like object keys to the front, in ascending numeric order, even after an
- * explicit sort. A "deterministic" serialiser that ignores this silently is not one, so a
- * numeric-like key anywhere in the tree is refused rather than quietly reordered. Config uses
- * arrays of `{id, ...}` or prefixed ids instead.
+ * JavaScript orders integer-like object keys first, ascending, regardless of sorting, so such a
+ * key anywhere in the tree is refused; config uses arrays of `{id, ...}` or prefixed ids instead.
  */
 export class NumericKeyError extends Error {
   constructor(path: string, key: string) {
@@ -42,15 +35,14 @@ const NUMERIC_LIKE = /^(0|[1-9]\d*)$/
 function unwrap(schema: z.ZodType | undefined): z.ZodType | undefined {
   let current = schema
   for (let depth = 0; depth < 10 && current !== undefined; depth++) {
-    const kind = (current as { def?: { type?: string } }).def?.type
     if (
-      kind === 'optional' ||
-      kind === 'nullable' ||
-      kind === 'default' ||
-      kind === 'prefault' ||
-      kind === 'catch'
+      current instanceof z.ZodOptional ||
+      current instanceof z.ZodNullable ||
+      current instanceof z.ZodDefault ||
+      current instanceof z.ZodPrefault ||
+      current instanceof z.ZodCatch
     ) {
-      current = (current as unknown as { unwrap(): z.ZodType }).unwrap()
+      current = current.unwrap() as z.ZodType
       continue
     }
     return current
@@ -104,8 +96,7 @@ function normalise(
     if (NUMERIC_LIKE.test(key)) throw new NumericKeyError(path === '' ? '(root)' : path, key)
     const child = record[key]
     if (child === undefined) continue
-    // A key the schema does not name (a record entry, or a field from a newer release) still
-    // recurses through the record's value schema so its own contents stay ordered.
+    // Keys the schema does not name (record entries, newer fields) still order via the record's value schema.
     const childSchema = shape?.[key] ?? elementSchema(schema)
     out[key] = normalise(child, path === '' ? key : `${path}.${key}`, childSchema, [])
   }
@@ -151,17 +142,14 @@ export function serialize(value: unknown, options: SerializeOptions = {}): strin
   return `${JSON.stringify(ordered, null, 2)}\n`
 }
 
-/** Declaration order of a Zod object's keys, so serialisation follows the schema, not the author. */
+/** Declaration order of a Zod object's keys. */
 export function schemaKeyOrder(schema: z.ZodObject): readonly string[] {
   return Object.keys(schema.shape)
 }
 
 /**
- * Defaults a Zod object declares, for the drop-defaults pass.
- *
- * Parsing `{}` would only work for a schema with no required fields, which no real config file
- * has. Each field is probed with `undefined` instead: that succeeds exactly when the field
- * supplies a default, and it does not depend on Zod's internal representation.
+ * Defaults a Zod object declares. Each field is probed with `undefined` rather than parsing `{}`,
+ * which would fail on any required field.
  */
 export function schemaDefaults(schema: z.ZodObject): Record<string, unknown> {
   const defaults: Record<string, unknown> = {}

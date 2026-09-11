@@ -8,16 +8,9 @@ import type {
   Theme,
   Widget,
 } from '../config/schema.ts'
-import { effectiveSections, gridSectionIds, sectionOf } from '../config/sections.ts'
+import { gridSectionIds, sectionGeometry, sectionOf } from '../config/sections.ts'
 
-/**
- * The whole config tree in memory.
- *
- * Every mutation validates the *entire prospective tree*, not just the file being written. Almost
- * every interesting invariant is cross-file — a layout entry pointing at a deleted widget, a
- * widget pointing at a target that no longer exists — and per-file validation cannot see any of
- * them.
- */
+/** The whole config tree in memory; every mutation validates the entire prospective tree, since most invariants are cross-file. */
 export type ConfigTree = {
   readonly dashboard: Dashboard
   readonly theme: Theme
@@ -50,11 +43,7 @@ export function toMutable(tree: ConfigTree): MutableConfigTree {
   }
 }
 
-/**
- * A content revision for optimistic concurrency. The browser sends it back as `If-Match` and an
- * MCP agent as `baseRevision`; a mismatch is a 409 telling the caller to re-read rather than
- * clobber. Sorted map entries so the hash depends on content, never on insertion order.
- */
+/** Content revision for optimistic concurrency (`If-Match` / `baseRevision`); map entries are sorted so the hash depends on content, not insertion order. */
 export function treeRevision(tree: ConfigTree): string {
   const sorted = (map: ReadonlyMap<string, unknown>) =>
     [...map.entries()].sort(([a], [b]) => a.localeCompare(b, 'en-US'))
@@ -72,11 +61,7 @@ export function treeRevision(tree: ConfigTree): string {
 
 export type Problem = { readonly path: string; readonly message: string }
 
-/**
- * Cross-file invariants. Everything here is a state the UI, an importer or an MCP agent could
- * otherwise produce, and every one of them renders as a blank tile or a crash rather than an
- * error message if it reaches disk.
- */
+/** Cross-file invariants that per-file schema validation cannot see. */
 export function validateTree(tree: ConfigTree): Problem[] {
   const problems: Problem[] = []
 
@@ -112,8 +97,7 @@ export function validateTree(tree: ConfigTree): Problem[] {
     if (!page.grid.breakpoints.some((b) => b.minWidth === 0)) {
       problems.push({
         path: `pages/${id}.json`,
-        // Without a zero-width tier the narrowest screens get no rules at all and the board
-        // collapses into a single column stack with no positioning.
+        // Without a zero-width tier the narrowest screens have no grid rules at all.
         message: 'the narrowest breakpoint must start at minWidth 0',
       })
     }
@@ -128,8 +112,7 @@ export function validateTree(tree: ConfigTree): Problem[] {
       seen.add(breakpoint.minWidth)
     }
 
-    // Section, group, link and navbar item ids all end up in CSS selectors and React keys, and a
-    // duplicate is a tile drawn twice or a group that cannot be addressed for removal.
+    // Section, group, link and navbar item ids become CSS selectors and React keys.
     const sectionIds = new Set<string>()
     for (const section of page.sections) {
       if (sectionIds.has(section.id)) {
@@ -193,7 +176,6 @@ export function validateTree(tree: ConfigTree): Problem[] {
     if (page.sections.length > 0 && gridSectionIds(page).length === 0) {
       problems.push({
         path: `pages/${id}.json`,
-        // Widgets need somewhere to be; a page of only bookmarks is fine until one is added.
         message: 'a page that declares sections needs at least one grid section',
       })
     }
@@ -234,20 +216,13 @@ export function validateTree(tree: ConfigTree): Problem[] {
       [...tree.widgets.values()].filter((w) => w.page === pageId).map((w) => [w.id, w]),
     )
     // A grid section may narrow the page's columns or cap its rows; the bounds are the section's.
-    const sections = new Map(
-      effectiveSections(page)
-        .filter((section) => section.kind === 'grid')
-        .map((section) => [section.id, section]),
-    )
     const boundsOf = (widgetId: string, breakpointId: string) => {
       const widget = pageWidgets.get(widgetId)
-      const section = widget === undefined ? undefined : sections.get(sectionOf(widget, page) ?? '')
-      const pageCols = page.grid.breakpoints.find((b) => b.id === breakpointId)?.cols ?? 0
-      return {
-        cols: section?.kind === 'grid' ? (section.cols[breakpointId] ?? pageCols) : pageCols,
-        maxRows:
-          section?.kind === 'grid' ? (section.maxRows ?? page.grid.maxRows) : page.grid.maxRows,
-      }
+      const { cols, maxRows } = sectionGeometry(
+        page,
+        widget === undefined ? undefined : sectionOf(widget, page),
+      )
+      return { cols: cols[breakpointId] ?? 0, maxRows }
     }
 
     for (const [breakpointId, items] of Object.entries(layout.layouts)) {
@@ -264,7 +239,6 @@ export function validateTree(tree: ConfigTree): Problem[] {
         if (!pageWidgets.has(item.i)) {
           problems.push({
             path: `layouts/${pageId}.json`,
-            // An orphaned entry is invisible until someone opens the editor and finds a ghost.
             message: `layout ${breakpointId} references widget "${item.i}", which is not on this page`,
           })
         }

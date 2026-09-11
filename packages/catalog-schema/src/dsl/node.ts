@@ -1,17 +1,9 @@
 import { z } from 'zod'
 
 /**
- * The projection DSL.
- *
- * A widget manifest is downloaded from a public catalog and then evaluated against a credentialed
- * service on the user's LAN. That single fact dictates the whole design: the language is a JSON
- * node tree, not a string to parse; there is no `eval`, no `new Function`, no regular expressions
- * (so no ReDoS), no recursion and no user-defined functions. It is total — a missing path yields
- * null rather than an exception — and it terminates by construction, with static caps enforced at
- * load time and a fuel budget enforced at run time.
- *
- * The operator set is closed and every member earns its place by a real widget. It is deliberately
- * cheaper to add an operator here, with a test, than to add an escape hatch.
+ * The projection DSL: a closed JSON node tree that untrusted catalog manifests use against
+ * credentialed LAN services, so no eval, regexes, recursion or user-defined functions. Total (a
+ * missing path yields null) and terminating by static caps at load time plus a run-time fuel budget.
  */
 
 export const COMPARISONS = ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'] as const
@@ -129,16 +121,14 @@ export const OP_NAMES = [
 export type OpName = (typeof OP_NAMES)[number]
 
 /**
- * A path is a dotted walk with numeric segments indexing arrays: `series.title`, `records.0.size`,
- * `$` for the whole scope root. No wildcards, no filters, no expressions — anything richer belongs
- * in an operator where it can be reviewed.
+ * Dotted walk with numeric segments indexing arrays (`series.title`, `records.0.size`); `$` is the
+ * scope root. No wildcards, filters or expressions.
  */
 const pathSchema = z
   .string()
   .max(200)
-  // The head is either the source root `$` or a plain identifier naming a binding; `$` is not
-  // allowed inside an identifier, so a typo like `$$$` is refused at review time rather than
-  // silently resolving to null forever and leaving a widget mysteriously blank.
+  // Head is the root `$` or a binding identifier; `$` is not allowed inside an identifier, so a
+  // typo like `$$$` is refused instead of resolving to null forever.
   .regex(/^\$(\.[A-Za-z0-9_-]+)*$|^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_-]+)*$/, 'invalid path')
 
 const bindingName = z.string().regex(/^[a-z][A-Za-z0-9]{0,31}$/, 'invalid binding name')

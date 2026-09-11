@@ -12,40 +12,11 @@ import {
 export { DARK_DEFAULTS, LIGHT_DEFAULTS, THEME_TOKENS }
 export type { ThemeToken }
 
-/**
- * Theme tokens and the base stylesheet baked into a published generation.
- *
- * Every colour is a custom property on `:root`, so the editor changing a theme is a property write
- * rather than a rebuild — and the same token set is what the SPA applies at runtime. Those are two
- * paths to one appearance, which is exactly the shape that produced the layout parity test, so
- * they get one too: `THEME_TOKENS` is the single list both sides iterate.
- */
+/** Theme tokens and the base stylesheet baked into a published generation. */
 
-/**
- * One rule, and the last place a token value can be refused.
- *
- * This string is interpolated into an inline `<style>` in the published page, so a value that can
- * end a declaration is not a broken declaration — it is the end of the stylesheet and the start of
- * whatever comes next. `}` closes the rule, `<` closes the element, and the quiet ones are worse:
- * an unclosed `"`, `'` or `(` swallows every declaration after it, and `/*` comments them out.
- * Measured in Chromium, a single stray quote in one token took four rules with it, including the
- * emitted grid CSS that positions every tile — the whole board unpositioned by one character.
- *
- * Nothing in the app writes such a value: the design panel converts colours itself, and the MCP
- * design tools only emit members of closed tables. But `config/theme.json` is a file a person
- * edits, `themeSchema` keeps whatever it finds, and the point of a guard at the sink is that it
- * holds when the thing upstream of it changes.
- *
- * So this is a grammar rather than a blacklist, because a blacklist has to keep guessing what CSS
- * treats as a terminator. The name must be a token the stylesheet consumes; the value must use
- * only the characters the shipped values use, close every bracket and quote it opens, and not
- * name a URL — a token value has never needed one, and a published page that fetches a remote
- * image is a page that tells someone else who is looking at it. All 1514 values in this
- * repository pass unchanged, so anything that does not is a mistake, and painting it is the bug.
- */
 const KNOWN_TOKENS = new Set<string>(ALL_TOKENS)
 
-/** Every character the presets, the finishes and the defaults actually use, and nothing else. */
+/** Only the characters the shipped token values use. */
 const VALUE_GRAMMAR = /^[A-Za-z0-9 ,.%#()/"'_+-]+$/
 
 function balanced(value: string, open: string, close: string): boolean {
@@ -61,6 +32,9 @@ function even(value: string, character: string): boolean {
   return [...value].filter((each) => each === character).length % 2 === 0
 }
 
+// Token values are interpolated into an inline <style>; `themeSchema` keeps whatever
+// `config/theme.json` holds, so an unbalanced quote/paren, `}` or `<` would truncate the
+// stylesheet, and url() would make the page fetch a remote resource. Allowlist, not blacklist.
 const safe = (name: string, value: string) =>
   KNOWN_TOKENS.has(name) &&
   VALUE_GRAMMAR.test(value) &&
@@ -77,14 +51,8 @@ function block(selector: string, tokens: Record<string, string>): string {
   return `${selector}{${declarations}}`
 }
 
-/**
- * Drop an unusable override BEFORE the merge, so the token falls back instead of vanishing.
- *
- * The filter in `block` is the guard that cannot be got past; this is the one that keeps the page
- * whole. Refusing at the sink alone leaves `--nh-accent` undefined — every rule that reads it then
- * paints nothing — where dropping the override here lets the preset's own accent stand, which is
- * what someone whose hand-edited file has one bad line would expect to see.
- */
+// Dropped before the merge so a bad override falls back to the preset value instead of leaving
+// the token undefined (the filter in `block` alone would leave e.g. `--nh-accent` unset).
 function withoutUnusableOverrides(theme: Theme): Theme {
   const cssVars = Object.fromEntries(
     (['theme', 'light', 'dark'] as const).map((bucket) => [
@@ -98,16 +66,10 @@ function withoutUnusableOverrides(theme: Theme): Theme {
 }
 
 /**
- * Emit the theme as CSS.
- *
- * Light is defined on bare `:root` so it is the fallback everywhere. Dark is defined twice — once
- * under `prefers-color-scheme` guarded against an explicit light choice, and once under
- * `[data-theme="dark"]` — so an explicit choice wins in both directions and the default "system"
- * setting still follows the OS.
+ * Light on bare `:root` as the fallback; dark both under `prefers-color-scheme` (guarded against an
+ * explicit light choice) and under `[data-theme="dark"]`, so an explicit choice wins either way.
  */
 export function themeVariables(theme: Theme): string {
-  // Both emitted blocks come from resolveTokens, the same function the browser calls when the
-  // editor changes a colour. That is what makes the parity test meaningful rather than decorative.
   const usable = withoutUnusableOverrides(theme)
   const light = resolveTokens(usable, 'light')
   const dark = resolveTokens(usable, 'dark')
@@ -123,10 +85,7 @@ export function themeVariables(theme: Theme): string {
   return parts.join('\n')
 }
 
-/**
- * The stylesheet that makes a published page readable with no JavaScript and no bundle. Tailwind
- * builds the editor; this is what a `curl` of the dashboard renders as.
- */
+/** Stylesheet a published page renders with, without JavaScript or the editor bundle. */
 export const BASE_STYLESHEET = `
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
@@ -212,27 +171,21 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
   box-shadow:var(--nh-link-shadow)}
 .nh-bookmarks[data-neo-display="cards"] .nh-bm:hover{background:var(--nh-link-bg-hover)}
 .nh-bookmarks[data-neo-display="cards"] .nh-bm-label{white-space:normal}
-/* A theme change is a custom property on :root, which invalidates style for the whole document —
-   and a board is thirty-odd tiles. Measured while dragging the radius slider: 13ms median and 63ms
-   at the 95th percentile with 32 tiles, against 1.8ms and 3.3ms with four. The work is per-tile
-   paint, so the fix is per-tile too. Containment promises a tile's layout and paint stay inside
-   it; content-visibility lets the browser skip the ones scrolled out of view entirely. The board is
-   absolutely positioned from the emitted grid CSS, so every tile already has its height and
-   skipping one cannot move anything. */
+/* A :root token change restyles every tile; containment and content-visibility keep the work
+   per-tile. Safe because the grid CSS positions tiles absolutely with fixed heights, so skipping
+   one moves nothing. */
 .nh-tile{background:var(--nh-surface);color:var(--nh-surface-foreground);
   border:var(--nh-border-width) solid var(--nh-border);border-radius:var(--nh-radius);
   box-shadow:var(--nh-shadow);padding:12px 14px;overflow:hidden;
   contain:layout paint;content-visibility:auto;
   display:flex;flex-direction:column;gap:8px}
-/* State is carried on the tile and was, until now, painted by nothing: a dead service and a
-   healthy one were the same rectangle apart from an 11px chip. A left rule reads across a room. */
+/* A left rule so a failing tile reads at a distance, not only from the 11px chip. */
 .nh-tile[data-neo-state="error"]{border-color:color-mix(in oklch,var(--nh-bad) 55%,var(--nh-border));
   box-shadow:var(--nh-shadow),inset 3px 0 0 0 var(--nh-bad)}
 .nh-tile[data-neo-state="stale"]{box-shadow:var(--nh-shadow),inset 3px 0 0 0 var(--nh-warn)}
 .nh-tile[data-neo-state="pending"] .nh-tile-body{opacity:0.7}
-/* A bookmark is never "waiting for data": its link is there from the first render. Dimming it
-   like a reading that has not arrived also dropped a solid-filled button below 4.5:1 on four
-   presets, which axe saw the moment link tiles stopped rendering as placeholders. */
+/* A link tile has nothing to wait for; dimming it also drops solid-filled buttons under 4.5:1 on
+   some presets. */
 .nh-tile[data-neo-template="link-tile"][data-neo-state="pending"] .nh-tile-body{opacity:1}
 .nh-tile-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .nh-tile-titles{display:flex;align-items:center;gap:8px;min-width:0}
@@ -244,18 +197,14 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 /* min() so a pill stays a pill on rounded themes and squares off on the zero-radius ones. */
 .nh-chip{font-size:0.6875rem;padding:2px 6px;border-radius:min(999px,max(var(--nh-radius),2px));
   background:var(--nh-muted);color:var(--nh-muted-foreground)}
-/* The tone rides the RING, not the fill. A tinted fill put the bad colour on an 18% wash of
-   itself, which measured 3.82:1 and had never been seen by axe because the accessibility board
-   carried no widgets - while bad-on-muted is the exact pair theme-contrast.test.ts proves for
-   every preset. Keeping the fill at muted is what makes that proof cover this chip. */
+/* Tone on the ring, fill stays muted: bad-on-muted is the pair theme-contrast.test.ts proves for
+   every preset; a tinted fill measured 3.82:1. */
 .nh-chip[data-neo-chip="error"]{background:var(--nh-muted);color:var(--nh-bad);
   box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--nh-bad) 50%,transparent)}
 .nh-chip[data-neo-chip="stale"]{background:var(--nh-muted);color:var(--nh-warn);
   box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--nh-warn) 50%,transparent)}
 .nh-placeholder{margin:0;color:var(--nh-muted-foreground);font-size:0.8125rem}
-/* A link tile IS a bookmark: the whole body is the target, not the few characters of its label.
-   Unstyled, this anchor measured 83x18 — under WCAG 2.5.8's 24x24 and a poor thing to aim a thumb
-   at, on the one widget whose entire job is being tapped. */
+/* The whole body is the target, not the label; min-height keeps it above WCAG 2.5.8's 24x24. */
 .nh-link{display:flex;align-items:center;justify-content:center;min-height:44px;height:100%;
   padding:8px 12px;border-radius:var(--nh-radius-control);text-decoration:none;
   color:var(--nh-link-color);font-weight:var(--nh-link-weight);background:var(--nh-link-bg);
@@ -278,7 +227,6 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-tile[data-neo-align="start"] .nh-placeholder{text-align:start;justify-content:flex-start}
 .nh-stat dt{font-size:0.6875rem;color:var(--nh-muted-foreground)}
 .nh-stat dd{margin:0;font-size:1.125rem;font-weight:600;font-variant-numeric:tabular-nums}
-/* The projection has been emitting a tone on every stat since v1 with no selector to receive it. */
 .nh-stat dd[data-neo-tone="ok"]{color:var(--nh-ok)}
 .nh-stat dd[data-neo-tone="warn"]{color:var(--nh-warn)}
 .nh-stat dd[data-neo-tone="bad"]{color:var(--nh-bad)}
@@ -287,8 +235,6 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-item-title{font-weight:500}
 .nh-item-subtitle{color:var(--nh-muted-foreground);font-size:0.75rem}
 .nh-item-badge{margin-left:auto;color:var(--nh-muted-foreground);font-variant-numeric:tabular-nums}
-/* gauge-set and status-badge shipped with no rules at all: an empty span with no width is
-   invisible, so two of the five templates drew literally nothing. */
 .nh-gauges{display:flex;flex-direction:column;gap:10px}
 .nh-gauge{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center}
 .nh-gauge-label{font-size:0.6875rem;color:var(--nh-muted-foreground);grid-column:1}
@@ -312,7 +258,6 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-status[data-neo-status="ok"] .nh-status-label{color:var(--nh-ok)}
 .nh-status[data-neo-status="degraded"] .nh-status-label{color:var(--nh-warn)}
 .nh-status[data-neo-status="down"] .nh-status-label{color:var(--nh-bad)}
-/* A first boot has no widgets, and rendered as an empty div: a heading over 32px of nothing. */
 .nh-board-empty{margin:16px;padding:28px 24px;border:var(--nh-border-width) dashed var(--nh-border);
   border-radius:var(--nh-radius);color:var(--nh-muted-foreground);text-align:center}
 .nh-board-empty strong{display:block;color:var(--nh-foreground);font-size:1rem;margin-bottom:4px}

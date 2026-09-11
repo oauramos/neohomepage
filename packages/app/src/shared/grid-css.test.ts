@@ -3,7 +3,7 @@ import { calcGridItemPosition } from 'react-grid-layout/core'
 import {
   emitGridCss,
   expectedCssGeometry,
-  UnsafeWidgetIdError,
+  UnsafeIdError,
   type Breakpoint,
   type GridConfig,
 } from './grid-css.ts'
@@ -33,8 +33,7 @@ describe('emitGridCss', () => {
     const css = emitGridCss(CONFIG, LAYOUTS)
     const queries = [...css.matchAll(/@media \(min-width:([\d.]+)px\)/g)].map((m) => Number(m[1]))
     expect(queries).toEqual([768, 1200])
-    // The narrowest breakpoint must not be wrapped, or a browser with no media query support
-    // (and the no-JS path we care about) would get no layout at all.
+    // The base breakpoint stays unwrapped so a browser without media queries still gets a layout.
     expect(css.indexOf('--nh-col')).toBeLessThan(css.indexOf('@media'))
   })
 
@@ -49,7 +48,7 @@ describe('emitGridCss', () => {
   it('refuses a widget id that could break out of the selector', () => {
     for (const hostile of ['a"]{color:red}[x', 'has space', '', '../etc', 'a}b']) {
       expect(() => emitGridCss(CONFIG, { sm: [{ i: hostile, x: 0, y: 0, w: 1, h: 1 }] })).toThrow(
-        UnsafeWidgetIdError,
+        UnsafeIdError,
       )
     }
   })
@@ -67,12 +66,8 @@ describe('emitGridCss', () => {
 })
 
 describe('CSS geometry against react-grid-layout', () => {
-  /**
-   * The static page positions items with calc(); the editor positions them with RGL's rounded
-   * integers. They cannot be bit-identical — the browser lays out in sub-pixels and RGL rounds —
-   * so the contract is that they never differ by as much as a whole pixel. A wider tolerance
-   * would let a real regression hide; a narrower one is not physically achievable.
-   */
+  // The browser lays out calc() in sub-pixels and RGL rounds to integers, so the contract is
+  // under one pixel of difference, not bit-identical.
   it('never differs from RGL by a whole pixel, across the parameter space', () => {
     let checked = 0
     let worst = 0
@@ -123,10 +118,6 @@ describe('CSS geometry against react-grid-layout', () => {
     }
 
     expect(checked).toBeGreaterThan(10_000)
-    expect({ worst, worstCase }).toEqual({
-      worst: expect.any(Number),
-      worstCase: expect.any(String),
-    })
-    expect(worst).toBeLessThan(1)
+    expect(worst, worstCase).toBeLessThan(1)
   })
 })

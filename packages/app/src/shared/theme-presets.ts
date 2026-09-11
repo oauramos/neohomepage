@@ -1,24 +1,9 @@
 /**
- * Named theme presets: a whole look in one identifier.
+ * Named theme presets: colours for both schemes plus shape/type tokens, resolved by `resolveTokens`
+ * as shape defaults < colour defaults < preset < user `cssVars`.
  *
- * `theme.preset` has existed in the schema since v1 and resolved to nothing — every install got
- * `LIGHT_DEFAULTS`/`DARK_DEFAULTS` and no way to ask for another look. This is the table that makes
- * the field mean something. A preset supplies a complete colour set for BOTH schemes plus the
- * non-colour tokens that carry as much of a theme's character as its hue does: corner radius,
- * border weight, elevation, the type stack, and how a bookmark button is painted.
- *
- * Precedence, resolved in `resolveTokens`: shape defaults, colour defaults, the preset, then the
- * user's own `cssVars`. So picking a preset never traps anyone — every token it sets stays
- * overridable from the design panel, and clearing an override falls back to the preset rather than
- * to the stock grey.
- *
- * This module deliberately imports nothing from `theme-tokens.ts`: that module imports THIS one to
- * resolve a preset, and a value-level cycle between them would be a real load-order bug rather
- * than a style opinion.
- *
- * Every colour here is `oklch(L C H)` because `contrast.ts` parses nothing else — a hex value
- * would make `contrastRatio` return null, and `theme-contrast.test.ts` treats null as a failure.
- * That is what keeps a pretty palette from shipping unreadable: see the preset matrix in that test.
+ * Must not import `theme-tokens.ts` (it imports this module; a value cycle is a load-order bug).
+ * Every colour is `oklch(L C H)` because `contrast.ts` parses nothing else.
  */
 
 import { GALLERY_PRESETS } from './theme-gallery.ts'
@@ -34,22 +19,15 @@ export type ThemePreset = {
   /** Scheme-independent: shape, elevation and type. */
   readonly shape: PresetTokens
   /**
-   * A generated background this preset asks for, as a `theme-backgrounds` id.
-   *
-   * Applied when someone PICKS the preset, not resolved into it: a background lives on
-   * `theme.surface` rather than in the token merge, and someone who then chooses a different one
-   * has to keep it. So this is a starting point the panel honours once, not a property of the
-   * theme — which is why it is an id here and not CSS.
+   * A `theme-backgrounds` id applied once when the preset is picked; it lives on `theme.surface`,
+   * not in the token merge.
    */
   readonly background?: string
 }
 
 /**
- * The non-colour tokens every preset may set.
- *
- * Listed as a contract for the same reason `THEME_TOKENS` is: the stylesheet consumes these by
- * name, and a preset that forgets one would silently inherit another preset's value at runtime
- * were it not for `SHAPE_DEFAULTS` filling the gap first.
+ * Non-colour tokens a preset may set; `SHAPE_DEFAULTS` fills any it omits so nothing leaks
+ * between presets.
  */
 export const SHAPE_TOKENS = [
   'radius',
@@ -75,7 +53,6 @@ export const SHAPE_TOKENS = [
 
 export type ShapeToken = (typeof SHAPE_TOKENS)[number]
 
-/** The shape of the board exactly as it looked before presets existed. */
 export const SHAPE_DEFAULTS: Record<ShapeToken, string> = {
   radius: '12px',
   'radius-control': '8px',
@@ -87,27 +64,20 @@ export const SHAPE_DEFAULTS: Record<ShapeToken, string> = {
   'title-tracking': '0.01em',
   'title-size': '0.8125rem',
   'link-bg': 'color-mix(in oklch,var(--nh-accent) 8%,transparent)',
-  // A translucent fill keeps the accent readable as text. A preset that paints a SOLID accent
-  // block must flip this to accent-foreground, or the label is the same colour as the button.
+  // A preset that paints a solid accent block must flip this to accent-foreground.
   'link-color': 'var(--nh-accent)',
   'link-bg-hover': 'color-mix(in oklch,var(--nh-accent) 22%,transparent)',
   'link-border': 'none',
   'link-shadow': 'none',
   'link-weight': '600',
   'max-width': '1600px',
-  // A reading — "Running 10" — sits bare on the tile by default; a preset or the design panel can
-  // box it (a muted fill and some padding) and centre it, per dashboard, and a widget can override.
+  // Readings sit bare by default; a preset, the design panel or a widget can box and centre them.
   'stat-bg': 'transparent',
   'stat-padding': '0',
   'stat-align': 'start',
 }
 
-/**
- * The stock look, named so it can be chosen back after trying another.
- *
- * Its colour maps are intentionally empty: leaving them out means "whatever LIGHT_DEFAULTS and
- * DARK_DEFAULTS say", so the default preset cannot drift away from the defaults it is named for.
- */
+// Empty colour maps fall through to LIGHT_DEFAULTS/DARK_DEFAULTS, so this cannot drift from them.
 const DEFAULT_PRESET: ThemePreset = {
   id: 'default',
   label: 'Default',
@@ -688,17 +658,11 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
 ]
 
 /**
- * Every preset a theme can name: the curated eleven plus the generated gallery.
- *
- * `resolveTokens` looks a preset up by id and must find gallery entries too, but the two lists stay
- * separate above so the design panel can present them as what they are — a short, opinionated set
- * with its own shape language, and a wide field to go shopping in.
- *
- * Imported lazily-shaped: `theme-gallery.ts` imports the TYPES from this module, so the value
- * import has to point the other way and only here, at the bottom, after ThemePreset exists.
+ * Curated presets plus the generated gallery; kept separate above so the design panel can present
+ * them differently.
  */
+export const ALL_PRESETS: readonly ThemePreset[] = [...THEME_PRESETS, ...GALLERY_PRESETS]
+
 export function presetById(id: string): ThemePreset | undefined {
   return ALL_PRESETS.find((preset) => preset.id === id)
 }
-
-export const ALL_PRESETS: readonly ThemePreset[] = [...THEME_PRESETS, ...GALLERY_PRESETS]

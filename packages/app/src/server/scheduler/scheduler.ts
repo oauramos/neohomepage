@@ -1,19 +1,11 @@
 import type { Json } from '@neohomepage/catalog-schema'
-import { DEFAULT_BACKOFF, nextIntervalMs, withJitter, type BackoffPolicy } from './backoff.ts'
+import { nextIntervalMs, withJitter } from './backoff.ts'
 import { ProjectionCache, type CacheView } from './cache.ts'
 import { TimerHeap } from './heap.ts'
 
 /**
- * The poll scheduler.
- *
- * One heap, one timer, one in-flight budget, shared by every browser tab. The alternative —
- * letting each open tab poll for itself — costs roughly five times as much for a household with
- * a phone, a desktop and a wall tablet all showing the same board, and it multiplies load on the
- * very services being displayed.
- *
- * Everything time- and IO-shaped is injected: the clock, the randomness, the timer and the
- * executor. That is what makes the whole loop testable without waiting for real seconds, and the
- * tests exercise idle decay over simulated hours.
+ * Poll scheduler shared by every browser tab: one heap, one timer, one in-flight budget. Clock,
+ * randomness, timer and executor are injected so tests can drive time.
  */
 
 export type FetchOutcome =
@@ -31,8 +23,6 @@ export type SchedulerDeps = {
   readonly random?: () => number
   readonly setTimer: (callback: () => void, delayMs: number) => unknown
   readonly clearTimer: (handle: unknown) => void
-  readonly policy?: BackoffPolicy
-  /** Simultaneous upstream requests. Forty widgets must not open forty sockets on a 2-vCPU box. */
   readonly concurrency?: number
 }
 
@@ -57,7 +47,7 @@ export class PollScheduler {
   #active = 0
   #queue: string[] = []
 
-  readonly #deps: Required<Omit<SchedulerDeps, 'policy'>> & { policy: BackoffPolicy }
+  readonly #deps: Required<SchedulerDeps>
 
   constructor(deps: SchedulerDeps) {
     this.#deps = {
@@ -66,7 +56,6 @@ export class PollScheduler {
       setTimer: deps.setTimer,
       clearTimer: deps.clearTimer,
       concurrency: deps.concurrency ?? 4,
-      policy: deps.policy ?? DEFAULT_BACKOFF,
     }
   }
 
@@ -80,21 +69,16 @@ export class PollScheduler {
   }
 
   /**
-   * Every key currently registered, fetched or not.
-   *
-   * Reconciliation must iterate THIS, not the cache: a key that was registered but has not
-   * succeeded yet has no cache entry, and a cleanup keyed on the cache would leave it polling a
-   * service for a widget that has been deleted.
+   * Every registered key, fetched or not; reconciliation must iterate this rather than the cache,
+   * which lacks keys that have not succeeded yet.
    */
   registeredKeys(): string[] {
     return [...this.#registrations.keys()]
   }
 
   /**
-   * Register a fetch, or add a subscriber to one that already exists.
-   *
-   * Returns an unsubscribe function rather than exposing a decrement, so a caller cannot
-   * accidentally release someone else's reference.
+   * Register a fetch or add a subscriber to an existing one; returns an unsubscribe bound to this
+   * reference.
    */
   register(spec: FetchSpec, options: { readonly observed?: boolean } = {}): () => void {
     const observed = options.observed ?? true
@@ -107,8 +91,7 @@ export class PollScheduler {
         unobservedSince: observed ? null : this.#deps.now(),
         inFlight: false,
       })
-      // First registration runs immediately: a page that has just opened should not wait a full
-      // interval to show anything.
+      // First registration fetches immediately so a fresh page is not blank for a full interval.
       this.#heap.schedule({ id: spec.key, dueAt: this.#deps.now(), value: spec.key })
     } else {
       existing.spec = spec
@@ -116,8 +99,7 @@ export class PollScheduler {
         const wasIdle = existing.subscribers === 0
         existing.subscribers++
         existing.unobservedSince = null
-        // Waking from idle: fetch now rather than at the decayed interval, or the first thing a
-        // returning viewer sees is a ten-minute-old number.
+        // Waking from idle fetches now instead of waiting out the decayed interval.
         if (wasIdle) this.#heap.schedule({ id: spec.key, dueAt: this.#deps.now(), value: spec.key })
       }
     }
@@ -163,13 +145,7 @@ export class PollScheduler {
     return this.cache.view(key, this.#deps.now())
   }
 
-  /**
-   * Fetch one key immediately, ignoring its backoff.
-   *
-   * This is what the refresh button and "test connection" call. Backoff exists to stop the app
-   * hammering a dead service on its own; a person explicitly asking is different, and making them
-   * wait out a fifteen-minute ladder after fixing the actual problem would be absurd.
-   */
+  /** Fetch one key now, ignoring its backoff; used by the refresh button and "test connection". */
   async refreshNow(key: string): Promise<void> {
     const registration = this.#registrations.get(key)
     if (registration === undefined || registration.inFlight) return
@@ -185,14 +161,19 @@ export class PollScheduler {
   }
 
   async #pump(): Promise<void> {
-    const started: Promise<void>[] = []
-    while (this.#queue.length > 0 && this.#active < this.#deps.concurrency) {
-      const key = this.#queue.shift() as string
-      const registration = this.#registrations.get(key)
-      if (registration === undefined || registration.inFlight) continue
-      started.push(this.#run(key, registration))
+    const worker = async (): Promise<void> => {
+      while (this.#queue.length > 0) {
+        const key = this.#queue.shift() as string
+        const registration = this.#registrations.get(key)
+        if (registration === undefined || registration.inFlight) continue
+        await this.#run(key, registration)
+      }
     }
-    await Promise.all(started)
+    // Count the free slots BEFORE starting any worker: #run increments #active synchronously.
+    const slots = Math.min(this.#deps.concurrency - this.#active, this.#queue.length)
+    const workers: Promise<void>[] = []
+    for (let i = 0; i < slots; i++) workers.push(worker())
+    await Promise.all(workers)
   }
 
   async #run(key: string, registration: Registration): Promise<void> {
@@ -204,8 +185,7 @@ export class PollScheduler {
       const outcome = await registration.spec.execute()
       if (outcome.ok) {
         const { changed } = this.cache.succeed(key, outcome.projection, at)
-        // Only a real content change is announced. Most polls return the same numbers, and
-        // waking every browser for them is pure cost.
+        // Only a real content change is announced; most polls return identical data.
         if (changed) this.#emit(key)
       } else {
         this.cache.fail(key, outcome.code, at, registration.spec.intervalMs)
@@ -238,7 +218,6 @@ export class PollScheduler {
       subscribers: registration.subscribers,
       unobservedForMs:
         registration.unobservedSince === null ? 0 : now - registration.unobservedSince,
-      policy: this.#deps.policy,
     })
     this.#heap.schedule({
       id: key,

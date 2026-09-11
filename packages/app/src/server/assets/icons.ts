@@ -2,32 +2,19 @@ import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
- * Service icons, by reference.
+ * Service icons by reference: config holds a slug, the file is fetched once into `state/icons/`
+ * and the page references the local copy, so a published dashboard loads nothing from the internet.
  *
- * A manifest names its icon by slug (`adguard-home`); so does a bookmark. The reference is the
- * only thing config ever holds — the URL it becomes is built here, against one of three sets this
- * build names — and the file is fetched once into `state/icons/`, a cache that is rebuilt when
- * deleted. The page then references the LOCAL copy, so a published dashboard never loads anything
- * from the internet on view and works the same on a LAN that has none.
- *
- * Five sets, told apart by prefix, the way gethomepage spells them:
- *
- *   nextcloud               dashboard-icons: full-colour logos of self-hosted things
- *   si-nextcloud            Simple Icons: one-colour brand marks, served in the brand colour
- *   si-claude-#D97757       the same, in a colour you chose
- *   lucide-search           Lucide: the interface glyphs shadcn and ReUI ship, painted in the
- *                           text colour (a mask) — or in a colour you chose, `-#hex`
- *   tabler-search           Tabler Icons, the same way
- *   mdi-router-network      Material Design Icons, the same way
- *
- * Offline network mode disables the fetch, and a reference that is absent renders as an initial in
- * a rounded square rather than a broken image. Misses are remembered for a while so a typo is not
- * a request to a CDN on every rebuild.
+ * Reference prefixes, spelled as gethomepage does:
+ *   nextcloud             dashboard-icons, full-colour logo
+ *   si-nextcloud          Simple Icons, brand colour; `si-claude-#D97757` in a chosen colour
+ *   lucide-x / tabler-x / mdi-x
+ *                         glyph sets painted as a mask in the text colour, or `-#hex`
  */
 
 export const ICONS_SUBDIR = 'icons'
 
-/** The five sets. Fixed here: nothing in config names a host. Package sets are pinned to a major. */
+/** Hosts are fixed here, never named by config; package sets are pinned to a major. */
 const DASHBOARD_ICONS = 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons'
 const SIMPLE_ICONS = 'https://cdn.simpleicons.org'
 const LUCIDE = 'https://cdn.jsdelivr.net/npm/lucide-static@1/icons'
@@ -48,7 +35,7 @@ export type IconRef = {
   readonly color: string | null
 }
 
-/** The reference grammar. One regex, so the schema, the editor and the store agree on it. */
+/** Reference grammar, shared by the schema, the editor and the store. */
 export const ICON_REF =
   /^(?:(si|lucide|tabler|mdi)-)?([a-z0-9][a-z0-9-]{0,63}?)(?:-#([0-9a-fA-F]{6}))?$/
 
@@ -67,7 +54,7 @@ export function parseIconRef(reference: string): IconRef | null {
   const source: IconSource = prefix === undefined ? 'dashboard' : (SOURCES[prefix] ?? 'dashboard')
   // Simple Icons slugs carry no hyphen; a hyphenated one is a dashboard-icons name by mistake.
   if (source === 'simple' && slug.includes('-')) return null
-  // A dashboard-icons logo is full colour already; a colour on it means nothing and is refused.
+  // dashboard-icons logos are full colour already; a colour on one is refused.
   if (source === 'dashboard' && color !== undefined) return null
   return { source, slug, color: color === undefined ? null : color.toLowerCase() }
 }
@@ -79,16 +66,11 @@ export function iconKey(ref: IconRef): string {
   return `${prefix}${ref.slug}${ref.color === null ? '' : `-${ref.color}`}`
 }
 
-/**
- * How the page draws it: an image as-is, or a mask painted in a colour. The glyph sets ship black
- * shapes — strokes for Lucide and Tabler, fills for MDI — and a mask is what makes them read on
- * every theme.
- */
+/** Glyph sets ship black shapes, so they are painted as a mask to read on every theme. */
 export function iconMode(ref: IconRef): 'image' | 'mask' {
   return ref.source === 'dashboard' || ref.source === 'simple' ? 'image' : 'mask'
 }
 
-/** The URLs to try, in order. Only dashboard-icons has a PNG fallback. */
 function candidates(ref: IconRef): { url: string; ext: 'svg' | 'png' }[] {
   switch (ref.source) {
     case 'simple':
@@ -112,7 +94,7 @@ function candidates(ref: IconRef): { url: string; ext: 'svg' | 'png' }[] {
   }
 }
 
-/** The largest icon in the set at the time of writing is a 240 KB SVG; this caps a surprise. */
+/** The largest known icon is a 240 KB SVG. */
 export const MAX_ICON_BYTES = 512 * 1024
 
 const MISS_TTL_MS = 60 * 60 * 1000
@@ -135,7 +117,7 @@ export function isIconFile(file: string): boolean {
   )
 }
 
-/** What a fetch must provide: the bytes of a URL, or null for anything but a 200 within the cap. */
+/** Bytes of a URL, or null for anything but a 200 within the cap. */
 export type IconFetch = (url: string, maxBytes: number) => Promise<Uint8Array | null>
 
 export class IconStore {
@@ -150,7 +132,7 @@ export class IconStore {
     this.#fetch = fetch
   }
 
-  /** Read what the cache already holds; a restart must not refetch a hundred icons. */
+  /** Reads the cache from disk so a restart does not refetch. */
   async load(): Promise<void> {
     await mkdir(this.#dir, { recursive: true })
     this.#available.clear()
@@ -167,9 +149,8 @@ export class IconStore {
   }
 
   /**
-   * The cached file for a key, and its type — served at `/assets/icons/<key>`, without an
-   * extension, so the resolver can name the URL from the reference alone and the store stays the
-   * only thing that knows whether the SVG or the PNG fallback is what arrived.
+   * Served at `/assets/icons/<key>` without an extension, so only the store knows whether the SVG
+   * or the PNG fallback arrived.
    */
   fileFor(key: string): { path: string; mime: string } | null {
     const ext = this.#available.get(key)
@@ -177,10 +158,7 @@ export class IconStore {
     return { path: join(this.#dir, `${key}.${ext}`), mime: iconMime(`${key}.${ext}`) }
   }
 
-  /**
-   * Fetch what is missing, a few at a time. Resolves to the keys that ARRIVED, so the caller
-   * knows whether anything changed and a rebuild is worth it.
-   */
+  /** Resolves to the keys that arrived, so the caller knows whether a rebuild is worth it. */
   async ensure(references: Iterable<string>, options: { offline: boolean }): Promise<string[]> {
     if (options.offline) return []
     const wanted = new Map<string, IconRef>()
@@ -220,7 +198,9 @@ export class IconStore {
         }
         this.#missedAt.set(key, Date.now())
         return false
-      } catch {
+      } catch (error) {
+        // The fetch returns null rather than throwing, so this is the local write or the decoder.
+        console.warn(`icons: ${key}: ${error instanceof Error ? error.message : String(error)}`)
         this.#missedAt.set(key, Date.now())
         return false
       } finally {
@@ -233,9 +213,8 @@ export class IconStore {
 }
 
 /**
- * The file is served back from this origin, so what is stored must be the image it claims to be
- * — an HTML document saved as `.svg` would be a page on the dashboard's origin. The check is on
- * the bytes: an SVG is an XML document whose root is `<svg`, a PNG starts with its signature.
+ * The file is served from this origin, so it must be the image it claims: an HTML document saved
+ * as `.svg` would be a page on the dashboard's origin.
  */
 function looksLikeSvg(bytes: Uint8Array): boolean {
   const head = new TextDecoder('utf-8', { fatal: false })

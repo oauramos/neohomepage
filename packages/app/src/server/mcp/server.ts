@@ -3,54 +3,25 @@ import { z } from 'zod'
 import type { AppContext } from '../context.ts'
 import {
   bookmarkLinkSchema,
-  layoutFileSchema,
   pageSchema,
   sectionSchema,
   targetSchema,
   widgetSchema,
 } from '../config/schema.ts'
-import { currentSize, placeWidget, saveSectionLayout } from '../config/board.ts'
+import { currentSize, placeWidget, removeFromLayouts, saveSectionLayout } from '../config/board.ts'
+import { isLoopbackHost } from '../fetcher/policy.ts'
 import { effectiveSections, sectionOf } from '../config/sections.ts'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
 import { probe } from '../fetcher/probe.ts'
 import { manifestView } from '../../shared/manifest-view.ts'
 import { routeValues, targetShapeFields } from '../../shared/target-shape.ts'
 import { DESIGN_TOOL_NAMES, registerDesignTools } from './design.ts'
+import { fail, ok, revisionOption } from './result.ts'
 
 /**
- * The MCP surface.
- *
- * Seventeen semantic tools, fixed regardless of how large the catalog grows. One tool per widget type
- * was rejected for reasons that are measurable rather than aesthetic: every tool's schema is sent
- * on every request, so the surface is a permanent token tax, and Claude Code flattens root-level
- * anyOf/oneOf — which mangles the obvious discriminated-union-over-widget-types design. Every
- * input here is a flat object; type safety comes from a three-step loop advertised in each
- * mutating tool's description: search_catalog, then get_widget_schema, then add_widget.
- *
- * Three things are permanently absent, and their absence is the design:
- *
- *   - No tool reads a secret, at any scope. Tool results land in a model context that may be
- *     shipped to a third-party API.
- *   - No tool accepts a URL, a path, a header or a method. An agent names a widget or a host and
- *     a port; the request is derived from a manifest, exactly as it is for the browser.
- *   - No tool AUTHORS CSS or JavaScript, because prompt injection reaching a write tool is a real
- *     amplifier and that is the one sink that turns it into code execution. The design tools in
- *     `design.ts` change how the board looks, and every value they write is a member of a closed
- *     table this repository ships, a number in a range, or a colour parsed and re-emitted here.
- *
- * Every write goes through the same ConfigStore.transaction() the UI uses, lands in the audit log
- * attributed to the token, and cuts a generation — so "the AI rewrote my dashboard" is a rollback,
- * not a support ticket.
+ * The MCP surface: flat-input tools only, since Claude Code flattens root-level anyOf/oneOf.
+ * Invariants: no tool reads a secret, accepts a URL/path/header/method, or authors CSS or JS.
  */
-
-const ok = (data: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-})
-
-const fail = (message: string) => ({
-  content: [{ type: 'text' as const, text: message }],
-  isError: true,
-})
 
 function newId(prefix: string): string {
   return `${prefix}${Math.random().toString(36).slice(2, 12)}`
@@ -92,8 +63,6 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           columns: Object.fromEntries(page.grid.breakpoints.map((b) => [b.id, b.cols])),
           maxRows: page.grid.maxRows,
           widgets: page.widgetIds.length,
-          // Top to bottom, as the page shows them. A grid section is where add_widget can land;
-          // a bookmarks section is what add_bookmark fills.
           sections: page.sections.map((section) =>
             section.kind === 'grid'
               ? {
@@ -186,8 +155,6 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         targetFields: view.target?.fields ?? [],
         configFields: view.config,
         operations: view.operations,
-        // A composite is bound role by role, so an agent that only learned about `targetId` would
-        // create a widget that fetches nothing. Saying so in the schema is what stops that.
         roles: view.roles,
         pollDefaultMs: view.poll.defaultIntervalMs,
       })
@@ -256,7 +223,6 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         scheme: z.enum(['http', 'https']).optional(),
         basePath: z.string().max(120).optional(),
         secrets: z.record(z.string().max(32), z.string().max(4096)).optional(),
-        /** Non-secret values. Sorted from `secrets` by the manifest, not by which key you used. */
         fields: z
           .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
           .optional(),
@@ -265,8 +231,8 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
     },
     async (input) => {
       const id = newId('t')
-      // Routed by the manifest, like the HTTP path: an agent that puts a credential under the
-      // wrong name still gets it stored in the vault rather than in a git-tracked file.
+      // The manifest decides what is secret, so a credential passed under `fields` still goes to
+      // the vault.
       const routed = routeValues(targetShapeFields(context.catalog(), input.type), {
         ...(input.fields === undefined ? {} : { fields: input.fields }),
         ...(input.secrets === undefined ? {} : { secrets: input.secrets }),
@@ -295,7 +261,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
               }),
             )
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         if (secretNames.length > 0) {
           await context.writeSecrets(
@@ -330,9 +296,8 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
         title: z.string().max(64).optional(),
         targetId: z.string().max(64).optional(),
         /**
-         * Composite widget types bind targets by ROLE instead of through `targetId`. An agent that
-         * only knew about `targetId` would create a calendar bound to nothing and report success,
-         * so `get_widget_schema` names the roles and this is where they are filled.
+         * Composite types bind targets per role here, not through `targetId`; get_widget_schema
+         * names the roles.
          */
         bindings: z.record(z.string().max(32), z.array(z.string().max(64)).max(16)).optional(),
         config: z
@@ -349,8 +314,6 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
       const manifest = context.catalog().get(input.type)
       if (manifest === undefined) return fail(`no widget type "${input.type}" — try search_catalog`)
 
-      // Refuse a composite with an unsatisfied role here rather than creating a tile that fetches
-      // nothing: the agent gets a message naming the role, not a silently empty widget.
       const view = manifestView(manifest)
       for (const role of view.roles) {
         const bound = input.bindings?.[role.name]?.length ?? 0
@@ -394,7 +357,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
               }),
             )
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -458,7 +421,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
               }
             }
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -485,22 +448,9 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           deps.actor,
           (draft) => {
             if (!draft.widgets.delete(input.id)) throw new Error(`no widget "${input.id}"`)
-            for (const [pageId, layout] of draft.layouts) {
-              draft.layouts.set(
-                pageId,
-                layoutFileSchema.parse({
-                  ...layout,
-                  layouts: Object.fromEntries(
-                    Object.entries(layout.layouts).map(([breakpoint, items]) => [
-                      breakpoint,
-                      items.filter((entry) => entry.i !== input.id),
-                    ]),
-                  ),
-                }),
-              )
-            }
+            removeFromLayouts(draft, input.id)
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -552,7 +502,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
               input.items as LayoutItem[],
             )
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -589,7 +539,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
             if (page === undefined) throw new Error(`no page "${input.page}"`)
             draft.pages.set(input.page, pageSchema.parse({ ...page, sections: input.sections }))
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -678,7 +628,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
             }
             draft.pages.set(pageId, pageSchema.parse({ ...page, sections }))
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
         await context.reload()
         void context.requestPublish(deps.actor)
@@ -713,11 +663,11 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
       const startedAt = performance.now()
       const outcome = await probe({
         manifest,
-        ...(input.kind === undefined ? {} : { kind: input.kind }),
+        kind: input.kind,
         target: {
           origin: `${input.scheme ?? 'http'}://${input.host}:${input.port}`,
           basePath: '',
-          allowLoopback: input.host === '127.0.0.1' || input.host === 'localhost',
+          allowLoopback: isLoopbackHost(input.host),
         },
         config: {},
         auth: { secrets: input.secrets ?? {}, config: {} },
