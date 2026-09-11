@@ -1,0 +1,101 @@
+{
+  "manifestVersion": 1,
+  "id": "glances-sensors",
+  "version": "1.0.0",
+  "displayName": "Glances · sensors",
+  "category": "monitoring",
+  "icon": "glances",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/glances-sensors",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [],
+  "operations": {
+    "sensors": {
+      "method": "GET",
+      "path": "/api/4/sensors",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "items": {
+        "op": "limit",
+        "n": 12,
+        "over": {
+          "op": "map",
+          "as": "s",
+          "over": {
+            "op": "filter",
+            "over": {
+              "op": "get",
+              "path": "$"
+            },
+            "as": "s",
+            "where": {
+              "op": "compare",
+              "cmp": "eq",
+              "left": {
+                "op": "get",
+                "path": "s.unit"
+              },
+              "right": {
+                "op": "const",
+                "value": "C"
+              }
+            }
+          },
+          "body": {
+            "op": "pick",
+            "fields": {
+              "title": {
+                "op": "get",
+                "path": "s.label"
+              },
+              "badge": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "s.value"
+                },
+                "as": "temperature"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "compare",
+      "const",
+      "filter",
+      "format",
+      "get",
+      "limit",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

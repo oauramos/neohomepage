@@ -49,8 +49,7 @@ describe('paths', () => {
   })
 
   it('does not read inherited properties', () => {
-    // A path must never reach Object.prototype: `$.constructor` would be both a leak and a value
-    // the JSON contract cannot represent.
+    // Reaching Object.prototype would leak a value the JSON contract cannot represent.
     expect(value(get('$.constructor'), source)).toBeNull()
     expect(value(get('$.toString'), source)).toBeNull()
   })
@@ -151,8 +150,6 @@ describe('structure operators', () => {
   })
 
   it('sinks unorderable values last in both directions, like missing ones', () => {
-    // "soon" is not a date. It is exactly as unknown as an absent field, and a descending sort
-    // must not float it to the top — that was a real bug caught by the ascending/descending pair.
     const source = [{ d: '2026-01-10T00:00:00Z' }, { d: 'soon' }, { d: '2026-01-02T00:00:00Z' }]
     for (const dir of ['asc', 'desc'] as const) {
       const sorted = value(
@@ -325,16 +322,21 @@ describe('limits', () => {
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.reason).toMatch(/byte cap/)
   })
+
+  it('truncates each concat child before spreading it', () => {
+    const huge = Array.from({ length: 200_000 }, (_, i) => i)
+    const result = runProjection(
+      { op: 'concat', of: [get('$.a')] },
+      { source: { a: huge }, options: {}, now: NOW, limits: { maxOutputBytes: 1_000_000 } },
+    )
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.value).toHaveLength(5000)
+  })
 })
 
 describe('composition patterns manifests rely on', () => {
   it('sorts by a computed value without a sort-by-expression operator', () => {
-    /**
-     * `sort` deliberately takes a path, not an expression — keeping the language small is worth
-     * more than saving a node. The documented pattern for a computed ordering is therefore:
-     * map to attach the key, sort by its path, then map again to drop it. Two extra nodes, no
-     * extra operator, and the helper key never reaches the render contract.
-     */
+    // `sort` takes a path, not an expression: map to attach the key, sort on it, map to drop it.
     const source = [
       { name: 'a', size: 100, left: 90 },
       { name: 'b', size: 100, left: 10 },
@@ -364,8 +366,7 @@ describe('composition patterns manifests rely on', () => {
   })
 
   it('builds a fixed array of computed objects with concat', () => {
-    // There is no array-literal operator: `concat` pushes a non-array value as one element, which
-    // is exactly what a `stats: [...]` block needs.
+    // There is no array-literal operator; `concat` pushes a non-array child as one element.
     const node: Node = {
       op: 'concat',
       of: [

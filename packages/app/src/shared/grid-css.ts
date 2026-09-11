@@ -2,15 +2,8 @@ import { colWidthPx, layoutHeightPx, type LayoutItem } from './grid-geometry.ts'
 
 /**
  * Emits the stylesheet that positions the board in view mode, with no grid library on the page.
- *
- * RGL computes integer pixels from a container width it has measured in the browser. The server
- * has no such measurement, so instead of numbers it emits the same formula as a calc(): the
- * column width is `(100% - fixed gaps) / cols`, which the browser resolves against the real
- * container. The arithmetic is identical to grid-geometry.ts; only the rounding differs, and the
- * browser's sub-pixel layout is strictly finer than RGL's integers.
- *
- * Consequence worth stating plainly: the static page and the editor agree to within one device
- * pixel, not bit-exactly. Bit-exact would require shipping the measurement pass we are avoiding.
+ * The server has no measured container width, so it emits grid-geometry.ts's column formula as a
+ * calc(); the result matches RGL's integer pixels to within one pixel, not bit-exactly.
  */
 
 export type Breakpoint = {
@@ -29,22 +22,19 @@ export type GridConfig = {
 
 export type BreakpointLayouts = Readonly<Record<string, readonly LayoutItem[]>>
 
-/**
- * Widget ids reach this function from config that an MCP agent or an imported file can write, and
- * they are interpolated into a selector. Anything outside this shape is refused rather than
- * escaped: our own ids are generated, so a violation is a bug or an attack, never a valid name.
- */
+// Ids come from agent- or import-written config and are interpolated into a selector. Refused
+// rather than escaped: generated ids always fit this shape, so a violation is a bug or an attack.
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 
-export class UnsafeWidgetIdError extends Error {
+export class UnsafeIdError extends Error {
   constructor(id: string) {
-    super(`widget id is not safe to place in a CSS selector: ${JSON.stringify(id)}`)
-    this.name = 'UnsafeWidgetIdError'
+    super(`id is not safe to place in a CSS selector: ${JSON.stringify(id)}`)
+    this.name = 'UnsafeIdError'
   }
 }
 
-function assertSafeId(id: string): void {
-  if (!SAFE_ID.test(id)) throw new UnsafeWidgetIdError(id)
+export function assertSafeId(id: string): void {
+  if (!SAFE_ID.test(id)) throw new UnsafeIdError(id)
 }
 
 /** Round to 4 decimals so the output is stable and diffable rather than full float noise. */

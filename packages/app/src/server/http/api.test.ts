@@ -6,10 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * The write API, exercised against a real store on a real temporary directory.
- *
- * `env` reads the data directory once at module load, so these tests set it before importing
- * anything that touches it — which is also why the imports are dynamic.
+ * The write API against a real store in a temporary directory. `env` reads the data directory at
+ * module load, so the imports are dynamic and run after it is set.
  */
 
 const created: string[] = []
@@ -42,29 +40,16 @@ async function mockService(): Promise<number> {
   return address.port
 }
 
-/**
- * Two upstreams behind one port: a Sonarr-shaped calendar and an iCalendar feed.
- *
- * Both on the same server so the test can bind two sources to one composite widget with two
- * targets that differ only in `widgetType` and base path — which is exactly the case that would
- * break if the source kind were chosen by anything other than the target's own shape.
- */
 const DAY_MS = 86_400_000
 
-/**
- * Dates relative to the run, not to the day this was written.
- *
- * The ICS decoder's window is `pastDays: 1, futureDays: 90`, so an event pinned to a literal date
- * is inside it for about a day and then quietly outside it. Both composite tests here went red on
- * their own two days after the commit that added them, with nothing in the repo having changed —
- * a failure that says "the calendar is broken" and means "the calendar is working".
- *
- * The Sonarr episode lands a day after the bin collection because one assertion is about ORDER:
- * the merged tile is sorted by date, and two events on the same day would make it a coin toss.
- */
+// Dates are relative to the run: the ICS decoder only keeps events within `pastDays: 1,
+// futureDays: 90`. The Sonarr episode lands a day after the bin collection so the date-order
+// assertion is deterministic.
 const inDays = (days: number): string => new Date(Date.now() + days * DAY_MS).toISOString()
 const icsStamp = (iso: string): string => iso.replaceAll(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
 
+// One host serving a Sonarr-shaped calendar and an iCalendar feed, so two targets that differ only
+// in `widgetType` and base path can bind to one composite widget.
 async function mockCalendarHost(): Promise<number> {
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/v3/calendar') === true) {
@@ -123,19 +108,34 @@ async function request(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   const text = await response.text()
-  // `unknown`, not `never`: `never` collapses the union to `null` and every downstream cast in
-  // this file becomes a type error rather than a narrowing.
-  const parsed: unknown = text === '' ? null : JSON.parse(text)
+  // `unknown`, not `never`: `never` collapses the union to `null` and breaks the downstream casts.
+  let parsed: unknown
+  try {
+    parsed = text === '' ? null : JSON.parse(text)
+  } catch {
+    parsed = text
+  }
   return { status: response.status, body: parsed }
 }
+
+async function create(path: '/api/widgets' | '/api/targets', body: unknown): Promise<string> {
+  const r = await request('POST', path, body)
+  expect(r.status).toBe(201)
+  return (r.body as { id: string }).id
+}
+
+const layoutFile = async () =>
+  JSON.parse(await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8')) as {
+    layouts: Record<string, { i: string; x: number; y: number; w: number; h: number }[]>
+    meta: Record<string, { origin: string }>
+  }
 
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'neo-api-'))
   created.push(dataDir)
   process.env.NEOHOMEPAGE_DATA_DIR = dataDir
   process.env.NEOHOMEPAGE_CATALOG_DIR = join(import.meta.dirname, '../../../../../catalog')
-  // `env` resolves its directories once at module load, so without a fresh registry every test
-  // after the first would quietly write into the first test's temporary directory.
+  // `env` resolves its directories once at module load; a fresh registry gives each test its own.
   vi.resetModules()
 
   const { env } = await import('../env.ts')
@@ -203,9 +203,7 @@ describe('adding a widget', () => {
     expect(status).toBe(201)
     const id = (body as { id: string }).id
 
-    const layout = JSON.parse(
-      await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8'),
-    ) as { layouts: Record<string, { i: string }[]> }
+    const layout = await layoutFile()
     for (const breakpoint of ['sm', 'md', 'lg']) {
       expect(
         layout.layouts[breakpoint]?.some((entry) => entry.i === id),
@@ -255,15 +253,10 @@ describe('optimistic concurrency', () => {
 
 describe('editing a widget', () => {
   it('merges config rather than replacing it', async () => {
-    // A form that posts one field must not wipe the others.
-    const id = (
-      (
-        await request('POST', '/api/widgets', {
-          type: 'sonarr-queue',
-          config: { maxItems: 5, hideEmpty: true },
-        })
-      ).body as { id: string }
-    ).id
+    const id = await create('/api/widgets', {
+      type: 'sonarr-queue',
+      config: { maxItems: 5, hideEmpty: true },
+    })
 
     await request('PATCH', `/api/widgets/${id}`, { config: { maxItems: 12 } })
     const written = JSON.parse(
@@ -273,43 +266,37 @@ describe('editing a widget', () => {
   })
 
   it('404s through the store when the widget is gone', async () => {
-    await expect(request('PATCH', '/api/widgets/wGone', { title: 'x' })).rejects.toThrow()
+    expect((await request('PATCH', '/api/widgets/wGone', { title: 'x' })).status).toBe(404)
   })
 })
 
 describe('saving a layout', () => {
   it('marks the breakpoint authored, so it is no longer regenerated', async () => {
-    const id = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue' })).body as { id: string }
-    ).id
+    const id = await create('/api/widgets', { type: 'sonarr-queue' })
     await request('PUT', '/api/pages/home/layout', {
       breakpoint: 'lg',
       items: [{ i: id, x: 2, y: 0, w: 4, h: 3 }],
     })
-    const layout = JSON.parse(
-      await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8'),
-    ) as { meta: Record<string, { origin: string }> }
+    const layout = await layoutFile()
     expect(layout.meta.lg?.origin).toBe('authored')
   })
 
   it('normalises geometry that runs off the edge', async () => {
-    const id = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue' })).body as { id: string }
-    ).id
+    const id = await create('/api/widgets', { type: 'sonarr-queue' })
     await request('PUT', '/api/pages/home/layout', {
       breakpoint: 'lg',
       items: [{ i: id, x: 10, y: 0, w: 6, h: 3 }],
     })
-    const layout = JSON.parse(
-      await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8'),
-    ) as { layouts: Record<string, { x: number; w: number }[]> }
+    const layout = await layoutFile()
     expect((layout.layouts.lg as { x: number; w: number }[])[0]).toMatchObject({ x: 6, w: 6 })
   })
 
   it('rejects an unknown breakpoint rather than inventing one', async () => {
-    await expect(
-      request('PUT', '/api/pages/home/layout', { breakpoint: 'xxl', items: [] }),
-    ).rejects.toThrow()
+    const { status } = await request('PUT', '/api/pages/home/layout', {
+      breakpoint: 'xxl',
+      items: [],
+    })
+    expect(status).toBe(422)
   })
 })
 
@@ -352,8 +339,6 @@ describe('testing a target before saving it', () => {
       secrets: { apiKey: 'GOOD' },
     })
     expect(body).toMatchObject({ ok: true })
-    // "It answered in 40ms" is what a person needs. The JSON the service returned is not, and
-    // echoing it is how a credential ends up in a browser.
     expect(JSON.stringify(body)).not.toContain('Show')
   })
 
@@ -379,34 +364,22 @@ describe('testing a target before saving it', () => {
 
 describe('deleting a widget', () => {
   it('removes its layout entries, so no ghost is left in the editor', async () => {
-    const id = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue' })).body as { id: string }
-    ).id
+    const id = await create('/api/widgets', { type: 'sonarr-queue' })
     await request('DELETE', `/api/widgets/${id}`)
 
-    const layout = JSON.parse(
-      await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8'),
-    ) as { layouts: Record<string, { i: string }[]> }
+    const layout = await layoutFile()
     for (const items of Object.values(layout.layouts)) {
       expect(items.some((entry) => entry.i === id)).toBe(false)
     }
   })
 
   it('removes the target and its credential when nothing else uses them', async () => {
-    const targetId = (
-      (
-        await request('POST', '/api/targets', {
-          label: 'Sonarr',
-          base: { host: '10.0.0.20', port: 8989 },
-          secrets: { apiKey: 'SECRET-A' },
-        })
-      ).body as { id: string }
-    ).id
-    const id = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue', targetId })).body as {
-        id: string
-      }
-    ).id
+    const targetId = await create('/api/targets', {
+      label: 'Sonarr',
+      base: { host: '10.0.0.20', port: 8989 },
+      secrets: { apiKey: 'SECRET-A' },
+    })
+    const id = await create('/api/widgets', { type: 'sonarr-queue', targetId })
 
     const { body } = await request('DELETE', `/api/widgets/${id}`)
     expect((body as { orphaned: { targets: string[] } }).orphaned.targets).toEqual([targetId])
@@ -417,19 +390,11 @@ describe('deleting a widget', () => {
   })
 
   it('keeps a target another widget still points at', async () => {
-    const targetId = (
-      (
-        await request('POST', '/api/targets', {
-          label: 'Sonarr',
-          base: { host: '10.0.0.20', port: 8989 },
-        })
-      ).body as { id: string }
-    ).id
-    const first = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue', targetId })).body as {
-        id: string
-      }
-    ).id
+    const targetId = await create('/api/targets', {
+      label: 'Sonarr',
+      base: { host: '10.0.0.20', port: 8989 },
+    })
+    const first = await create('/api/widgets', { type: 'sonarr-queue', targetId })
     await request('POST', '/api/widgets', { type: 'sonarr-queue', targetId })
 
     const { body } = await request('DELETE', `/api/widgets/${first}`)
@@ -439,20 +404,12 @@ describe('deleting a widget', () => {
 
   it('stops polling for it, so the app is not still hitting a service for a tile nobody sees', async () => {
     const port = await mockService()
-    const targetId = (
-      (
-        await request('POST', '/api/targets', {
-          label: 'Sonarr',
-          base: { host: '127.0.0.1', port },
-          secrets: { apiKey: 'GOOD' },
-        })
-      ).body as { id: string }
-    ).id
-    const id = (
-      (await request('POST', '/api/widgets', { type: 'sonarr-queue', targetId })).body as {
-        id: string
-      }
-    ).id
+    const targetId = await create('/api/targets', {
+      label: 'Sonarr',
+      base: { host: '127.0.0.1', port },
+      secrets: { apiKey: 'GOOD' },
+    })
+    const id = await create('/api/widgets', { type: 'sonarr-queue', targetId })
 
     expect(context.scheduler.registered).toBeGreaterThan(0)
     await request('DELETE', `/api/widgets/${id}`)
@@ -460,12 +417,48 @@ describe('deleting a widget', () => {
   })
 })
 
+describe('live updates', () => {
+  const yieldToStream = () => new Promise((settle) => setImmediate(settle))
+
+  it('drops a subscriber that stopped reading, rather than buffering for it', async () => {
+    // Hono's StreamingApi swallows write errors, so a dead connection only shows as a growing backlog.
+    const response = await app.request('/api/events')
+    expect(response.status).toBe(200)
+    expect(context.hub.size).toBe(1)
+
+    for (let i = 0; i < 100; i++) {
+      context.hub.broadcast({ type: 'widget', data: { id: `w${String(i)}` } })
+      await yieldToStream()
+    }
+    expect(context.hub.size).toBe(0)
+  })
+
+  it('keeps a subscriber that reads, and delivers every frame to it', async () => {
+    const response = await app.request('/api/events')
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader()
+    const decoder = new TextDecoder()
+    let received = ''
+    const frames = () => received.split('event: widget\n').length - 1
+    const drained = (async () => {
+      while (frames() < 200) {
+        const { done, value } = await reader.read()
+        if (done) break
+        received += decoder.decode(value, { stream: true })
+      }
+    })()
+
+    for (let i = 0; i < 200; i++) {
+      context.hub.broadcast({ type: 'widget', data: { id: `w${String(i)}` } })
+      await yieldToStream()
+    }
+    await drained
+    expect(frames()).toBe(200)
+    expect(context.hub.size).toBe(1)
+    await reader.cancel()
+  })
+})
+
 describe('every mutating route is behind the write gate', () => {
-  /**
-   * Enumerating the routes rather than listing them by hand: a route added later must be
-   * protected by default, and a test that names them one by one would silently not cover the
-   * next one. The gate is `app.use('*')`, so this asserts the wiring rather than the list.
-   */
   it('refuses a cross-site write on every non-GET route', async () => {
     const routes: [string, string][] = [
       ['POST', '/api/widgets'],
@@ -525,8 +518,8 @@ describe('a composite widget, end to end', () => {
     const feed = await request('POST', '/api/targets', {
       label: 'Bins',
       widgetType: 'ics-feed',
-      // The feed's whole path lives in the target, which is what the bare "/" operation path is
-      // for. Through a config hole it would be percent-encoded into one segment.
+      // The feed path lives in the target's basePath; through a config hole it would be
+      // percent-encoded into one segment.
       base: { scheme: 'http', host: '127.0.0.1', port, basePath: '/bins.ics' },
     })
     expect(feed.status).toBe(201)
@@ -540,8 +533,7 @@ describe('a composite widget, end to end', () => {
     expect(created.status).toBe(201)
     const widgetId = (created.body as { id: string }).id
 
-    // The config on disk names two targets and no URL, path, header or method — and stays sparse:
-    // `targetId` is absent rather than written as null, because it equals the schema default.
+    // `targetId` is absent rather than null: it equals the schema default.
     const onDisk = JSON.parse(
       await readFile(join(dataDir, 'config', 'widgets', `${widgetId}.json`), 'utf8'),
     ) as Record<string, unknown>
@@ -558,7 +550,7 @@ describe('a composite widget, end to end', () => {
     >
     const composed = data[widgetId]
     expect(composed?.sources).toEqual({ total: 2, ok: 2 })
-    // One item from each source, and in date order across the two — which is the whole feature.
+    // One item from each source, in date order.
     expect(composed?.projection?.items.map((item) => item.title)).toEqual([
       'Bin collection',
       'A Show',
@@ -596,8 +588,6 @@ describe('a composite widget, end to end', () => {
       string,
       { projection: { items: unknown[]; status: string } | null; meta: { errorCode?: string } }
     >
-    // One dead Radarr must not blank out the calendars that answered — the whole reason
-    // `compose.partial` exists.
     expect(data[widgetId]?.projection?.items).toHaveLength(1)
     expect(data[widgetId]?.projection?.status).toBe('degraded')
     expect(data[widgetId]?.meta.errorCode).toBe('partial')
@@ -625,7 +615,6 @@ describe('a composite widget, end to end', () => {
 
     const deleted = await request('DELETE', `/api/widgets/${(created.body as { id: string }).id}`)
     expect(deleted.status).toBe(200)
-    // Cleaning up only `targetId` would leave a deleted calendar's API keys on disk forever.
     expect((deleted.body as { orphaned: { targets: string[] } }).orphaned.targets).toHaveLength(2)
     expect(await readdir(join(dataDir, 'config', 'targets'))).toEqual([])
 
@@ -638,9 +627,6 @@ describe('a composite widget, end to end', () => {
 
 describe('no credential reaches config/, whatever the caller sends', () => {
   it('stores an API key as a secret even when it arrives in the plain-fields bucket', async () => {
-    // The regression this exists for: the browser used to decide which values were credentials,
-    // and a form bug spread a whole draft object into `base`. The API key landed in
-    // config/targets/*.json in plaintext — in the directory whose purpose is being committed.
     const { status, body } = await request('POST', '/api/targets', {
       label: 'Sonarr',
       widgetType: 'sonarr-queue',
@@ -668,8 +654,7 @@ describe('no credential reaches config/, whatever the caller sends', () => {
       widgetType: 'sonarr-queue',
       base: { host: '10.0.0.20', port: 8989, values: { apiKey: 'SMUGGLED' } },
     })
-    // Either refused outright or silently stripped — never written. Both are acceptable; the
-    // assertion below is the one that matters.
+    // Refused or stripped are both fine; it must never be written.
     expect([201, 422]).toContain(status)
     const targets = await readdir(join(dataDir, 'config', 'targets'))
     for (const file of targets) {
@@ -694,7 +679,6 @@ describe('no credential reaches config/, whatever the caller sends', () => {
   })
 
   it('leaves nothing credential-shaped anywhere in the config tree', async () => {
-    // The whole-tree grep the plan calls for, run against a config built the way the UI builds it.
     await request('POST', '/api/targets', {
       label: 'Sonarr',
       widgetType: 'sonarr-queue',
@@ -724,11 +708,134 @@ describe('no credential reaches config/, whatever the caller sends', () => {
       expect(text, file).not.toContain('correct-horse-battery')
     }
 
-    // ...and the username, which is NOT a secret, is still there where it belongs.
+    // The username is not a secret and stays in config.
     const targets = await readdir(join(dataDir, 'config', 'targets'))
     const all = await Promise.all(
       targets.map((file) => readFile(join(dataDir, 'config', 'targets', file), 'utf8')),
     )
     expect(all.join('')).toContain('admin')
+  })
+})
+
+describe('sections', () => {
+  const SECTIONS = [
+    { id: 'nav', kind: 'navbar', items: [{ id: 't', kind: 'title' }] },
+    { id: 'main', kind: 'grid' },
+    { id: 'narrow', kind: 'grid', cols: { lg: 6 }, maxRows: 3 },
+    {
+      id: 'links',
+      kind: 'bookmarks',
+      columns: { lg: 3 },
+      display: 'chips',
+      groups: [
+        {
+          id: 'router',
+          title: 'Router',
+          links: [{ id: 'l1', label: 'FriendlyWrt', base: { host: '192.168.2.1', port: 80 } }],
+        },
+      ],
+    },
+  ]
+
+  it("replaces a page's sections whole and resolves them", async () => {
+    expect((await request('PATCH', '/api/pages/home', { sections: SECTIONS })).status).toBe(200)
+    const { body } = await request('GET', '/api/state')
+    const page = (body as { resolved: { pages: { sections: { id: string; kind: string }[] }[] } })
+      .resolved.pages[0]
+    expect(page?.sections.map((section) => section.kind)).toEqual([
+      'navbar',
+      'grid',
+      'grid',
+      'bookmarks',
+    ])
+  })
+
+  it('422s a malformed section list, naming the page, rather than 500ing', async () => {
+    const { status, body } = await request('PATCH', '/api/pages/home', {
+      sections: [{ id: 'x', kind: 'bookmarks', display: 'marquee' }],
+    })
+    expect(status).toBe(422)
+    expect((body as { error: string }).error).toContain('pages/home.json')
+  })
+
+  it('refuses a section list that would strand a widget', async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    await request('POST', '/api/widgets', { type: 'sonarr-queue', section: 'narrow' })
+    const { status, body } = await request('PATCH', '/api/pages/home', {
+      sections: SECTIONS.filter((section) => section.id !== 'narrow'),
+    })
+    expect(status).toBe(422)
+    expect((body as { error: string }).error).toContain('narrow')
+  })
+
+  it("places a widget inside its section's columns, without touching another section", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const main = await create('/api/widgets', { type: 'sonarr-queue' })
+    const { status, body } = await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 8, h: 3 },
+    })
+    expect(status).toBe(201)
+    const narrow = (body as { id: string }).id
+
+    const file = await layoutFile()
+    const lg = file.layouts.lg ?? []
+    // An 8-wide request in a 6-column section is clamped to the section, not the page.
+    expect(lg.find((item) => item.i === narrow)).toMatchObject({ x: 0, y: 0, w: 6 })
+    // Both sit at the origin of their own board: coordinates are per section.
+    expect(lg.find((item) => item.i === main)).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it("refuses a widget the section's row cap has no room for", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 6, h: 3 },
+    })
+    const { status, body } = await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 6, h: 3 },
+    })
+    // Still created; the refusal is reported per breakpoint.
+    expect(status).toBe(201)
+    expect((body as { refusedBreakpoints: string[] }).refusedBreakpoints).toContain('lg')
+  })
+
+  it("saves a layout for one section and leaves the other sections' entries alone", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const main = await create('/api/widgets', { type: 'sonarr-queue' })
+    const narrow = await create('/api/widgets', { type: 'sonarr-queue', section: 'narrow' })
+
+    const { status } = await request('PUT', '/api/pages/home/layout', {
+      breakpoint: 'lg',
+      section: 'narrow',
+      items: [{ i: narrow, x: 2, y: 0, w: 4, h: 3 }],
+    })
+    expect(status).toBe(200)
+    const lg = (await layoutFile()).layouts.lg ?? []
+    expect(lg.find((item) => item.i === narrow)).toMatchObject({ x: 2, w: 4 })
+    expect(lg.find((item) => item.i === main)).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it('moves a widget to another section and re-places it there', async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const id = await create('/api/widgets', { type: 'sonarr-queue', size: { w: 8, h: 3 } })
+    const { status } = await request('PATCH', `/api/widgets/${id}`, { section: 'narrow' })
+    expect(status).toBe(200)
+
+    const { body } = await request('GET', '/api/state')
+    const sections = (
+      body as {
+        resolved: { pages: { sections: { id: string; widgetIds?: string[] }[] }[] }
+      }
+    ).resolved.pages[0]?.sections
+    expect(sections?.find((section) => section.id === 'narrow')?.widgetIds).toEqual([id])
+    expect(sections?.find((section) => section.id === 'main')?.widgetIds).toEqual([])
+    // Re-placed to fit the six columns it moved into.
+    const lg = (await layoutFile()).layouts.lg ?? []
+    expect(lg.find((item) => item.i === id)?.w).toBe(6)
   })
 })

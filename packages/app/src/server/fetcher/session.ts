@@ -1,27 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { Auth } from '@neohomepage/catalog-schema'
-import { fillTemplate, MissingSecretError, type AppliedAuth, type AuthContext } from './auth.ts'
-import { fetchUpstream, UpstreamError, type FetchLimits } from './client.ts'
+import { fillTemplate, type AppliedAuth, type AuthContext } from './auth.ts'
+import { fetchUpstream } from './client.ts'
 import { assertUrlShape } from './policy.ts'
 
 /**
- * The fifth auth kind: log in once, then carry what the login returned.
- *
- * Pi-hole v6 answers `POST /api/auth` with `session.sid`; qBittorrent answers
- * `POST /api/v2/auth/login` with a `Set-Cookie`. Neither can be expressed by attaching a static
- * header to every request, and pretending otherwise is why the kind existed in the schema with no
- * implementation behind it.
- *
- * Three properties this has to keep, all of which a naive version loses:
- *
- *   - The login request obeys the same rules as any other. Same SSRF policy, same origin-and-path
- *     assertion, same body cap. A login is an outbound request to a LAN address like any other,
- *     and giving it a private code path would give it a private set of holes.
- *   - One login per credential, shared. Six widgets on one qBittorrent must not each open a
- *     session; qBittorrent counts them and starts refusing.
- *   - A rejected session is discarded, not retried into a lockout. Services in this space ban an
- *     IP after N failures, so a loop that re-logs-in on every 403 turns a stale cookie into an
- *     hour of downtime.
+ * Session-exchange auth: log in once, then carry what the login returned (Pi-hole v6 answers with
+ * a JSON token at `session.sid`, qBittorrent with a `Set-Cookie`).
  */
 
 type SessionAuth = Extract<Auth, { kind: 'session-exchange' }>
@@ -31,11 +16,19 @@ type Session = {
   readonly obtainedAt: number
 }
 
+type AuthorizeInput = {
+  readonly auth: SessionAuth
+  readonly origin: string
+  readonly basePath: string
+  readonly context: AuthContext
+  readonly allowLoopback: boolean
+  readonly insecureSkipVerify: boolean
+}
+
 export type SessionManagerDeps = {
   readonly now: () => number
-  /** How long a session is reused before a fresh login. Services rarely publish their own TTL. */
+  /** Reuse window before a fresh login; services rarely publish their own TTL. */
   readonly ttlMs?: number
-  readonly fetch?: typeof fetchUpstream
 }
 
 export class SessionExchangeError extends Error {
@@ -54,15 +47,12 @@ export class SessionManager {
   readonly #deps: Required<SessionManagerDeps>
 
   constructor(deps: SessionManagerDeps) {
-    this.#deps = { ttlMs: 30 * 60 * 1000, fetch: fetchUpstream, ...deps }
+    this.#deps = { ttlMs: 30 * 60 * 1000, ...deps }
   }
 
   /**
-   * The cache key.
-   *
-   * Includes the resolved credential, not just the target: rotating a password must not keep
-   * serving the session the old one bought. The credential is hashed rather than stored so a heap
-   * dump of this map is not a list of passwords.
+   * Cache key. Includes the credential so a rotated password does not keep serving the old
+   * session; hashed so a heap dump of the map is not a list of passwords.
    */
   static key(origin: string, basePath: string, auth: SessionAuth, context: AuthContext): string {
     const material = JSON.stringify({
@@ -76,27 +66,13 @@ export class SessionManager {
     return createHash('sha256').update(material).digest('hex').slice(0, 32)
   }
 
-  size(): number {
-    return this.#sessions.size
-  }
-
   invalidate(key: string): void {
     this.#sessions.delete(key)
   }
 
-  clear(): void {
-    this.#sessions.clear()
-  }
-
-  async authorize(input: {
-    readonly auth: SessionAuth
-    readonly origin: string
-    readonly basePath: string
-    readonly context: AuthContext
-    readonly allowLoopback: boolean
-    readonly insecureSkipVerify: boolean
-    readonly limits?: Partial<FetchLimits>
-  }): Promise<{ readonly key: string; readonly applied: AppliedAuth }> {
+  async authorize(
+    input: AuthorizeInput,
+  ): Promise<{ readonly key: string; readonly applied: AppliedAuth }> {
     const key = SessionManager.key(input.origin, input.basePath, input.auth, input.context)
 
     const existing = this.#sessions.get(key)
@@ -104,8 +80,7 @@ export class SessionManager {
       return { key, applied: existing.applied }
     }
 
-    // Collapse concurrent logins for the same credential into one. Without this, the scheduler
-    // starting six widgets in the same tick sends six logins and half of them race to overwrite.
+    // Collapses concurrent logins for one credential; qBittorrent counts sessions and refuses.
     let pending = this.#inFlight.get(key)
     if (pending === undefined) {
       pending = this.#login(input).finally(() => this.#inFlight.delete(key))
@@ -116,21 +91,13 @@ export class SessionManager {
     return { key, applied: session.applied }
   }
 
-  async #login(input: {
-    readonly auth: SessionAuth
-    readonly origin: string
-    readonly basePath: string
-    readonly context: AuthContext
-    readonly allowLoopback: boolean
-    readonly insecureSkipVerify: boolean
-    readonly limits?: Partial<FetchLimits>
-  }): Promise<Session> {
+  async #login(input: AuthorizeInput): Promise<Session> {
     const { auth, context } = input
 
     const base = assertUrlShape(input.origin)
     const expectedPathname = `${input.basePath.replace(/\/+$/, '')}${auth.loginPath}`
     const url = new URL(expectedPathname, base)
-    // The same assertion the operation executor makes. A login is not a special case.
+    // Same origin-and-path assertion the operation executor makes; a login is not a special case.
     if (url.origin !== base.origin || url.pathname !== expectedPathname) {
       throw new SessionExchangeError('path-mismatch', 'the login URL is not the one declared')
     }
@@ -140,21 +107,14 @@ export class SessionManager {
       form.set(field, fillTemplate(template, context))
     }
 
-    let response
-    try {
-      response = await this.#deps.fetch({
-        url,
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: form.toString(),
-        allowLoopback: input.allowLoopback,
-        insecureSkipVerify: input.insecureSkipVerify,
-        ...(input.limits === undefined ? {} : { limits: input.limits }),
-      })
-    } catch (error) {
-      if (error instanceof MissingSecretError || error instanceof UpstreamError) throw error
-      throw new SessionExchangeError('login-unreachable', 'the login request did not complete')
-    }
+    const response = await fetchUpstream({
+      url,
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+      allowLoopback: input.allowLoopback,
+      insecureSkipVerify: input.insecureSkipVerify,
+    })
 
     if (response.status >= 400) {
       throw new SessionExchangeError(
@@ -175,8 +135,8 @@ export class SessionManager {
       if (setCookie === undefined || setCookie === '') {
         throw new SessionExchangeError('no-session-cookie', 'the login returned no session cookie')
       }
-      // Name=value only. Attributes (Path, HttpOnly, SameSite) are instructions to a browser and
-      // echoing them back as a request header is how a Cookie header ends up malformed.
+      // Name=value only: attributes (Path, HttpOnly, SameSite) are browser instructions and
+      // malform a Cookie header when echoed back.
       const pairs = setCookie
         .split(/,(?=[^;]+?=)/)
         .map((one) => one.split(';', 1)[0]?.trim())
@@ -204,10 +164,8 @@ export class SessionManager {
 }
 
 /**
- * Pull the token out of a JSON login response by dotted path.
- *
- * Deliberately not the projection DSL: this runs before any projection exists, on a body that is
- * a credential rather than data, and it must never be able to do anything but read one string.
+ * Reads the token out of a JSON login response by dotted path. Deliberately not the projection
+ * DSL: the body is a credential, and this must never do more than read one string.
  */
 function readTokenPath(body: string, path: string | undefined): string | null {
   if (path === undefined) return null

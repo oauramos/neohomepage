@@ -10,68 +10,76 @@ request it makes and a projection written in a language that cannot loop, recurs
 None of them is a React component, and none of them ships code. That is what makes a catalog
 contributed by strangers safe to install.
 
-**16 widgets** covering 5 of 5 presentation templates, 5 of 5 authentication kinds and 3 of 3 response formats.
+**24 widgets** covering 5 of 5 presentation templates, 5 of 5 authentication kinds and 3 of 3 response formats.
 
 ## Downloads
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **qBittorrent** <br><code>qbittorrent-transfer</code> | transfer | Password <br><small>log in, then a session</small> | `stat-grid` |
-| **SABnzbd** <br><code>sabnzbd-queue</code> | queue | API key <br><small>API key in the query string</small> | `list` |
+| Widget                                                | Shows    | Needs                                                  | Renders as  |
+| ----------------------------------------------------- | -------- | ------------------------------------------------------ | ----------- |
+| **qBittorrent** <br><code>qbittorrent-transfer</code> | transfer | Password <br><small>log in, then a session</small>     | `stat-grid` |
+| **SABnzbd** <br><code>sabnzbd-queue</code>            | queue    | API key <br><small>API key in the query string</small> | `list`      |
 
 ## Information
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Calendar** <br><code>unified-calendar</code> | 4 source kinds merged into one tile | API key <br><small>API key header, none</small> | `list` |
+| Widget                                         | Shows                               | Needs                                           | Renders as |
+| ---------------------------------------------- | ----------------------------------- | ----------------------------------------------- | ---------- |
+| **Calendar** <br><code>unified-calendar</code> | 4 source kinds merged into one tile | API key <br><small>API key header, none</small> | `list`     |
 
 ## Media
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Jellyfin sessions** <br><code>jellyfin-sessions</code> | sessions | API key <br><small>API key header</small> | `list` |
-| **Plex** <br><code>plex-sessions</code> | sessions | X-Plex-Token <br><small>API key header</small> | `list` |
+| Widget                                                     | Shows      | Needs                                                | Renders as  |
+| ---------------------------------------------------------- | ---------- | ---------------------------------------------------- | ----------- |
+| **Immich** <br><code>immich-library</code>                 | statistics | API key <br><small>API key header</small>            | `stat-grid` |
+| **Jellyfin sessions** <br><code>jellyfin-sessions</code>   | sessions   | API key <br><small>API key header</small>            | `list`      |
+| **Navidrome · library** <br><code>navidrome-library</code> | scan       | Token <br><small>API key in the query string</small> | `stat-grid` |
+| **Navidrome · playing** <br><code>navidrome-playing</code> | nowPlaying | Token <br><small>API key in the query string</small> | `list`      |
+| **Plex** <br><code>plex-sessions</code>                    | sessions   | X-Plex-Token <br><small>API key header</small>       | `list`      |
 
 ## Media automation
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Radarr queue** <br><code>radarr-queue</code> | queue | API key <br><small>API key header</small> | `list` |
-| **Sonarr queue** <br><code>sonarr-queue</code> | queue | API key <br><small>API key header</small> | `list` |
+| Widget                                         | Shows | Needs                                     | Renders as |
+| ---------------------------------------------- | ----- | ----------------------------------------- | ---------- |
+| **Radarr queue** <br><code>radarr-queue</code> | queue | API key <br><small>API key header</small> | `list`     |
+| **Sonarr queue** <br><code>sonarr-queue</code> | queue | API key <br><small>API key header</small> | `list`     |
 
 ## Misc
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Service link** <br><code>service-link</code> | root | no credential <br><small>none</small> | `link-tile` |
+| Widget                                         | Shows | Needs                                 | Renders as  |
+| ---------------------------------------------- | ----- | ------------------------------------- | ----------- |
+| **Service link** <br><code>service-link</code> | root  | no credential <br><small>none</small> | `link-tile` |
 
 ## Monitoring
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Uptime Kuma** <br><code>uptime-kuma-status</code> | heartbeat | no credential <br><small>none</small> | `status-badge` |
+| Widget                                                 | Shows     | Needs                                 | Renders as     |
+| ------------------------------------------------------ | --------- | ------------------------------------- | -------------- |
+| **Glances · disks** <br><code>glances-fs</code>        | fs        | no credential <br><small>none</small> | `gauge-set`    |
+| **Glances · GPU** <br><code>glances-gpu</code>         | gpu       | no credential <br><small>none</small> | `stat-grid`    |
+| **Glances · host** <br><code>glances-quicklook</code>  | quicklook | no credential <br><small>none</small> | `gauge-set`    |
+| **Glances · sensors** <br><code>glances-sensors</code> | sensors   | no credential <br><small>none</small> | `list`         |
+| **Uptime Kuma** <br><code>uptime-kuma-status</code>    | heartbeat | no credential <br><small>none</small> | `status-badge` |
 
 ## Nas
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **TrueNAS pools** <br><code>truenas-pools</code> | pools | API key <br><small>API key header</small> | `gauge-set` |
+| Widget                                           | Shows | Needs                                                 | Renders as  |
+| ------------------------------------------------ | ----- | ----------------------------------------------------- | ----------- |
+| **Nextcloud** <br><code>nextcloud-server</code>  | info  | App password <br><small>username and password</small> | `stat-grid` |
+| **TrueNAS pools** <br><code>truenas-pools</code> | pools | API key <br><small>API key header</small>             | `gauge-set` |
 
 ## Network
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **AdGuard Home** <br><code>adguard-stats</code> | stats | Password <br><small>username and password</small> | `stat-grid` |
-| **Pi-hole** <br><code>pihole-summary</code> | summary | API token <br><small>API key in the query string</small> | `stat-grid` |
-| **Speedtest Tracker** <br><code>speedtest-tracker</code> | latest | API token <br><small>API key header</small> | `stat-grid` |
+| Widget                                                   | Shows   | Needs                                                    | Renders as  |
+| -------------------------------------------------------- | ------- | -------------------------------------------------------- | ----------- |
+| **AdGuard Home** <br><code>adguard-stats</code>          | stats   | Password <br><small>username and password</small>        | `stat-grid` |
+| **Pi-hole** <br><code>pihole-summary</code>              | summary | API token <br><small>API key in the query string</small> | `stat-grid` |
+| **Speedtest Tracker** <br><code>speedtest-tracker</code> | latest  | API token <br><small>API key header</small>              | `stat-grid` |
 
 ## Virtualization
 
-| Widget | Shows | Needs | Renders as |
-| --- | --- | --- | --- |
-| **Portainer** <br><code>portainer-containers</code> | containers | Access token <br><small>API key header</small> | `stat-grid` |
-| **Proxmox cluster** <br><code>proxmox-cluster</code> | resources | Token secret <br><small>API key header</small> | `stat-grid` |
-| **Proxmox node** <br><code>proxmox-node</code> | status | Token secret <br><small>API key header</small> | `gauge-set` |
+| Widget                                               | Shows      | Needs                                          | Renders as  |
+| ---------------------------------------------------- | ---------- | ---------------------------------------------- | ----------- |
+| **Portainer** <br><code>portainer-containers</code>  | containers | Access token <br><small>API key header</small> | `stat-grid` |
+| **Proxmox cluster** <br><code>proxmox-cluster</code> | resources  | Token secret <br><small>API key header</small> | `stat-grid` |
+| **Proxmox node** <br><code>proxmox-node</code>       | status     | Token secret <br><small>API key header</small> | `gauge-set` |
 
 ## Adding one
 

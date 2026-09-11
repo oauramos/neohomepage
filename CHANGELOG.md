@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+### Sections
+
+- **A page is a stack of sections.** Three kinds: a `navbar` composed of items (the title, a line
+  of text, a row of links, a clock, a search box, a spacer), a `grid` — the free board as before,
+  with its own column counts per breakpoint and its own row cap — and `bookmarks`: named groups of
+  links laid out N per row, drawn as a list, cards, icon-and-name or chips. A page that declares
+  none resolves to the navbar-and-grid pair every install already had, so nothing on disk
+  migrates. Layouts stay one flat file per page; a grid section's board is the entries whose
+  widget names it, so every board starts at row zero and placing into one section cannot move a
+  tile in another. The validator bounds each entry by its section, refuses a section list that
+  would strand a widget, and keeps section, group, link and navbar item ids unique.
+- **A Sections tab** in the editor: add, reorder, remove, expand and configure. Links are typed as
+  URLs and stored as parts — the browser does the split, so the server still never sees a URL.
+  Edits save whole after half a second; a 422 is shown in place with the draft kept. The board
+  re-renders from the resolved state as soon as a save lands, columns included, because the page's
+  stylesheet is now emitted in the browser from the same function the publish step bakes with.
+- **Icons.** A manifest has named its icon by slug since the first widget, and a bookmark can
+  now too — the dashboard-icons names gethomepage users already have. The server fetches each one
+  once into `state/icons/`, checks the bytes are the image they claim to be, and the page
+  references the local copy; a viewed dashboard loads nothing from the internet. Until cached, a
+  link shows its initial. Tiles show their type's icon beside the title.
+- **MCP**: `get_sections`, `set_sections`, `add_bookmark`; `add_widget`, `update_widget` and
+  `set_layout` take a `section`; `describe_dashboard` reports the sections.
+- **Readings can be boxed and centred.** Three shape tokens — `stat-bg`, `stat-padding`,
+  `stat-align` — set it for the dashboard from the design panel (Type → Readings), a preset can
+  carry it, and a widget can choose for itself (`look.stats`, `look.align`) from its row in the
+  Widgets tab or through `update_widget`. "Running 10" in a muted box, centred, reads across a
+  room; bare and left-aligned is still the default.
+- **The Widgets tab is a list you can edit.** One search box at the top adds (type to narrow the
+  catalog, or Browse it); at rest the tab is the placed widgets, each row opening into its own
+  editor — title, section, readings, the options its manifest declares, where it reads from,
+  and a two-step Remove. Edits save half a second after the last change and the row says so.
+  Catalog entries show their icon and a badge when a credential is needed. The dialog is wider,
+  the tabs carry icons and start on Widgets, and below tablet width the tabs become a row.
+- **The page boots from the state it was published with.** The embedded state was written flat
+  and read as `{resolved}`, so every load booted from an empty dashboard, painted the default theme
+  over the baked one for a frame, then fetched what it already had. Found because a link tile
+  rendering as a real button on first paint let axe scan that frame and fail four presets on a
+  colour that never exists on screen.
+- **An https target addressed by IP is reachable again.** Node refuses an IP literal as the TLS
+  ServerName, and the refusal was mapped to "unreachable" — so every Proxmox, Portainer and
+  TrueNAS at `https://192.168.x.x` failed in a millisecond, before a packet was sent.
+- **A bookmark is a link before it is a liveness check.** A link tile's href is resolved from its
+  target and path, not read from a projection that only exists once `GET /` has succeeded; a
+  service that answers with a login redirect, a 401 or a self-signed certificate is still a
+  bookmark. The probe's verdict stays in the chip.
+
+### Catalog
+
+- **Eight widgets from one homelab's `services.yaml`**: `glances-quicklook` (CPU, memory, swap
+  and load of a host), `glances-sensors` (every Celsius reading), `glances-gpu`, `glances-fs`
+  (a bar per mount), `nextcloud-server` (who is on, users, files, free space — the serverinfo
+  app over Basic auth with an app password), `immich-library` (photos, videos, storage),
+  `navidrome-library` (songs, folders, last scan) and `navidrome-playing` (who is listening to
+  what). Each written clean-room from the vendor's API documentation, with a recorded fixture
+  trimmed to what the projection reads; the Navidrome idle shape — `"nowPlaying": {}`, an object
+  where a list is expected — has a unit test of its own because a fixture cannot wait for someone
+  to press play.
+- **A query or path template can read the target's own fields**, beneath the widget's options.
+  Subsonic's username and salt are properties of the server and travel as query parameters, and
+  before this the operation could only reach the widget's config, so the request went out with an
+  empty user and the tile showed dashes. Secrets are still refused in a URL whichever bag they are
+  in.
+
 ### The editor
 
 - **Widgets have a kind** — widget, bookmark or tool — declared on the manifest and defaulted, so no
@@ -181,6 +245,31 @@
   pair the contrast test already proves, and carry the tone as a ring.
 - axe now scans all seven presets in both schemes on a board with a bookmark tile, which is what
   caught the two presets whose solid accent fill was painting its label in the fill colour.
+
+### Cleanup
+
+- **A pass over the whole codebase.** Dead exports, parameters and CSS rules removed; duplicated
+  helpers folded into one (`removeFromLayouts`, `isLoopbackHost`, `readSecretsFile`, `exists`,
+  `useFocusTrap`, the e2e fixtures, the test HTTP stubs); comments cut to what the code cannot
+  say for itself. Behaviour is unchanged except where the pass found a bug:
+  - `requestPublish` lost the first caller's promise when a second edit landed inside the debounce
+    window; the window now shares one promise and publishes once.
+  - The DSL `concat` copied every child before truncating, so a large upstream array could throw
+    on spread; each child is capped first. `sort` coerces each key once instead of on every
+    comparison.
+  - A composite manifest smuggling a secret was reported at a doubled path.
+  - Saving a layout for an unknown breakpoint returned 500; it is a 422 with the reason.
+  - The poll scheduler ran the queue in batches of `concurrency` and waited for the slowest
+    fetch in each batch before starting the next; workers now pull from the queue until it is
+    empty.
+  - Backing out of the add-widget form kept a stale "could not connect" error above the catalog.
+  - Booting without baked state and with the first `/api/state` failing left a blank container
+    around a still-mounted React tree; the app now stays up with the placeholder state.
+- **Typechecking covers everything.** `packages/catalog-schema` tests, the e2e specs and the
+  Vite, Vitest and Playwright configs were outside every `tsconfig`; they are in now, and the
+  catalog-schema build has its own `tsconfig.build.json`.
+- `pnpm catalog:docs` formats its output through Prettier, so the stale-docs check in CI compares
+  like with like.
 
 ## 0.1.0 — first release
 

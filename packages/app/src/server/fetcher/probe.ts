@@ -1,7 +1,6 @@
 import type { Manifest } from '@neohomepage/catalog-schema'
 import { isComposite, sourceKinds } from '@neohomepage/catalog-schema'
 import type { AuthContext } from './auth.ts'
-import type { FetchLimits } from './client.ts'
 import {
   executeOperation,
   executeSource,
@@ -9,14 +8,7 @@ import {
   type TargetBinding,
 } from './execute.ts'
 
-/**
- * "Does this credential reach this box?", for both manifest shapes.
- *
- * The install form, the MCP `test_target` tool and `neo fetch` all ask exactly this question, and
- * all three used to ask it by reaching into `manifest.operations` themselves. Composites have no
- * `operations`, so that reach is now a compile error and this is the one place that knows how to
- * pick a probe for either shape.
- */
+/** Picks and runs one probe for either manifest shape; composites have no `operations`. */
 
 export type ProbeInput = {
   readonly manifest: Manifest
@@ -28,13 +20,6 @@ export type ProbeInput = {
   readonly config: Readonly<Record<string, unknown>>
   readonly auth: AuthContext
   readonly now: string
-  readonly limits?: Partial<FetchLimits>
-}
-
-export function probeNames(manifest: Manifest): string[] {
-  return isComposite(manifest)
-    ? sourceKinds(manifest).map((entry) => entry.kind)
-    : Object.keys(manifest.operations)
 }
 
 export async function probe(input: ProbeInput): Promise<ExecuteResult> {
@@ -62,7 +47,6 @@ export async function probe(input: ProbeInput): Promise<ExecuteResult> {
       config: input.config,
       auth: input.auth,
       now: input.now,
-      ...(input.limits === undefined ? {} : { limits: input.limits }),
     })
   }
 
@@ -77,6 +61,5 @@ export async function probe(input: ProbeInput): Promise<ExecuteResult> {
     config: input.config,
     auth: input.auth,
     now: input.now,
-    ...(input.limits === undefined ? {} : { limits: input.limits }),
   })
 }

@@ -18,8 +18,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      # Never `corepack enable`: corepack is not distributed with Node >= 25, so that line becomes
-      # a time bomb the day the base image moves. pnpm/action-setup reads packageManager instead.
+      # No `corepack enable`: corepack is not shipped with Node >= 25; pnpm/action-setup reads
+      # packageManager instead.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -34,7 +34,6 @@ jobs:
       - run: pnpm docs:build
 
       - name: The widget reference matches the manifests
-        # A generated page nobody sees in a diff is a page nobody notices going wrong.
         run: |
           pnpm catalog:docs
           git diff --exit-code docs/widgets/index.md || {
@@ -43,11 +42,8 @@ jobs:
           }
 
       - name: The catalog build is reproducible and small
-        # Two claims the publish design rests on, checked rather than asserted. Byte-identical
-        # rebuilds are the integrity story that stands in for signing at v1 — anyone can rebuild
-        # from the tag and compare the hash. The size cap is the trigger written into the plan for
-        # splitting the catalog out of this repository; crossing it should be a decision, not a
-        # surprise.
+        # Byte-identical rebuilds stand in for signing at v1; the size cap is the agreed trigger
+        # for splitting the catalog into its own repository.
         run: |
           pnpm catalog:build
           first=$(cat catalog-dist/v1/latest.json)
@@ -66,9 +62,7 @@ jobs:
 
   budgets:
     timeout-minutes: 20
-    # Two of the three numbers the plan commits to. The third — RSS under a soak — needs real
-    # linux/arm64 under a cgroup and is measured by scripts/memcheck.ts on hardware, because a
-    # memory figure taken on a GitHub runner would be a number about GitHub.
+    # RSS under soak is not measured here: it needs linux/arm64 under a cgroup (scripts/memcheck.ts).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -80,14 +74,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: First boot, restart and publish latency, at 60 widgets
-        # Four runs, so the restart figure is a p95 over three samples rather than over one.
+        # Four runs: one first boot, then a restart median over three samples.
         run: pnpm budgets --runs=4
 
   restore-drill:
     timeout-minutes: 20
-    # The backup claim, executed rather than described: build a dashboard, commit /data, clone it
-    # onto an empty directory, boot with the credential in the environment only, and require the
-    # resolved tree and the served board to come back identical.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -102,9 +93,8 @@ jobs:
 
   browser:
     timeout-minutes: 20
-    # The checks that need a real layout engine: axe, the keyboard-only edit session, the board
-    # with JavaScript disabled, and tap targets at phone width. Everything else is in vitest,
-    # where it runs in milliseconds.
+    # Only the checks that need a real layout engine (axe, keyboard-only editing, no-JS board,
+    # tap targets); everything else runs in vitest.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -125,8 +115,6 @@ jobs:
           retention-days: 7
 
   boundary:
-    # The client/server boundary is load-bearing: src/web is bundled for the browser. Prove the
-    # lint rule actually fires rather than trusting that it is configured.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -139,12 +127,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: The boundary rule fires, by name
-        # Asserting "eslint exited non-zero" is not the same as asserting the rule fired. eslint
-        # exits 1 for lint errors and 2 for operational failures — a broken config, or a path
-        # matching no files. So if src/web were ever renamed, the override would stop matching,
-        # `pnpm lint` would stay green because nothing is left under the old glob, and this job
-        # would go green too on eslint's exit 2. The boundary would be entirely unenforced with
-        # two green jobs. Checking the rule id by name is what makes that impossible.
+        # eslint exits 1 for lint errors and 2 for operational failures (broken config, glob
+        # matching no files), so a bare non-zero check would stay green if src/web were renamed.
+        # The rule id is checked by name.
         run: |
           set -uo pipefail
           probe=packages/app/src/web/__boundary_probe.ts
@@ -167,8 +152,7 @@ jobs:
           printf '%s\n' "import { env } from '../server/env.ts'" "export const p = env" > "$probe"
           if fired; then echo "ok   value import from src/server"; else echo "::error::a value import from src/server did not trip the boundary rule"; fail=1; fi
 
-          # And the negative: type-only imports across the boundary are deliberately allowed, so a
-          # rule tightened until everything trips it would pass all of the above and be wrong.
+          # Type-only imports across the boundary are allowed; an over-tightened rule must fail here.
           printf '%s\n' "import type { Env } from '../server/env.ts'" "export type P = Env" > "$probe"
           if fired; then echo "::error::a TYPE-only import from src/server was refused; allowTypeImports has regressed"; fail=1; else echo "ok   type-only import still allowed"; fi
 
@@ -176,7 +160,6 @@ jobs:
           exit $fail
 
       - name: Remove the probe even if the check failed
-        # `if: always()`, because a probe left behind is a file that fails `pnpm lint` for
-        # everyone afterwards on a self-hosted or cached checkout.
+        # A leftover probe fails `pnpm lint` on a cached checkout.
         if: always()
         run: rm -f packages/app/src/web/__boundary_probe.ts

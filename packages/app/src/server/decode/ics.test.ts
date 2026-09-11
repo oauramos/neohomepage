@@ -51,9 +51,7 @@ describe('single events', () => {
   })
 
   it('anchors an all-day event at UTC midnight, whatever the server timezone is', () => {
-    // A DATE value carries no timezone, and ical.js resolves it in the host's local zone. Left
-    // alone, the same feed decodes to 03:00Z on a machine in São Paulo — so this assertion fails
-    // on every developer machine that is not UTC the moment the anchoring regresses.
+    // ical.js resolves a DATE value in the host zone; on a non-UTC machine this would be 03:00Z.
     const { events } = decodeIcs(
       calendar(
         'BEGIN:VEVENT',
@@ -74,8 +72,7 @@ describe('single events', () => {
   })
 
   it('converts a zoned time using the calendar VTIMEZONE, not the host zone', () => {
-    // Without registering the VTIMEZONE, ical.js treats 09:00 as floating and this comes back as
-    // 09:00Z — an off-by-three-hours nobody testing in UTC would ever see.
+    // Without the VTIMEZONE registered, ical.js treats 09:00 as floating and returns 09:00Z.
     const { events } = decodeIcs(
       calendar(
         'BEGIN:VTIMEZONE',
@@ -182,8 +179,7 @@ describe('recurrence', () => {
   })
 
   it('applies a RECURRENCE-ID override once, not twice', () => {
-    // The override component is also a VEVENT with the same UID. Emitting it on its own as well
-    // as through the iterator is the classic duplicate-in-the-agenda bug.
+    // The override is a second VEVENT with the same UID.
     const { events } = decodeIcs(
       calendar(
         'BEGIN:VEVENT',
@@ -212,8 +208,7 @@ describe('recurrence', () => {
   })
 
   it('terminates on a pathological rule instead of expanding the window second by second', () => {
-    // FREQ=SECONDLY over 90 days is 7.8 million instances. The iteration cap is what makes an
-    // untrusted calendar URL unable to hang the poll loop.
+    // FREQ=SECONDLY over the 90-day window is ~7.8 million instances.
     const started = process.hrtime.bigint()
     const { events } = decodeIcs(
       calendar(
@@ -296,8 +291,8 @@ describe('through the decoder registry', () => {
         'END:VEVENT',
       ),
       { now: NOW },
-    ) as { events: { summary: string }[] }
-    expect(decoded.events[0]?.summary).toBe('Via registry')
+    )
+    expect(decoded).toMatchObject({ events: [{ summary: 'Via registry' }] })
   })
 
   it('reports a parse failure with a code and no upstream text', () => {

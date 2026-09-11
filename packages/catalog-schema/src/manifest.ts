@@ -3,11 +3,8 @@ import { nodeSchema } from './dsl/node.ts'
 import { usedOpcodes } from './dsl/walk.ts'
 
 /**
- * A widget manifest: the single hand-written artefact per integration.
- *
- * Four things are derived from it and therefore cannot drift — the edit form, the MCP tool schema,
- * the proxy's endpoint allowlist, and the secret-stripping rule. The catalog contains no code, so
- * everything a widget can do has to be expressible here, and every field is reviewed as data.
+ * Widget manifest schema: the one hand-written artefact per integration, from which the edit form,
+ * MCP tool schema, proxy endpoint allowlist and secret-stripping rule are all derived.
  */
 
 export const TEMPLATES = ['stat-grid', 'list', 'gauge-set', 'status-badge', 'link-tile'] as const
@@ -36,15 +33,8 @@ export type FieldKind = (typeof FIELD_KINDS)[number]
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{1,48}$/, 'must be a lowercase slug')
 
 /**
- * The categories a widget may claim. Closed, and that is the point.
- *
- * A free-form slug produced `virtualisation` and `virtualization`, `network` and `network-dns`,
- * `media` and `media-server` in one sixteen-widget catalog — three pairs of near-duplicate
- * headings in the editor's browse list, each with some of the widgets someone was looking for.
- * A community catalog with a free-form field here would be unbrowsable within a month, and the
- * category is a public contract: renaming one later moves widgets under people's feet.
- *
- * Spellings are en-US, matching everything else user-facing in the project.
+ * Closed set: a free-form slug yields near-duplicate browse headings, and a category is a public
+ * contract that cannot be renamed later. Spellings are en-US.
  */
 export const CATEGORIES = [
   'virtualization',
@@ -87,11 +77,8 @@ export const fieldSchema = z.object({
 })
 export type Field = z.infer<typeof fieldSchema>
 
-/**
- * A secret may be referenced ONLY from an auth template. Never from a path, never from a query
- * value: a credential in a URL ends up in access logs, proxy logs and browser history, and it
- * gives a hostile manifest a channel to exfiltrate one.
- */
+// A secret may be referenced only from an auth template, never from a path or query: a credential
+// in a URL ends up in logs and gives a hostile manifest an exfiltration channel.
 const secretRef = /\{\{secret:([a-zA-Z][A-Za-z0-9]*)\}\}/g
 
 export const authSchema = z.discriminatedUnion('kind', [
@@ -113,8 +100,8 @@ export const authSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('session-exchange'),
-    // Pi-hole v6 returns session.sid from POST /api/auth; qBittorrent returns a cookie. A
-    // stateless-only auth model cannot express either, which is why this kind exists.
+    // For upstreams that hand out a session token or cookie from a login call (Pi-hole v6,
+    // qBittorrent), which a stateless auth model cannot express.
     loginPath: z.string().max(200),
     body: z.record(z.string().max(32), z.string().max(200)),
     /** Dotted path to the token in the JSON login response. Required by `sendAs: header`. */
@@ -137,9 +124,7 @@ const pathTemplate = z
   .string()
   .min(1)
   .max(200)
-  // The colon is for the unified `{{config:name}}` hole syntax, the same form `auth` uses. The
-  // first version of this regex was written for an earlier `{config.field}` spelling and silently
-  // rejected every path template that actually interpolated anything.
+  // The colon admits the `{{config:name}}` hole syntax, the same form `auth` uses.
   .regex(
     /^\/[A-Za-z0-9._~\-/{}:]*$/,
     'must be an absolute path containing only {{config:name}} holes',
@@ -164,16 +149,9 @@ export const requiresSchema = z.object({
 export type Requires = z.infer<typeof requiresSchema>
 
 /**
- * A source kind: one shape of upstream a role will accept, declared self-containedly.
- *
- * It is a whole mini-manifest — its own fields, its own auth, its own single operation — because
- * a unified calendar binds a Sonarr and an ICS feed at the same time, and those authenticate
- * differently. Pointing at another manifest's operation instead would make every calendar widget
- * break the day someone renames a path in the Sonarr manifest.
- *
- * `emits` is the fan-out, and it is where one HTTP request becomes several streams: Radarr's
- * in-cinemas, physical and digital dates are three emits over one `/api/v3/calendar` response,
- * not three requests and not a `flatMap` opcode.
+ * One upstream shape a role accepts, self-contained (own fields, auth, operation) so a composite
+ * can bind sources that authenticate differently without depending on another manifest.
+ * `emits` fans one response out into several streams.
  */
 export const sourceKindSchema = z
   .object({
@@ -208,15 +186,15 @@ export const roleSchema = z
   .strict()
 export type Role = z.infer<typeof roleSchema>
 
+const itemPath = z
+  .string()
+  .max(64)
+  .regex(/^[A-Za-z][A-Za-z0-9.]{0,62}$/)
+
 /**
- * How N streams become one widget.
- *
- * Six knobs, all total, all applied in a fixed order (concat, distinct, sort, limit). Composition
- * is deliberately not the DSL: the DSL runs per source, before anything is merged, and giving the
- * merge step its own expression language would double the surface a hostile manifest can reach.
- *
- * `partial` is the calendar's whole reason for existing at home: one dead Radarr must not blank
- * out the four calendars that answered.
+ * Merges N source streams into one widget, in fixed order: concat, distinct, sort, limit.
+ * Deliberately not the DSL, which runs per source before merging. `partial` keeps one dead
+ * source from blanking the ones that answered.
  */
 export const composeSchema = z
   .object({
@@ -224,32 +202,17 @@ export const composeSchema = z
     sortBy: z
       .array(
         z.object({
-          path: z
-            .string()
-            .max(64)
-            .regex(/^[A-Za-z][A-Za-z0-9.]{0,62}$/),
+          path: itemPath,
           direction: z.enum(['asc', 'desc']).default('asc'),
         }),
       )
       .max(3)
       .default([]),
     /**
-     * Keys that together identify one item, for dropping duplicates across sources.
-     *
-     * An array, not a single path, because one path is almost always the wrong granularity. The
-     * calendar shipped with `distinctBy: "title"` and every episode of a series after the first
-     * vanished — they share a title, and only the instant tells them apart.
+     * Keys that together identify one item across sources; a single path such as `title` is
+     * usually too coarse.
      */
-    distinctBy: z
-      .array(
-        z
-          .string()
-          .max(64)
-          .regex(/^[A-Za-z][A-Za-z0-9.]{0,62}$/),
-      )
-      .min(1)
-      .max(3)
-      .optional(),
+    distinctBy: z.array(itemPath).min(1).max(3).optional(),
     limit: z.int().min(1).max(50).default(20),
     partial: z.boolean().default(true),
   })
@@ -263,12 +226,8 @@ const commonManifest = {
   displayName: z.string().min(1).max(48),
   category: z.enum(CATEGORIES),
   /**
-   * What KIND of thing this is, as distinct from what domain it belongs to.
-   *
-   * `category` answers "media or network"; this answers "does it show a reading, open a link, or
-   * do something". The editor groups by it, and they are genuinely different jobs: a bookmark is
-   * added in bulk and never configured again, a widget is configured once and watched, and a tool
-   * is acted on. Defaulted rather than required so no existing manifest has to change.
+   * What kind of thing this is, as distinct from `category`'s domain; the editor groups by it.
+   * Defaulted so existing manifests need not change.
    */
   kind: z.enum(['widget', 'bookmark', 'tool']).default('widget'),
   /** A slug into the bundled icon pack. Never a URL: that would be a tracking pixel. */
@@ -307,29 +266,18 @@ export const compositeManifestSchema = z
   .strict()
 export type CompositeManifest = z.infer<typeof compositeManifestSchema>
 
-/**
- * A plain union rather than a discriminator field.
- *
- * The two shapes have disjoint required keys, so `roles` already discriminates. Adding a
- * `kind: "single"` line to every manifest to please `discriminatedUnion` would be a keyword that
- * only exists to restate what the body already says.
- */
+// Plain union: the two shapes have disjoint required keys, so `roles` already discriminates.
 export const manifestSchema = z.union([singleManifestSchema, compositeManifestSchema])
 
 export type Manifest = z.infer<typeof manifestSchema>
 
-/** Narrowing that the rest of the server switches on. */
 export function isComposite(manifest: Manifest): manifest is CompositeManifest {
   return 'roles' in manifest
 }
 
 /**
- * Parse a manifest and, on failure, say which branch it was judged against.
- *
- * A bare union reports `(root): Invalid input` — literally true and useless to whoever is writing
- * the file. Choosing the branch the document already looks like turns that into "your fourth emit
- * has no projection", which is the difference between a contributor fixing a PR in a minute and
- * abandoning it.
+ * On failure, reports issues against the branch the document already looks like; a bare union
+ * only says `(root): Invalid input`.
  */
 export function parseManifest(
   raw: unknown,
@@ -344,8 +292,7 @@ export function parseManifest(
   const branch = looksComposite ? compositeManifestSchema : singleManifestSchema
   const detailed = branch.safeParse(raw)
   const issues = detailed.success
-    ? // The branch parsed but the union did not, which can only mean the document satisfies both
-      // sets of required keys — a manifest that is single-source AND composite at once.
+    ? // The branch parsed but the union did not: the document satisfies both shapes at once.
       [
         {
           path: '(root)',
@@ -361,7 +308,6 @@ export function parseManifest(
   return { ok: false, shape: looksComposite ? 'composite' : 'single', issues }
 }
 
-/** Every source kind in a composite, flattened with the role it belongs to. */
 export function sourceKinds(
   manifest: CompositeManifest,
 ): { role: string; kind: string; source: SourceKind }[] {
@@ -371,10 +317,8 @@ export function sourceKinds(
 }
 
 /**
- * Derive what a manifest actually needs. The catalog's CI asserts this equals the declared
- * `requires` block, and the client re-derives it independently rather than trusting the catalog —
- * a hand-maintained requirements list drifts within weeks, and that drift *is* the
- * "installs fine, then renders nothing" bug.
+ * Catalog CI asserts this equals the declared `requires` block, and the client re-derives it
+ * rather than trusting the catalog.
  */
 export function deriveRequires(manifest: Manifest): Requires {
   const opcodes = new Set<string>()
@@ -384,14 +328,14 @@ export function deriveRequires(manifest: Manifest): Requires {
   if (isComposite(manifest)) {
     for (const { source } of sourceKinds(manifest)) {
       authKinds.add(source.auth.kind)
-      fetchKinds.add(source.operation.decode ?? 'json')
+      fetchKinds.add(source.operation.decode)
       for (const emit of source.emits)
         for (const op of usedOpcodes(emit.projection)) opcodes.add(op)
     }
   } else {
     authKinds.add(manifest.target.auth.kind)
     for (const operation of Object.values(manifest.operations)) {
-      fetchKinds.add(operation.decode ?? 'json')
+      fetchKinds.add(operation.decode)
     }
     for (const op of usedOpcodes(manifest.projection)) opcodes.add(op)
   }
@@ -406,10 +350,7 @@ export function deriveRequires(manifest: Manifest): Requires {
 
 export type ManifestProblem = { readonly path: string; readonly message: string }
 
-/**
- * Checks the schema cannot express, run on every catalog pull request.
- * These are the rules that keep a hostile manifest no more dangerous than a mistyped base URL.
- */
+/** Checks the schema cannot express; run on every catalog pull request. */
 export function auditManifest(manifest: Manifest): ManifestProblem[] {
   const problems: ManifestProblem[] = []
 
@@ -445,13 +386,8 @@ export function auditManifest(manifest: Manifest): ManifestProblem[] {
   return problems
 }
 
-/**
- * The secret rules, applied to one authenticating surface.
- *
- * Shared between the single-target shape and every source kind of a composite, because a
- * composite that authenticated by a second, laxer code path would be exactly the hole this audit
- * exists to close.
- */
+// Secret rules for one authenticating surface, shared by the single-target shape and every
+// composite source kind so there is no second, laxer path.
 function auditSurface(
   surface: { fields: readonly Field[]; auth: Auth },
   operations: Record<string, Operation>,
@@ -476,14 +412,12 @@ function auditSurface(
       query: operation.query,
       headers: operation.headers,
     })
-    if (secretRef.test(exposed)) {
+    if (exposed.search(secretRef) !== -1) {
       problems.push({
         path: `${operationsPath}.${opName}`,
-        message:
-          'a secret may only be referenced from target.auth, never in a path, query or header',
+        message: `a secret may only be referenced from ${fieldsPath}.auth, never in a path, query or header`,
       })
     }
-    secretRef.lastIndex = 0
   }
 }
 
@@ -510,7 +444,7 @@ function auditComposite(manifest: CompositeManifest, problems: ManifestProblem[]
 
     for (const [kindName, source] of kinds) {
       const where = `roles.${roleName}.kinds.${kindName}`
-      auditSurface(source, { operation: source.operation }, where, `${where}.operation`, problems)
+      auditSurface(source, { operation: source.operation }, where, where, problems)
 
       const emitIds = new Set<string>()
       for (const emit of source.emits) {
@@ -522,8 +456,7 @@ function auditComposite(manifest: CompositeManifest, problems: ManifestProblem[]
     }
   }
 
-  // A composite renders `items`, so a sort key that names nothing an item has would silently
-  // produce arrival order — the failure mode being "my calendar is not in date order".
+  // A sort key naming no item field would silently yield arrival order.
   for (const key of manifest.compose.sortBy) {
     const head = key.path.split('.')[0] as string
     if (!ITEM_FIELDS.has(head)) {

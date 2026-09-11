@@ -3,12 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test as base, type Page } from '@playwright/test'
+import type { Resolved } from '../src/shared/resolved.ts'
 
 /**
- * A server per test file, on a temporary data directory.
- *
- * Per file rather than per test because booting costs about a second and the tests here are
- * read-mostly; the ones that write get their own file.
+ * One server per test file on a temporary data directory; booting costs about a second and the
+ * tests are read-mostly.
  */
 
 const PORT = 7599
@@ -67,14 +66,30 @@ export async function startServer(): Promise<{ harness: Harness; stop: () => Pro
   }
 }
 
-/**
- * A page whose mouse is a trap.
- *
- * The keyboard test has to prove the whole edit session works without pointing at anything, and
- * "I did not call the mouse" is not a property you can assert by reading the test — someone adds
- * one `.click()` to get a failing test green and the guarantee is gone with no signal. Taking the
- * mouse away is the only version of this that stays true.
- */
+export async function sendJson<T = unknown>(
+  url: string,
+  body: unknown,
+  method = 'POST',
+): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return (await response.json()) as T
+}
+
+export async function readState(
+  page: Page,
+  baseURL: string,
+): Promise<{ revision: string; resolved: Resolved }> {
+  return (await (await page.request.get(`${baseURL}/api/state`)).json()) as {
+    revision: string
+    resolved: Resolved
+  }
+}
+
+/** Replaces `page.mouse` with traps so a keyboard-only test cannot quietly gain a click. */
 export function forbidMouse(page: Page): void {
   const trap = (name: string) => () => {
     throw new Error(

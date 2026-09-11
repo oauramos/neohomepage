@@ -1,0 +1,16 @@
+{
+  "gauges": [
+    {
+      "label": "/",
+      "used": 20658774016,
+      "total": 100861726720,
+      "unit": "bytes"
+    },
+    {
+      "label": "/mnt/streaming",
+      "used": 2603698401280,
+      "total": 3936818806784,
+      "unit": "bytes"
+    }
+  ]
+}

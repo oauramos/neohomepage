@@ -1,12 +1,6 @@
 /**
- * A binary min-heap keyed by due time.
- *
- * The scheduler runs one timer, not one per widget. N setIntervals drift apart, wake the process
- * N times a second between them, and produce a thundering herd every time they happen to align —
- * all of which matters on a box where the app is meant to be invisible when nobody is looking.
- *
- * Entries are matched by id, so changing an interval or cancelling is O(n) to find but O(log n)
- * to reheap: the right trade at the scale of "a few dozen widgets".
+ * Binary min-heap keyed by due time, so the scheduler runs one timer rather than one per widget.
+ * Entries are matched by id; a reschedule or cancel is O(n) to find and O(log n) to reheap.
  */
 
 export type HeapEntry<T> = {

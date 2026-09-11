@@ -1,43 +1,35 @@
-@import 'tailwindcss';
+/* No utility is used anywhere; without source(none) the scanner emits one per stray source word. */
+@import 'tailwindcss' source(none);
 
-/*
- * Runtime theming contract: every colour the app paints is a CSS custom property on :root, so a
- * theme the user picks in the FAB modal is a property write, never a rebuild. The full token set
- * (and its baked-into-the-generation twin) lands in F8.
- */
-:root {
-  --nh-background: oklch(0.985 0 0);
-  --nh-foreground: oklch(0.21 0.006 285);
-}
+/* Every colour is a :root custom property, so a theme change is a property write. The defaults sit
+   in a layer so the unlayered stylesheet a published page bakes in wins; only the dev page uses them. */
+@layer base {
+  :root {
+    --nh-background: oklch(0.985 0 0);
+    --nh-foreground: oklch(0.21 0.006 285);
+  }
 
-:root:not([data-theme='light']) {
-  @media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @media (prefers-color-scheme: dark) {
+      --nh-background: oklch(0.16 0.004 285);
+      --nh-foreground: oklch(0.96 0.001 286);
+    }
+  }
+
+  :root[data-theme='dark'] {
     --nh-background: oklch(0.16 0.004 285);
     --nh-foreground: oklch(0.96 0.001 286);
   }
-}
-
-:root[data-theme='dark'] {
-  --nh-background: oklch(0.16 0.004 285);
-  --nh-foreground: oklch(0.96 0.001 286);
 }
 
 body {
   margin: 0;
   background: var(--nh-background);
   color: var(--nh-foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
+  font-family: var(--nh-font-sans, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif);
 }
 
-/*
- * Editor chrome only. The board itself is styled by the stylesheet the publish step bakes into
- * the page, so a published dashboard is complete without this bundle ever loading.
- */
+/* Editor chrome only; the board is styled by the stylesheet the publish step bakes into the page. */
 .nh-sr-only {
   position: absolute;
   width: 1px;
@@ -88,8 +80,8 @@ body {
   background: rgb(0 0 0 / 32%);
 }
 .nh-modal {
-  width: min(560px, calc(100vw - 40px));
-  max-height: min(70vh, 640px);
+  width: min(720px, calc(100vw - 40px));
+  max-height: min(80vh, 760px);
   display: flex;
   flex-direction: column;
   background: var(--nh-surface);
@@ -137,8 +129,7 @@ body {
   font-size: 18px;
   cursor: pointer;
   line-height: 1;
-  /* WCAG 2.5.8 wants 24x24 CSS pixels. A glyph-sized button measured 11x18 — the smallest thing
-     on the page, on a phone, and the one that gets you out of the modal. */
+  /* WCAG 2.5.8 minimum target size (24x24). */
   min-width: 28px;
   min-height: 28px;
   display: inline-flex;
@@ -163,14 +154,48 @@ body {
   min-width: 148px;
 }
 .nh-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   border: 0;
   background: transparent;
   color: var(--nh-muted-foreground);
+  min-height: 34px;
   padding: 6px 8px;
   border-radius: 8px;
   font-size: 0.8125rem;
   cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.nh-tab:hover {
+  background: var(--nh-muted);
+  color: var(--nh-foreground);
+}
+.nh-tab-icon {
+  flex: none;
+  opacity: 0.8;
+}
+.nh-tab[aria-current='true'] .nh-tab-icon {
+  opacity: 1;
+}
+@media (max-width: 640px) {
+  .nh-modal-body {
+    flex-direction: column;
+  }
+  .nh-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--nh-border);
+    min-width: 0;
+    padding: 8px;
+  }
+  .nh-tab {
+    flex: none;
+  }
 }
 .nh-tab[aria-current='true'] {
   background: var(--nh-muted);
@@ -225,7 +250,106 @@ body {
 
 /* Edit mode and the add-widget form. */
 .nh-editor {
-  padding: 8px 16px 96px;
+  padding: 8px 16px 24px;
+}
+/* react-grid-layout's own stylesheet is not loaded; these replace the rules dragging and the
+   placeholder depend on, in the theme's terms. */
+.nh-editor .react-grid-layout {
+  position: relative;
+  transition: height 200ms ease;
+}
+.nh-editor .react-grid-item {
+  transition: all 200ms ease;
+  transition-property: left, top, width, height;
+}
+.nh-editor .react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+.nh-editor .react-grid-item.resizing {
+  transition: none;
+  z-index: 1;
+  will-change: width, height;
+}
+.nh-editor .react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 3;
+  will-change: transform;
+}
+.nh-editor .react-grid-item.react-draggable-dragging .nh-editor-cell {
+  box-shadow: 0 16px 40px rgb(0 0 0 / 35%);
+  border-style: solid;
+}
+.nh-editor .react-grid-item.react-grid-placeholder {
+  background: color-mix(in oklch, var(--nh-accent) 18%, transparent);
+  border: 1px dashed var(--nh-accent);
+  border-radius: 12px;
+  opacity: 1;
+  transition-duration: 100ms;
+  z-index: 2;
+  user-select: none;
+}
+.nh-editor .react-grid-item.react-grid-placeholder.placeholder-resizing {
+  transition: none;
+}
+.nh-editor .react-grid-item > .react-resizable-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  height: 28px;
+  cursor: se-resize;
+  z-index: 1;
+}
+.nh-editor .react-grid-item > .react-resizable-handle::after {
+  content: '';
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--nh-muted-foreground);
+  border-bottom: 2px solid var(--nh-muted-foreground);
+  border-radius: 0 0 2px 0;
+}
+.nh-editor .react-grid-item:hover > .react-resizable-handle::after,
+.nh-editor .react-grid-item.resizing > .react-resizable-handle::after {
+  border-color: var(--nh-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-editor .react-grid-layout,
+  .nh-editor .react-grid-item {
+    transition: none;
+  }
+}
+.nh-editbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--nh-border);
+  border-radius: 12px;
+  background: var(--nh-surface);
+  color: var(--nh-surface-foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  font-size: 0.8125rem;
+}
+.nh-editbar-note {
+  color: var(--nh-muted-foreground);
+}
+.nh-editbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.nh-editbar .nh-button,
+.nh-editbar .nh-button-quiet {
+  min-height: 34px;
 }
 .nh-editor-bar {
   display: flex;
@@ -245,6 +369,18 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+.nh-editor-size {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid var(--nh-control-border);
+  border-radius: 6px;
+  background: var(--nh-background);
+  color: var(--nh-foreground);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
 }
 .nh-editor-cell-bar {
   display: flex;
@@ -266,8 +402,6 @@ body {
   overflow: hidden;
   padding: 8px;
 }
-/* 44px is the smallest target a finger reliably hits; anything less makes dragging on a phone a
-   game of chance. */
 .nh-drag-handle,
 .nh-editor-remove {
   min-width: 32px;
@@ -286,6 +420,7 @@ body {
   outline: 2px solid var(--nh-accent);
   outline-offset: 1px;
 }
+/* 44px is the smallest target a finger reliably hits. */
 @media (pointer: coarse) {
   .nh-drag-handle,
   .nh-editor-remove {
@@ -403,9 +538,9 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
   max-height: 260px;
   overflow: auto;
 }
@@ -419,8 +554,12 @@ body {
   padding: 8px 10px;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
 }
 .nh-catalog-name {
   font-weight: 600;
@@ -448,10 +587,9 @@ body {
   color: var(--nh-ok);
 }
 
-/* ---------------------------------------------------------------- the design panel
-
-   Anchored bottom-right against the editor's bottom-left. The scrim uses `place-items`, so a
-   right-hand modal only needs to override the inline axis rather than re-position anything. */
+/* ---- Design panel -------------------------------------------------------------------------- */
+/* Anchored bottom-right; the scrim uses `place-items`, so a right-hand modal only overrides the
+   inline axis. */
 .nh-fab-design {
   left: auto;
   right: 20px;
@@ -472,8 +610,7 @@ body {
   overflow: auto;
   padding: 14px 16px 18px;
 }
-/* Six sections do not fit one line at this width, and a nav that overflows pushes the whole panel
-   into a horizontal scroll rather than wrapping. Two rows is the honest answer. */
+/* Six items do not fit one row at panel width, so the nav wraps instead of scrolling. */
 .nh-design-nav {
   display: flex;
   flex-wrap: wrap;
@@ -506,7 +643,6 @@ body {
   gap: 12px;
 }
 
-/* A segmented control, used for scheme, font and title case. */
 .nh-seg {
   display: flex;
   gap: 4px;
@@ -534,8 +670,7 @@ body {
   outline-offset: 2px;
 }
 
-/* The preset cards: each swatch is painted with that preset's OWN tokens, radius and border
-   included, so the card is a sample of the theme rather than a label for it. */
+/* Preset cards; each swatch is painted with that preset's own tokens, radius and border included. */
 .nh-preset-grid {
   list-style: none;
   margin: 0;
@@ -618,19 +753,7 @@ body {
   accent-color: var(--nh-accent);
   min-height: 24px;
 }
-.nh-design-section .nh-field select {
-  grid-column: 1 / -1;
-  min-height: 34px;
-  border: 1px solid var(--nh-control-border);
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.8125rem;
-  padding: 0 8px;
-}
-
-/* The live contrast readout, computed with the same function the test suite asserts with. */
+/* Live contrast-ratio readout. */
 .nh-ratios {
   display: flex;
   flex-wrap: wrap;
@@ -685,8 +808,8 @@ body {
   outline-offset: 2px;
 }
 
-/* Colour rows: a native picker, the hex it maps to, and a reset that is only live when the token
-   actually carries an override. The hex is the label people read; the picker is how they change it. */
+/* Colour rows: native picker, hex readout, and a reset that is only live when the token carries
+   an override. */
 .nh-colour-group {
   border: 1px solid var(--nh-border);
   border-radius: 10px;
@@ -722,7 +845,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A colour input paints its own chrome; stripping the padding is what makes the swatch fill it. */
+/* Zero padding so the swatch fills the input's own chrome. */
 .nh-colour-picker {
   flex: none;
   width: 34px;
@@ -783,8 +906,7 @@ body {
   outline-offset: 2px;
 }
 
-/* Overrides survive a preset change on purpose, which makes them invisible: the board stops
-   matching the card you clicked and nothing says why. This is the explanation and the way back. */
+/* Notice that colour overrides survived a preset change, with a way to clear them. */
 .nh-overrides {
   display: flex;
   align-items: center;
@@ -801,9 +923,8 @@ body {
   text-transform: capitalize;
 }
 
-/* The gallery: sixty-four palettes, so a card is a colour bar and a name rather than a paragraph.
-   Four bars — page, tile, accent, healthy, failing — is enough to recognise a palette at a glance
-   and cheap enough to render sixty-four times. */
+/* Palette gallery: a strip of colour bars and a name per card, cheap enough to render for every
+   palette. */
 .nh-swatch-grid {
   list-style: none;
   margin: 0;
@@ -860,19 +981,12 @@ body {
   outline-offset: 2px;
 }
 .nh-design-section .nh-input {
-  width: 100%;
   min-height: 34px;
-  border: 1px solid var(--nh-control-border);
-  border-radius: 8px;
   background: transparent;
   color: inherit;
-  font: inherit;
-  font-size: 0.8125rem;
   padding: 0 8px;
 }
 
-/* Board width: four icons on a scale, not a dropdown. Each is a viewport frame with the board
-   inside it, so the choice is the picture rather than a word standing in for one. */
 .nh-widths {
   grid-column: 1 / -1;
   display: flex;
@@ -904,20 +1018,9 @@ body {
   outline-offset: 2px;
 }
 
-/* Auto-hide only ever changes opacity, so a control that cannot be seen can still be focused and
-   pressed. Which is also why focus and hover always win over it.
-
-   The two directions are deliberately not symmetrical. Leaving is passive — nobody asked for it,
-   so it takes 1.8s and is meant to be barely noticed. Coming back is a response to intent: you
-   moved toward the corner, so it is there in 120ms. One duration for both was the first thing that
-   made this feel hard.
-
-   The second was the curve. An ease-in held the button at full opacity for 800ms and then dropped
-   it from 0.58 to 0.05 in the last 200ms — measured — which is a snap with a delay in front of it,
-   not a fade. The S-curve below spreads the change evenly with soft ends: it starts moving
-   immediately, so you see it leaving rather than vanishing, and settles rather than arriving.
-   The blur and the slight shrink make it read as receding instead of as a light being switched
-   off. */
+/* Auto-hide only changes opacity, so a hidden control stays focusable; focus and hover win over it.
+   Leaving is slow (1.8s, even S-curve so it visibly recedes); returning answers intent, so 120ms.
+   An ease-in held full opacity and then snapped in the last 200ms. */
 [data-neo-controls] .nh-fab {
   transition:
     opacity 120ms ease-out,
@@ -940,8 +1043,7 @@ body {
   filter: none;
   transform: none;
 }
-/* Reduced motion drops the movement, not the fade: a cross-fade is not the thing that causes
-   trouble, and snapping straight to invisible is exactly the hardness this is meant to avoid. */
+/* Reduced motion drops the blur and shrink, not the fade; snapping to invisible is what this avoids. */
 @media (prefers-reduced-motion: reduce) {
   [data-neo-controls='hidden'] .nh-fab {
     filter: none;
@@ -950,8 +1052,7 @@ body {
   }
 }
 
-/* Publish, promoted from the footer to the header. The dot is the unpublished-changes signal that
-   used to be a sentence you had to scroll to. */
+/* Header action button; the dot signals unpublished changes. */
 .nh-modal-action {
   position: relative;
   display: flex;
@@ -1093,9 +1194,8 @@ body {
   flex-direction: column;
   gap: 8px;
 }
-/* The input covers its own label at full size rather than being visually hidden. Hiding it made a
-   1x1 control the tap-target sweep correctly refused: the label was the target and the input was a
-   pinhole next to it. Transparent and stretched, the thing you aim at IS the thing you press. */
+/* The input is transparent and stretched over its label rather than visually hidden, so the tap
+   target is the input itself. */
 .nh-upload {
   position: relative;
   display: inline-flex;
@@ -1134,4 +1234,372 @@ body {
 .nh-upload-delete:focus-visible {
   outline: 2px solid var(--nh-accent);
   outline-offset: 2px;
+}
+
+/* ---- Sections panel ------------------------------------------------------------------------ */
+.nh-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nh-section-card {
+  border: 1px solid var(--nh-border);
+  border-radius: 10px;
+  background: var(--nh-surface);
+}
+.nh-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 4px;
+}
+.nh-section-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nh-section-toggle:hover {
+  background: var(--nh-muted);
+}
+.nh-section-toggle:focus-visible,
+.nh-mini:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 1px;
+}
+.nh-section-name {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+.nh-section-body {
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--nh-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nh-kind {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--nh-muted);
+  color: var(--nh-muted-foreground);
+  flex: none;
+}
+.nh-row-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  flex: none;
+}
+.nh-mini {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--nh-border);
+  border-radius: 6px;
+  background: var(--nh-background);
+  color: var(--nh-foreground);
+  font: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+.nh-mini:hover {
+  background: var(--nh-muted);
+}
+.nh-mini-danger:hover {
+  color: var(--nh-bad);
+}
+.nh-grow {
+  flex: 1 1 120px;
+  width: auto;
+}
+.nh-select {
+  width: auto;
+  flex: 0 1 auto;
+}
+.nh-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+}
+.nh-nav-item,
+.nh-group-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--nh-border);
+  border-radius: 8px;
+}
+.nh-link-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nh-link-row {
+  display: grid;
+  grid-template-columns: 1fr 88px auto;
+  grid-template-areas:
+    'label icon actions'
+    'url url url';
+  gap: 4px;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--nh-border);
+}
+.nh-link-row:last-of-type {
+  border-bottom: 0;
+}
+.nh-link-label {
+  grid-area: label;
+}
+.nh-link-icon {
+  grid-area: icon;
+}
+.nh-link-url {
+  grid-area: url;
+}
+.nh-link-row .nh-row-actions {
+  grid-area: actions;
+}
+.nh-link-row .nh-input[aria-invalid='true'] {
+  border-color: var(--nh-bad);
+}
+.nh-cols {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.nh-col-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 64px;
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+}
+
+/* ---- Widgets panel ------------------------------------------------------------------------- */
+.nh-wsearch {
+  display: flex;
+  gap: 6px;
+}
+.nh-wsearch .nh-input {
+  flex: 1;
+  min-height: 36px;
+}
+.nh-wsearch .nh-button-quiet[aria-pressed='true'] {
+  background: var(--nh-muted);
+}
+.nh-seg-compact .nh-seg-item {
+  flex: 0 1 auto;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+}
+.nh-wlist-head {
+  justify-content: space-between;
+}
+.nh-wlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nh-wrow {
+  border: 1px solid var(--nh-border);
+  border-radius: 10px;
+  background: var(--nh-background);
+  transition: border-color 150ms ease;
+}
+.nh-wrow[data-neo-expanded='true'] {
+  border-color: var(--nh-control-border);
+}
+.nh-wrow-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nh-wrow-toggle:hover {
+  background: var(--nh-muted);
+}
+.nh-wrow-toggle:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: -2px;
+}
+.nh-wrow-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.nh-wrow-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.nh-wrow-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nh-wrow-meta {
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nh-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--nh-muted-foreground);
+}
+.nh-dot[data-neo-tone='ok'] {
+  background: var(--nh-ok);
+}
+.nh-dot[data-neo-tone='warn'] {
+  background: var(--nh-warn);
+}
+.nh-dot[data-neo-tone='bad'] {
+  background: var(--nh-bad);
+}
+.nh-chevron {
+  flex: none;
+  color: var(--nh-muted-foreground);
+  transition: transform 150ms ease;
+}
+.nh-wrow[data-neo-expanded='true'] .nh-chevron {
+  transform: rotate(180deg);
+}
+.nh-wrow-body {
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--nh-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.nh-wrow-target code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.nh-wrow-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.nh-button-danger {
+  background: var(--nh-bad);
+  color: var(--nh-accent-foreground);
+  border-color: transparent;
+}
+.nh-quiet-danger:hover {
+  color: var(--nh-bad);
+  border-color: var(--nh-bad);
+}
+.nh-catalog-item:hover {
+  background: var(--nh-muted);
+  border-color: var(--nh-control-border);
+}
+.nh-catalog-item:focus-visible {
+  outline: 2px solid var(--nh-accent);
+  outline-offset: 1px;
+}
+.nh-catalog-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+.nh-catalog-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--nh-muted);
+  color: var(--nh-muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.nh-catalog-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nh-badge {
+  flex: none;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--nh-muted);
+  color: var(--nh-muted-foreground);
+}
+.nh-add-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 0.8125rem;
+}
+.nh-design-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nh-look {
+  gap: 6px 8px;
+}
+.nh-look-caption {
+  font-size: 0.6875rem;
+  color: var(--nh-muted-foreground);
+  min-width: 34px;
+}
+.nh-look .nh-seg {
+  flex: 0 1 auto;
+}
+.nh-look .nh-seg-item {
+  flex: 0 1 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
 }

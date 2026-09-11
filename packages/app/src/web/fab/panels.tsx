@@ -1,129 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Resolved } from '../../shared/resolved.ts'
 import type { DashboardState } from '../state.ts'
-import { AddWidget } from './AddWidget.tsx'
 
-/**
- * The editor's panels, split out of `main.tsx` once there were five of them.
- *
- * The split is not cosmetic: Theme and Config both hold their own draft state, and a `switch` in a
- * render function has nowhere to keep it — the components below can.
- */
+/** The editor's panels; each is a component because Theme and Config hold their own draft state. */
 
-export const WIDGET_KINDS = [
-  { id: 'widget', label: 'Widgets', blurb: 'Things that show a reading.' },
-  { id: 'bookmark', label: 'Bookmarks', blurb: 'Things that open a link.' },
-  { id: 'tool', label: 'Tools', blurb: 'Things you act on.' },
-] as const
-
-export type WidgetKind = (typeof WIDGET_KINDS)[number]['id']
-
-/**
- * Which kind a placed widget is.
- *
- * The manifest carries `kind`, but a RESOLVED widget carries only its type — so the kind is looked
- * up from the catalog the editor already fetched. A type the catalog does not know (a widget whose
- * manifest was removed) is shown under Widgets rather than hidden, because hiding it would make an
- * un-removable tile invisible in the one screen that can remove it.
- */
-export function kindOf(type: string, catalog: Map<string, string>): WidgetKind {
-  const kind = catalog.get(type)
-  return kind === 'bookmark' || kind === 'tool' ? kind : 'widget'
-}
-
-export function WidgetsPanel({
-  state,
-  onChanged,
-  onRemove,
-}: {
-  state: DashboardState
-  onChanged: () => void
-  onRemove: (id: string) => void
-}) {
-  const [kind, setKind] = useState<WidgetKind>('widget')
-  const [catalog, setCatalog] = useState<Map<string, string>>(new Map())
-
-  useEffect(() => {
-    let live = true
-    void fetch('/api/catalog')
-      .then(
-        (response) => response.json() as Promise<{ manifests: { id: string; kind?: string }[] }>,
-      )
-      .then((payload) => {
-        if (!live) return
-        setCatalog(new Map(payload.manifests.map((m) => [m.id, m.kind ?? 'widget'])))
-      })
-      .catch(() => {
-        // A failed catalog fetch means everything lands under Widgets, which is the honest
-        // fallback: the list is still complete and still removable.
-      })
-    return () => {
-      live = false
-    }
-  }, [])
-
-  const placed = state.resolved.widgets.filter((widget) => kindOf(widget.type, catalog) === kind)
-  const counts = new Map(
-    WIDGET_KINDS.map((entry) => [
-      entry.id,
-      state.resolved.widgets.filter((widget) => kindOf(widget.type, catalog) === entry.id).length,
-    ]),
-  )
-
-  return (
-    <div className="nh-panel-stack">
-      <div className="nh-seg" role="group" aria-label="Widget kind">
-        {WIDGET_KINDS.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            className="nh-seg-item"
-            aria-pressed={kind === entry.id}
-            onClick={() => setKind(entry.id)}
-          >
-            {entry.label}
-            <span className="nh-count">{counts.get(entry.id) ?? 0}</span>
-          </button>
-        ))}
-      </div>
-
-      <AddWidget onAdded={onChanged} kind={kind} />
-
-      {placed.length === 0 ? (
-        <p className="nh-panel-note">
-          No {WIDGET_KINDS.find((entry) => entry.id === kind)?.label.toLowerCase()} yet.{' '}
-          {WIDGET_KINDS.find((entry) => entry.id === kind)?.blurb}
-        </p>
-      ) : (
-        <ul className="nh-panel-list">
-          {placed.map((widget) => (
-            <li key={widget.id}>
-              <strong>{widget.title}</strong> <code>{widget.type}</code>{' '}
-              <span className="nh-panel-dim">{state.data[widget.id]?.meta.state ?? 'pending'}</span>{' '}
-              <button
-                type="button"
-                className="nh-button-quiet"
-                onClick={() => onRemove(widget.id)}
-                aria-label={`Remove ${widget.title}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-/**
- * Theme import and export.
- *
- * The same JSON either way, and the same JSON that lives in `config/theme.json` — so someone who
- * pulls the repo, edits the file and pushes has done exactly what this box does, and someone who
- * has never seen a terminal can still move a look between two installs. That equivalence is the
- * point: this is not an export format, it is the file.
- */
+/** Theme import and export; the JSON either way is `config/theme.json` as it is on disk. */
 export function ThemePanel({
   state,
   onImported,
@@ -173,8 +54,7 @@ export function ThemePanel({
       return
     }
 
-    // Replace rather than merge: an import is "make it look like this", and merging would leave
-    // whatever the current theme had that the imported one does not mention.
+    // Replace, not merge: tokens the imported theme does not mention must be cleared.
     const cleared = Object.fromEntries(
       (['theme', 'light', 'dark'] as const).map((bucket) => [
         bucket,
@@ -187,13 +67,19 @@ export function ThemePanel({
       ]),
     )
 
-    const response = await fetch('/api/theme', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...theme, cssVars: cleared }),
-    })
+    let response: Response
+    try {
+      response = await fetch('/api/theme', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...theme, cssVars: cleared }),
+      })
+    } catch {
+      setStatus({ tone: 'bad', message: 'The server did not answer' })
+      return
+    }
     if (!response.ok) {
-      const body = (await response.json()) as { error?: string }
+      const body = (await response.json().catch(() => ({}))) as { error?: string }
       setStatus({ tone: 'bad', message: body.error ?? 'The server refused it' })
       return
     }
@@ -381,8 +267,7 @@ export function AboutPanel({ state }: { state: DashboardState }) {
       <ul className="nh-links">
         {LINKS.map((link) => (
           <li key={link.href}>
-            {/* noreferrer as well as noopener: the referrer would leak the dashboard's hostname,
-                which on a homelab is often a private name the user has not published anywhere. */}
+            {/* noreferrer: the referrer would leak the dashboard's (often private) hostname. */}
             <a href={link.href} target="_blank" rel="noreferrer">
               <svg
                 viewBox="0 0 24 24"

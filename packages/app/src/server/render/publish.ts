@@ -4,23 +4,15 @@ import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { dashboard } from '../../shared/board.ts'
 import { FAVICON_LINK } from '../../shared/favicon.ts'
-import { emitGridCss, type Breakpoint, type GridConfig } from '../../shared/grid-css.ts'
-import type { LayoutItem } from '../../shared/grid-geometry.ts'
+import { emitPageCss } from '../../shared/section-css.ts'
 import type { Resolved } from '../../shared/resolved.ts'
 import { writeFileDurable } from '../store/atomic.ts'
 import { Generations } from '../store/generations.ts'
 import { BASE_STYLESHEET, themeVariables } from './theme.ts'
 
 /**
- * Publishing: turn the resolved config into a static page.
- *
- * This is the decisive difference from building on a framework. Regeneration is a
- * `renderToStaticMarkup` call — a function, costing single-digit megabytes of transient heap —
- * not a bundler run, which on a 1 GB box is a machine-freezing event. Everything expensive
- * (bundling, type checking, Tailwind) happened in CI and never happens here.
- *
- * The generation directory is written in full, smoke-checked, and only then does the pointer move.
- * A failed render leaves the previous generation serving.
+ * Renders the resolved config into a static page and cuts a generation; the pointer moves only
+ * after the render passes a smoke check, so a failed render leaves the previous generation serving.
  */
 
 export class PublishError extends Error {
@@ -49,25 +41,13 @@ export type PublishResult = {
   readonly durationMs: number
 }
 
-/** A sentinel the smoke check looks for. If this is missing, the render produced nothing usable. */
 const ROOT_SENTINEL = 'id="neo-root"'
 
-function gridConfigFor(page: Resolved['pages'][number]): GridConfig {
-  return {
-    breakpoints: page.grid.breakpoints as readonly Breakpoint[],
-    rowHeight: page.grid.rowHeight,
-    margin: page.grid.margin,
-    containerPadding: page.grid.containerPadding,
-  }
-}
-
 /**
- * Read Vite's manifest to find the built asset filenames.
- *
- * Absent in a source checkout, which is fine: the published page is complete HTML and CSS on its
- * own. The bundle only adds live updates and the editor.
+ * Asset tags from Vite's manifest; empty in a source checkout, where the published page is
+ * complete without the bundle.
  */
-async function assetTags(webDistDir: string | undefined): Promise<string> {
+export async function currentAssetTags(webDistDir: string | undefined): Promise<string> {
   if (webDistDir === undefined) return ''
   try {
     const manifestPath = join(webDistDir, '.vite', 'manifest.json')
@@ -75,10 +55,7 @@ async function assetTags(webDistDir: string | undefined): Promise<string> {
       string,
       { file?: string; css?: string[]; isEntry?: boolean }
     >
-    // `isEntry`, not "the first thing with a file". Once anything is code-split — and lazily
-    // loading react-grid-layout for edit mode splits it immediately — the first manifest entry is
-    // a chunk, and picking it ships the wrong script and no stylesheet at all. The page then
-    // renders completely unstyled, which is exactly what happened.
+    // Once anything is code-split the first manifest entry is a chunk, not the entry.
     const entry = Object.values(manifest).find((value) => value.isEntry === true)
     if (entry?.file === undefined) return ''
     const css = (entry.css ?? []).map((href) => `<link rel="stylesheet" href="/_app/${href}">`)
@@ -94,25 +71,25 @@ export function renderDocument(options: {
 }): string {
   const { resolved } = options
 
-  const gridCss = resolved.pages
-    .map((page) => {
-      const layouts = page.layouts as Readonly<Record<string, readonly LayoutItem[]>>
-      return emitGridCss(gridConfigFor(page), layouts, `.neo-board[data-neo-page="${page.id}"]`)
-    })
-    .join('\n')
+  const gridCss = resolved.pages.map((page) => emitPageCss(page)).join('\n')
 
   const body = renderToStaticMarkup(dashboard(resolved, {}))
 
-  // Only non-secret resolved state is embedded. `curl` against the page therefore reveals the
-  // layout and the widget names, and nothing about credentials or upstream responses.
-  const state = JSON.stringify({
+  // Targets stay out: a target names a host and its credentials, and the page is served to
+  // anyone the API is not. The editor fetches them when it takes over.
+  const embedded: Resolved = {
+    schemaVersion: resolved.schemaVersion,
     title: resolved.title,
     defaultPage: resolved.defaultPage,
     generatedAt: resolved.generatedAt,
     pages: resolved.pages,
     widgets: resolved.widgets,
+    targets: [],
     theme: resolved.theme,
-  })
+    features: resolved.features,
+    diagnostics: [],
+  }
+  const state = JSON.stringify({ resolved: embedded })
 
   return `<!doctype html>
 <html lang="en" ${resolved.theme.mode === 'system' ? '' : `data-theme="${resolved.theme.mode}"`}>
@@ -152,17 +129,14 @@ function escapeHtml(value: string): string {
   })
 }
 
-/**
- * `</script>` inside embedded JSON ends the script element early, whatever the JSON says. A
- * dashboard title or a widget name is user-controlled, so this is a real escape, not a formality.
- */
+/** `</script>` inside embedded JSON ends the script element early; titles are user-controlled. */
 function escapeJsonForScript(json: string): string {
   return json.replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
 }
 
 export async function publish(input: PublishInput): Promise<PublishResult> {
   const startedAt = performance.now()
-  const assets = await assetTags(input.webDistDir)
+  const assets = await currentAssetTags(input.webDistDir)
 
   let html: string
   try {
@@ -173,8 +147,6 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     })
   }
 
-  // Smoke check before anything is committed. A render that "succeeded" but produced an empty or
-  // structurally broken document must not become the page people see.
   if (!html.includes(ROOT_SENTINEL) || html.length < 200) {
     throw new PublishError('the rendered document failed its smoke check; nothing was published')
   }
@@ -205,17 +177,9 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
 }
 
 /**
- * Fingerprint the asset tags a generation embedded.
- *
- * Compared on boot against the current build: an app upgrade changes the bundle filenames without
- * touching config, and without this the published page keeps pointing at a script that was deleted
- * by the new build.
+ * Compared on boot against the current build: an app upgrade renames the bundle without touching
+ * config.
  */
 export function assetsFingerprint(assets: string): string {
   return createHash('sha256').update(assets).digest('hex').slice(0, 16)
-}
-
-/** Read the asset tags the current build would emit, for the boot-time staleness check. */
-export async function currentAssetTags(webDistDir: string | undefined): Promise<string> {
-  return assetTags(webDistDir)
 }

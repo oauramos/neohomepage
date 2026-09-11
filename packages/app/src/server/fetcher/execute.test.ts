@@ -1,32 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createServer, type Server } from 'node:http'
-import { once } from 'node:events'
 import {
   singleManifestSchema,
   type Operation,
   type SingleManifest,
 } from '@neohomepage/catalog-schema'
-import { buildOperationUrl, executeOperation, OperationError } from './execute.ts'
+import {
+  buildOperationUrl,
+  executeOperation,
+  OperationError,
+  type ExecuteInput,
+} from './execute.ts'
+import { closeServers, serve } from './fixtures.ts'
 
-const servers: Server[] = []
-
-async function serve(handler: Parameters<typeof createServer>[1]): Promise<string> {
-  const server = createServer(handler)
-  servers.push(server)
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('no address')
-  return `http://127.0.0.1:${address.port}`
-}
-
-afterEach(async () => {
-  while (servers.length > 0) {
-    const server = servers.pop() as Server
-    server.closeAllConnections()
-    await new Promise((resolve) => server.close(resolve))
-  }
-})
+afterEach(closeServers)
 
 const MANIFEST: SingleManifest = singleManifestSchema.parse({
   manifestVersion: 1,
@@ -69,6 +55,18 @@ const MANIFEST: SingleManifest = singleManifestSchema.parse({
 
 const target = (origin: string) => ({ origin, basePath: '', allowLoopback: true })
 const auth = { secrets: { apiKey: 'KEY' }, config: {} }
+const NOW = '2026-09-06T12:00:00.000Z'
+
+const run = (origin: string, overrides: Partial<ExecuteInput> = {}) =>
+  executeOperation({
+    manifest: MANIFEST,
+    operation: 'queue',
+    target: target(origin),
+    config: {},
+    auth,
+    now: NOW,
+    ...overrides,
+  })
 
 describe('the central invariant: the caller never names a URL', () => {
   const operation = MANIFEST.operations.queue as Operation
@@ -79,8 +77,7 @@ describe('the central invariant: the caller never names a URL', () => {
   })
 
   it('treats a bare "/" as the target base path exactly', () => {
-    // What lets an iCalendar feed keep its whole path in the target. Through a config hole the
-    // value would be percent-encoded and /dav/cal.ics would become /dav%2Fcal.ics.
+    // An iCalendar feed keeps its whole path in the target; a config hole would encode the slashes.
     const feed = { ...operation, path: '/', decode: 'ics' as const }
     expect(
       buildOperationUrl(
@@ -106,14 +103,10 @@ describe('the central invariant: the caller never names a URL', () => {
     const url = buildOperationUrl(traversal, target('http://10.0.0.20:8989'), {
       name: '../../admin',
     })
-    // The value is encoded, so the path stays exactly one segment under /api.
     expect(url.pathname).toBe('/api/..%2F..%2Fadmin')
   })
 
   it('refuses a manifest that references a secret outside target.auth', () => {
-    // A credential interpolated into a path or query lands in access logs, proxy logs and browser
-    // history. The schema rejects this too; this is the runtime half of the same rule, so a
-    // manifest that slipped past an older validator still cannot do it.
     const leaky: Operation = { method: 'GET', path: '/api/{{secret:apiKey}}', decode: 'json' }
     expect(() => buildOperationUrl(leaky, target('http://10.0.0.20:8989'), {})).toThrow(
       /may only be used in target\.auth/,
@@ -142,21 +135,16 @@ describe('executing an operation end to end', () => {
   it('fetches, decodes and projects', async () => {
     let seenPath: string | undefined
     let seenKey: string | undefined
-    const origin = await serve((req, res) => {
-      seenPath = req.url
-      seenKey = req.headers['x-api-key'] as string
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end('{"records":[{"id":1},{"id":2}]}')
-    })
+    const origin = (
+      await serve((req, res) => {
+        seenPath = req.url
+        seenKey = req.headers['x-api-key'] as string
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"records":[{"id":1},{"id":2}]}')
+      })
+    ).origin
 
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'queue',
-      target: target(origin),
-      config: { maxItems: 3 },
-      auth,
-      now: '2026-09-06T12:00:00.000Z',
-    })
+    const result = await run(origin, { config: { maxItems: 3 } })
 
     expect(seenPath).toBe('/api/v3/queue?pageSize=3')
     expect(seenKey).toBe('KEY')
@@ -167,72 +155,82 @@ describe('executing an operation end to end', () => {
     })
   })
 
-  it('reports a missing credential as a code, not as a crash', async () => {
-    const origin = await serve((_req, res) => res.end('{}'))
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'queue',
-      target: target(origin),
-      config: {},
-      auth: { secrets: {}, config: {} },
-      now: '2026-09-06T12:00:00.000Z',
+  it('lets a query parameter read a target field, beneath the widget options', async () => {
+    // Subsonic: username and salt are target fields sent as query params; the token stays in auth.
+    const subsonic: SingleManifest = singleManifestSchema.parse({
+      ...MANIFEST,
+      id: 'subsonic-now',
+      target: {
+        fields: [
+          { name: 'username', kind: 'string', label: 'User', required: true },
+          { name: 'salt', kind: 'string', label: 'Salt', required: true },
+          { name: 'token', kind: 'secret', label: 'Token', required: true },
+        ],
+        auth: { kind: 'query', param: 't', value: '{{secret:token}}' },
+      },
+      operations: {
+        queue: {
+          method: 'GET',
+          path: '/rest/getNowPlaying.view',
+          query: { u: '{{config:username}}', s: '{{config:salt}}', c: '{{config:client}}' },
+        },
+      },
+      config: [{ name: 'client', kind: 'string', label: 'Client', default: 'neo' }],
+      requires: { ...MANIFEST.requires, authKinds: ['query'] },
     })
+    let seenUrl: string | undefined
+    const origin = (
+      await serve((req, res) => {
+        seenUrl = req.url
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"records":[]}')
+      })
+    ).origin
+    await run(origin, {
+      manifest: subsonic,
+      config: { client: 'neo' },
+      auth: { secrets: { token: 'T0K' }, config: { username: 'otavio', salt: 'abc' } },
+    })
+    expect(seenUrl).toBe('/rest/getNowPlaying.view?u=otavio&s=abc&c=neo&t=T0K')
+  })
+
+  it('reports a missing credential as a code, not as a crash', async () => {
+    const origin = (await serve((_req, res) => res.end('{}'))).origin
+    const result = await run(origin, { auth: { secrets: {}, config: {} } })
     expect(result).toMatchObject({ ok: false, code: 'missing-credential' })
   })
 
   it('turns a 401 into a code a widget can render', async () => {
-    const origin = await serve((_req, res) => {
-      res.writeHead(401)
-      res.end('bad key')
-    })
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'queue',
-      target: target(origin),
-      config: {},
-      auth,
-      now: '2026-09-06T12:00:00.000Z',
-    })
+    const origin = (
+      await serve((_req, res) => {
+        res.writeHead(401)
+        res.end('bad key')
+      })
+    ).origin
+    const result = await run(origin)
     expect(result).toMatchObject({ ok: false, code: 'http-401' })
     // The upstream body never travels with the error.
     expect(JSON.stringify(result)).not.toContain('bad key')
   })
 
   it('reports malformed JSON without echoing what the target sent', async () => {
-    const origin = await serve((_req, res) => res.end('<html>login page with ?token=abc123</html>'))
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'queue',
-      target: target(origin),
-      config: {},
-      auth,
-      now: '2026-09-06T12:00:00.000Z',
-    })
+    const origin = (
+      await serve((_req, res) => res.end('<html>login page with ?token=abc123</html>'))
+    ).origin
+    const result = await run(origin)
     expect(result).toMatchObject({ ok: false, code: 'bad-json' })
     expect(JSON.stringify(result)).not.toContain('abc123')
   })
 
   it('refuses a blocked address before opening a socket', async () => {
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'queue',
+    const result = await run('http://169.254.169.254', {
       target: { origin: 'http://169.254.169.254', basePath: '' },
-      config: {},
-      auth,
-      now: '2026-09-06T12:00:00.000Z',
     })
     expect(result).toMatchObject({ ok: false, code: 'blocked-address' })
   })
 
   it('reports an unknown operation rather than guessing', async () => {
-    const result = await executeOperation({
-      manifest: MANIFEST,
-      operation: 'nope',
-      target: target('http://10.0.0.20:8989'),
-      config: {},
-      auth,
-      now: '2026-09-06T12:00:00.000Z',
-    })
+    const result = await run('http://10.0.0.20:8989', { operation: 'nope' })
     expect(result).toMatchObject({ ok: false, code: 'unknown-operation' })
   })
 })

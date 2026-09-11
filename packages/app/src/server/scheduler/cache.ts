@@ -2,15 +2,8 @@ import { createHash } from 'node:crypto'
 import type { Json } from '@neohomepage/catalog-schema'
 
 /**
- * The projection cache.
- *
- * Only projections live here, never raw upstream bodies. That single rule is what makes a
- * hypothetical SSRF to qBittorrent's `app/preferences` return `{}` instead of an SMTP password,
- * and it shrinks both the cache and every SSE frame by an order of magnitude: sixty cached entries
- * cost a couple of megabytes rather than tens.
- *
- * A failure never erases the last good value. A widget showing yesterday's number with a visible
- * age is useful; a widget that blanks the moment a service restarts is not.
+ * Projection cache. Holds projections only, never raw upstream bodies, so a cached entry cannot
+ * leak an upstream secret; a failure keeps the last good projection.
  */
 
 export type EntryState = 'fresh' | 'stale' | 'error'
@@ -37,33 +30,15 @@ function hash(value: Json): string {
     .slice(0, 16)
 }
 
-export type CacheOptions = {
-  /** How long a last-good value stays "stale" before it is presented as an error. */
-  readonly staleAfterMs?: number
-}
+const STALE_MULTIPLIER = 6
 
 export class ProjectionCache {
   #entries = new Map<string, CacheEntry>()
-  #staleMultiplier = 6
-  readonly #options: CacheOptions
-
-  constructor(options: CacheOptions = {}) {
-    this.#options = options
-  }
-
-  get size(): number {
-    return this.#entries.size
-  }
-
-  keys(): string[] {
-    return [...this.#entries.keys()]
-  }
 
   raw(key: string): CacheEntry | undefined {
     return this.#entries.get(key)
   }
 
-  /** The entry as a caller should see it, with its age computed against `now`. */
   view(key: string, now: number): CacheView | undefined {
     const entry = this.#entries.get(key)
     if (entry === undefined) return undefined
@@ -71,13 +46,7 @@ export class ProjectionCache {
     return { ...entry, ageMs }
   }
 
-  /**
-   * Record a success.
-   *
-   * Returns whether the content actually changed. An upstream that answers with the same numbers
-   * produces no projection churn, no SSE frame and no republish — which is most polls, most of
-   * the time.
-   */
+  /** Returns whether the projection changed, so an identical upstream answer produces no churn. */
   succeed(key: string, projection: Json, at: string): { changed: boolean } {
     const previous = this.#entries.get(key)
     const contentHash = hash(projection)
@@ -96,16 +65,13 @@ export class ProjectionCache {
   }
 
   /**
-   * Record a failure without discarding the last good value.
-   *
-   * The entry becomes `stale` while that value is still worth showing, and only `error` once it is
-   * old enough to mislead. A widget that has never succeeded goes straight to `error`, because
-   * there is nothing to be stale about.
+   * Keeps the last good projection: `stale` while it is within the stale window, `error` once it
+   * is older or there never was one.
    */
   fail(key: string, errorCode: string, at: string, intervalMs: number): void {
     const previous = this.#entries.get(key)
     const failures = (previous?.consecutiveFailures ?? 0) + 1
-    const staleWindow = this.#options.staleAfterMs ?? intervalMs * this.#staleMultiplier
+    const staleWindow = intervalMs * STALE_MULTIPLIER
     const lastSuccess =
       previous?.fetchedAt === null || previous?.fetchedAt === undefined
         ? null
@@ -128,10 +94,5 @@ export class ProjectionCache {
 
   delete(key: string): boolean {
     return this.#entries.delete(key)
-  }
-
-  /** Drop everything, used when the config revision changes wholesale. */
-  clear(): void {
-    this.#entries.clear()
   }
 }

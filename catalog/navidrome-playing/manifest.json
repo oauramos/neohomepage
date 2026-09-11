@@ -1,0 +1,135 @@
+{
+  "manifestVersion": 1,
+  "id": "navidrome-playing",
+  "version": "1.0.0",
+  "displayName": "Navidrome · playing",
+  "category": "media",
+  "icon": "navidrome",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/navidrome-playing",
+  "target": {
+    "fields": [
+      {
+        "name": "username",
+        "kind": "string",
+        "label": "Username",
+        "required": true
+      },
+      {
+        "name": "salt",
+        "kind": "string",
+        "label": "Salt",
+        "required": true,
+        "help": "Any random string; the token is md5(password + salt)"
+      },
+      {
+        "name": "token",
+        "kind": "secret",
+        "label": "Token",
+        "required": true,
+        "help": "md5 of your password followed by the salt, as hex"
+      }
+    ],
+    "auth": {
+      "kind": "query",
+      "param": "t",
+      "value": "{{secret:token}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "nowPlaying": {
+      "method": "GET",
+      "path": "/rest/getNowPlaying.view",
+      "decode": "json",
+      "query": {
+        "u": "{{config:username}}",
+        "s": "{{config:salt}}",
+        "v": "1.16.1",
+        "c": "neohomepage",
+        "f": "json"
+      }
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Playing"
+              },
+              "value": {
+                "op": "count",
+                "of": {
+                  "op": "get",
+                  "path": "$.subsonic-response.nowPlaying.entry"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "items": {
+        "op": "limit",
+        "n": 8,
+        "over": {
+          "op": "map",
+          "as": "e",
+          "over": {
+            "op": "get",
+            "path": "$.subsonic-response.nowPlaying.entry"
+          },
+          "body": {
+            "op": "pick",
+            "fields": {
+              "title": {
+                "op": "get",
+                "path": "e.title"
+              },
+              "subtitle": {
+                "op": "get",
+                "path": "e.artist"
+              },
+              "badge": {
+                "op": "get",
+                "path": "e.username"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "list"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "list"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "count",
+      "get",
+      "limit",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "query"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

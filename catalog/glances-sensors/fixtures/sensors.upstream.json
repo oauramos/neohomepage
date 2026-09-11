@@ -1,0 +1,74 @@
+[
+  {
+    "label": "Composite",
+    "unit": "C",
+    "value": 44,
+    "warning": 89,
+    "critical": 94,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "Composite 1",
+    "unit": "C",
+    "value": 41,
+    "warning": 99,
+    "critical": 109,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "Sensor 1",
+    "unit": "C",
+    "value": 44,
+    "warning": 65261,
+    "critical": 65261,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "Sensor 2",
+    "unit": "C",
+    "value": 48,
+    "warning": 65261,
+    "critical": 65261,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "Tctl",
+    "unit": "C",
+    "value": 51,
+    "warning": null,
+    "critical": null,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "edge",
+    "unit": "C",
+    "value": 43,
+    "warning": null,
+    "critical": null,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "r8169_0_100:00 0",
+    "unit": "C",
+    "value": 50,
+    "warning": 120,
+    "critical": 120,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "r8169_0_200:00 0",
+    "unit": "C",
+    "value": 45,
+    "warning": 120,
+    "critical": 120,
+    "type": "temperature_core",
+    "key": "label"
+  }
+]

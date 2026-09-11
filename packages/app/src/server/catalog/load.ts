@@ -7,11 +7,8 @@ import {
 } from '@neohomepage/catalog-schema'
 
 /**
- * Load manifests from a directory.
- *
- * Per-entry quarantine is the important behaviour: one malformed manifest drops itself and is
- * counted, and every other widget still renders. A single bad merge in a community catalog must
- * not empty the browse UI for everyone until the next release.
+ * Manifests loaded from a directory; a malformed manifest is rejected on its own and the rest
+ * still load.
  */
 export type CatalogLoad = {
   readonly manifests: ReadonlyMap<string, Manifest>

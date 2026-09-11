@@ -10,15 +10,8 @@ import {
 } from './theme-tokens.ts'
 
 /**
- * Theme parity.
- *
- * A theme is applied twice: baked into the published stylesheet, and written onto `:root` by the
- * editor so a colour change is visible before anything is republished. That is the same
- * two-paths-one-appearance shape as the layout, and it deserves the same test — a colour that
- * looks right live and wrong after publishing is a genuinely confusing bug.
- *
- * The failure mode this is built to catch: adding a token to the palette and wiring it into only
- * one of the two paths. Both iterate THEME_TOKENS, so the assertion can name the missing one.
+ * A theme is applied twice: baked into the published stylesheet and written onto `:root` by the
+ * editor. Both must produce the same tokens.
  */
 
 /** Pull `--nh-*` declarations out of a single CSS block. */
@@ -46,8 +39,7 @@ describe('every token reaches both paths', () => {
         runtime[token],
       )
     }
-    // And nothing extra: a token in the stylesheet that the applier does not know about would
-    // silently revert the moment the editor touched the theme.
+    // A stylesheet token the applier does not know would revert once the editor touched the theme.
     expect(Object.keys(baked).sort()).toEqual([...ALL_TOKENS].sort())
   })
 
@@ -75,8 +67,7 @@ describe('every token reaches both paths', () => {
   })
 
   it('lets the shared block win over a per-scheme value in both paths', () => {
-    // `cssVars.theme` is scheme-independent: a font or a radius. If the two paths disagreed about
-    // its precedence, a shared override would apply live and vanish on publish.
+    // `cssVars.theme` is scheme-independent (a font, a radius) and must win in both paths.
     const custom = themeSchema.parse({
       cssVars: { light: { accent: 'red' }, dark: { accent: 'blue' }, theme: { accent: 'green' } },
     })
@@ -96,7 +87,6 @@ describe('the palettes themselves', () => {
   })
 
   it('actually differ between light and dark, so a dark page is not a light one', () => {
-    // A copy-pasted palette passes every other check here and produces an unreadable dark mode.
     const identical = THEME_TOKENS.filter((token) => LIGHT_DEFAULTS[token] === DARK_DEFAULTS[token])
     expect(identical).toEqual([])
   })

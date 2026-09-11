@@ -1,28 +1,15 @@
-import type { Compose, Projection } from '@neohomepage/catalog-schema'
+import type { Compose, Projection, ProjectionEnvelope } from '@neohomepage/catalog-schema'
 
 /**
- * Merge N source streams into one widget.
- *
- * Deliberately not the DSL. The DSL runs *inside* a source, on that upstream's own response; the
- * merge runs across sources and needs nothing more than concat, distinct, sort and limit. Giving
- * it an expression language would double the surface a hostile manifest can reach for no widget
- * that anyone has actually asked for.
- *
- * The interesting behaviour is `partial`. A home calendar binds four services and one of them is
- * always down; blanking the tile because Radarr is restarting is the failure people leave a
- * dashboard over. With `partial`, the surviving sources render and the widget reports `degraded`.
+ * Merges N source streams into one widget with concat, distinct, sort and limit only. Deliberately
+ * not the DSL, which runs inside one source; an expression language here would widen the surface
+ * a hostile manifest can reach.
  */
 
 export type SourcePart = {
   /** For diagnostics only — never rendered, so it can name a target the viewer cannot reach. */
   readonly key: string
-  /**
-   * Bound but never fetched yet: counted in the total, counted as neither success nor failure.
-   *
-   * Without the distinction, every composite spends its first seconds after a restart reporting
-   * "degraded" and showing a partial list, which is indistinguishable from a service actually
-   * being down and trains people to ignore the badge.
-   */
+  /** Bound but not fetched yet: counted in the total, as neither success nor failure. */
   readonly pending: boolean
   readonly ok: boolean
   readonly items: readonly Item[]
@@ -34,19 +21,11 @@ export type SourcePart = {
 
 type Item = NonNullable<Projection['items']>[number]
 
-export type ComposedWidget = {
-  readonly projection: Projection | null
-  readonly meta: {
-    readonly fetchedAt: string
-    readonly ageMs: number
-    readonly state: 'fresh' | 'stale' | 'error'
-    readonly errorCode?: string
-  }
+export type ComposedWidget = ProjectionEnvelope & {
   /** How many of the bound sources answered, so the tile can say "3 of 4". */
   readonly sources: { readonly total: number; readonly ok: number }
 }
 
-/** Read a dotted path off an item. Total: a missing or non-object step yields undefined. */
 function at(item: Item, path: string): unknown {
   let cursor: unknown = item
   for (const step of path.split('.')) {
@@ -56,14 +35,8 @@ function at(item: Item, path: string): unknown {
   return cursor
 }
 
-/**
- * Order two items by one sort key, with the direction applied where it belongs.
- *
- * The missing-value bucket is decided BEFORE the flip and never flipped. Applying `desc` to the
- * comparator's whole result — the obvious one-liner — floats every item that has no value at the
- * key to the TOP under `desc`, so a calendar sorted newest-first leads with its junk rows. The
- * same mistake was already found once in the DSL's own sort; it is easy to make twice.
- */
+// Missing values sort last in both directions: the direction flip is applied only to the
+// compared values, never to the missing-value bucket.
 function compareByKey(a: Item, b: Item, path: string, direction: 'asc' | 'desc'): number {
   const left = at(a, path)
   const right = at(b, path)
@@ -98,20 +71,12 @@ export function composeSources(compose: Compose, parts: readonly SourcePart[]): 
         state: 'error',
         errorCode:
           firstError ??
-          (parts.length === 0
-            ? 'no-sources'
-            : // Every bound source is still on its first fetch. Reported distinctly so the tile
-              // says "loading" rather than accusing four healthy services of being down.
-              failed === 0
-              ? 'pending'
-              : 'all-sources-failed'),
+          (parts.length === 0 ? 'no-sources' : failed === 0 ? 'pending' : 'all-sources-failed'),
       },
       sources: { total: parts.length, ok: 0 },
     }
   }
 
-  // Refusing to render when any source failed is what `partial: false` buys: a widget whose whole
-  // point is completeness (a duty roster, say) is better blank than quietly missing a shift.
   if (failed > 0 && !compose.partial) {
     const firstError = parts.find((part) => !part.ok)?.errorCode
     return {
@@ -134,10 +99,7 @@ export function composeSources(compose: Compose, parts: readonly SourcePart[]): 
     const distinct: Item[] = []
     for (const item of items) {
       const parts = distinctBy.map((path) => at(item, path))
-      // An item missing ANY key is never a duplicate: two rows the upstream left sparse are not
-      // the same event, and collapsing them silently deletes data whose only fault is a thin
-      // response. Two episodes of one series differ only by their instant, so a single key is
-      // almost always the wrong granularity — which is why this takes a list.
+      // An item missing any key is never a duplicate: sparse upstream rows are not the same event.
       if (parts.some((value) => value === undefined || value === null)) {
         distinct.push(item)
         continue

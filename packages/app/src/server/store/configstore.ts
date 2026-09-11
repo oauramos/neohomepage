@@ -12,9 +12,16 @@ import {
   themeSchema,
   widgetSchema,
 } from '../config/schema.ts'
-import { writeFileDurable, writeFilesDurable } from './atomic.ts'
-import { collectionFile, configPaths, type CollectionName, type ConfigPaths } from './paths.ts'
-import { schemaDefaults, schemaKeyOrder, serialize } from './serialize.ts'
+import { writeFilesDurable } from './atomic.ts'
+import { isEnoent } from './fs.ts'
+import {
+  COLLECTION_DIRECTORIES,
+  collectionFile,
+  configPaths,
+  type CollectionName,
+  type ConfigPaths,
+} from './paths.ts'
+import { schemaKeyOrder, serialize } from './serialize.ts'
 import {
   toMutable,
   treeRevision,
@@ -25,15 +32,8 @@ import {
 } from './tree.ts'
 
 /**
- * The single writer.
- *
- * Every mutation — the browser, an MCP agent, the importer, a migration — funnels through
- * `transaction()`: take the lock, re-read from disk, apply the change to a draft, validate the
- * whole prospective tree, then write only the files whose serialised bytes actually changed.
- *
- * Re-reading inside the lock rather than trusting a cached tree is what makes concurrent editing
- * safe without a database. A caller that cares about losing someone else's edit passes
- * `baseRevision` and gets a conflict instead of a silent overwrite.
+ * The single writer. Every mutation goes through `transaction()`: lock, re-read from disk, apply
+ * to a draft, validate the whole tree, write only the files whose serialised bytes changed.
  */
 
 export class ConfigConflictError extends Error {
@@ -83,37 +83,28 @@ const SINGLETON_SCHEMAS = {
 } as const
 
 function render(schema: z.ZodObject, value: unknown): string {
-  // Passing the schema itself (not just its top-level key order) is what makes nested objects
-  // and array items come out in declaration order too — a layout item reads `i, x, y, w, h`
-  // rather than alphabetically, which is the difference between a readable diff and a puzzle.
-  return serialize(value, { schema, defaults: schemaDefaults(schema) })
+  // The full schema, not just its top-level key order, so nested objects and array items also
+  // serialise in declaration order.
+  return serialize(value, { schema })
 }
 
 type RawFile = { readonly text: string; readonly value: unknown }
 
 /**
- * Read a file, keeping the raw bytes alongside the parsed value.
- *
- * The change detector compares the renderer's output against what is ACTUALLY on disk, not
- * against a re-render of the parsed value. Comparing render-to-render would make formatting
- * invisible: a file left alphabetical by an older release, or hand-edited with four-space indent,
- * would never be normalised, and a serialiser improvement would silently never reach existing
- * installs. Comparing to the bytes means the next transaction that touches the tree tidies it,
- * once, and then stays stable.
+ * Read a file keeping the raw bytes: change detection compares rendered output to what is on
+ * disk, so stale formatting is normalised by the next transaction.
  */
 async function readJson(path: string): Promise<RawFile | undefined> {
   let text: string
   try {
     text = await readFile(path, 'utf8')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    if (isEnoent(error)) return undefined
     throw error
   }
   try {
     return { text, value: JSON.parse(text) }
   } catch (error) {
-    // A hand-edit or a bad git merge must produce a legible message naming the file, not a bare
-    // SyntaxError from somewhere in the boot sequence.
     throw new Error(
       `${path} is not valid JSON: ${error instanceof Error ? error.message : error}`,
       {
@@ -135,15 +126,7 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, path: string): T 
 export class ConfigStore {
   readonly paths: ConfigPaths
 
-  /**
-   * In-process serialisation of transactions.
-   *
-   * The file lock only excludes other *processes* — the CLI running while the server is up. Two
-   * concurrent requests inside this process (the browser saving a layout while an MCP agent adds
-   * a widget, which is the normal case, not the exotic one) would interleave their awaits and
-   * fight over the same lock. Chaining every transaction onto one promise makes the file lock a
-   * cross-process guard and this the intra-process one.
-   */
+  // The file lock only excludes other processes; this chain serialises transactions within this one.
   #queue: Promise<unknown> = Promise.resolve()
 
   constructor(configDir: string) {
@@ -162,20 +145,15 @@ export class ConfigStore {
 
   async ensureDirectories(): Promise<void> {
     await mkdir(this.paths.root, { recursive: true })
-    for (const collection of ['pages', 'layouts', 'targets', 'widgets'] as const) {
+    for (const collection of COLLECTION_DIRECTORIES) {
       await mkdir(this.paths[collection], { recursive: true })
     }
   }
 
-  /**
-   * Load one directory of entities. The map key is always the file name, never a field inside the
-   * file — a mismatch between the two is a validation problem to report, not something to paper
-   * over by trusting whichever one happens to be read first.
-   */
+  /** The map key is the file name, never a field inside the file; a mismatch is a validation problem. */
   private async loadCollection<T>(
     collection: CollectionName,
     schema: z.ZodType<T>,
-    objectSchema: z.ZodObject,
     snapshot: Map<string, string>,
   ): Promise<Map<string, T>> {
     const out = new Map<string, T>()
@@ -183,7 +161,7 @@ export class ConfigStore {
     try {
       names = (await readdir(this.paths[collection])).filter((n) => n.endsWith('.json')).sort()
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return out
+      if (isEnoent(error)) return out
       throw error
     }
     for (const name of names) {
@@ -192,7 +170,6 @@ export class ConfigStore {
       const parsed = parseOrThrow(schema, raw?.value, path)
       out.set(name.slice(0, -'.json'.length), parsed)
       if (raw !== undefined) snapshot.set(path, raw.text)
-      void objectSchema
     }
     return out
   }
@@ -201,10 +178,8 @@ export class ConfigStore {
     const snapshot = new Map<string, string>()
     const warnings: Problem[] = []
 
-    // A file that does not exist gets NO snapshot entry, so the rendered output differs from
-    // "what is on disk" and the file gets created. Recording a synthetic snapshot for an absent
-    // file makes an all-defaults file — dashboard.json, which is just `schemaVersion` — invisible
-    // to the change detector, and it would never land on disk at all.
+    // An absent file gets no snapshot entry; otherwise an all-defaults file such as dashboard.json
+    // would never be created.
     const dashboardRaw = await readJson(this.paths.dashboard)
     const dashboard = parseOrThrow(
       dashboardSchema,
@@ -221,35 +196,23 @@ export class ConfigStore {
     const network = parseOrThrow(networkSchema, networkRaw?.value ?? {}, this.paths.network)
     if (networkRaw !== undefined) snapshot.set(this.paths.network, networkRaw.text)
 
-    const pages = await this.loadCollection('pages', pageSchema, pageSchema, snapshot)
-    const layouts = await this.loadCollection(
-      'layouts',
-      layoutFileSchema,
-      layoutFileSchema,
-      snapshot,
-    )
-    const targets = await this.loadCollection('targets', targetSchema, targetSchema, snapshot)
-    const widgets = await this.loadCollection('widgets', widgetSchema, widgetSchema, snapshot)
+    const pages = await this.loadCollection('pages', pageSchema, snapshot)
+    const layouts = await this.loadCollection('layouts', layoutFileSchema, snapshot)
+    const targets = await this.loadCollection('targets', targetSchema, snapshot)
+    const widgets = await this.loadCollection('widgets', widgetSchema, snapshot)
 
-    for (const [name, value] of [
-      ['dashboard.json', dashboard],
-      ['theme.json', theme],
-      ['network.json', network],
-    ] as const) {
-      const known = new Set(
-        schemaKeyOrder(SINGLETON_SCHEMAS[name.replace('.json', '') as 'dashboard']),
-      )
-      for (const key of Object.keys(value)) {
+    const tree: ConfigTree = { dashboard, theme, network, pages, layouts, targets, widgets }
+    for (const name of ['dashboard', 'theme', 'network'] as const) {
+      const known = new Set(schemaKeyOrder(SINGLETON_SCHEMAS[name]))
+      for (const key of Object.keys(tree[name])) {
         if (!known.has(key)) {
           warnings.push({
-            path: name,
+            path: `${name}.json`,
             message: `unknown key "${key}" — kept as-is; it may come from a newer release`,
           })
         }
       }
     }
-
-    const tree: ConfigTree = { dashboard, theme, network, pages, layouts, targets, widgets }
     return { tree, revision: treeRevision(tree), warnings, snapshot }
   }
 
@@ -259,7 +222,7 @@ export class ConfigStore {
     files.set(this.paths.dashboard, render(dashboardSchema, tree.dashboard))
     files.set(this.paths.theme, render(themeSchema, tree.theme))
     files.set(this.paths.network, render(networkSchema, tree.network))
-    for (const collection of ['pages', 'layouts', 'targets', 'widgets'] as const) {
+    for (const collection of COLLECTION_DIRECTORIES) {
       const schema = COLLECTION_SCHEMAS[collection]
       for (const [id, entity] of tree[collection]) {
         files.set(collectionFile(this.paths, collection, id), render(schema, entity))
@@ -268,12 +231,7 @@ export class ConfigStore {
     return files
   }
 
-  /**
-   * Apply a change under the lock.
-   *
-   * `mutate` receives a deep copy, so a throw part-way leaves nothing half-applied in memory, and
-   * validation runs on the finished draft before a single byte reaches disk.
-   */
+  /** Apply a change under the lock. `mutate` gets a deep copy; the draft is validated before anything is written. */
   async transaction(
     actor: string,
     mutate: (draft: MutableConfigTree) => unknown,
@@ -288,12 +246,10 @@ export class ConfigStore {
     options: { readonly baseRevision?: string },
   ): Promise<{ revision: string; changed: string[]; removed: string[] }> {
     await this.ensureDirectories()
-    // The mkdir strategy is the only lock that behaves on NFS and SMB, which is exactly where a
-    // git-synced config directory tends to live.
+    // mkdir-based locking is the only kind that behaves on NFS and SMB.
     const release = await lockfile.lock(this.paths.root, {
       stale: 10_000,
-      // Generous, because the competing holder is another process (the CLI, a migration) doing
-      // real work, and failing a user's save to avoid a two-second wait is the wrong trade.
+      // Generous: the competing holder is another process doing real work.
       retries: { retries: 10, minTimeout: 50, maxTimeout: 1_000 },
       realpath: false,
     })
@@ -335,10 +291,5 @@ export class ConfigStore {
     } finally {
       await release()
     }
-  }
-
-  /** Write one file outside the tree model, used by the seeder. */
-  async writeRaw(path: string, contents: string): Promise<void> {
-    await writeFileDurable(path, contents)
   }
 }

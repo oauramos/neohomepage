@@ -1,0 +1,22 @@
+[
+  {
+    "device_name": "/dev/mapper/pve-root",
+    "fs_type": "ext4",
+    "mnt_point": "/",
+    "size": 100861726720,
+    "used": 20658774016,
+    "free": 75032215552,
+    "percent": 21.6,
+    "key": "mnt_point"
+  },
+  {
+    "device_name": "/dev/sdb1",
+    "fs_type": "ext4",
+    "mnt_point": "/mnt/streaming",
+    "size": 3936818806784,
+    "used": 2603698401280,
+    "free": 1133064376320,
+    "percent": 69.7,
+    "key": "mnt_point"
+  }
+]

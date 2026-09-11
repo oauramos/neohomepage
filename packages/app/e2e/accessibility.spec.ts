@@ -1,14 +1,10 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { expect, test, startServer, type Harness } from './fixtures.ts'
+import { expect, test, sendJson, startServer, type Harness } from './fixtures.ts'
 
 /**
- * Accessibility, checked by a real engine on a real render.
- *
- * The bar is axe's own: zero `serious` and zero `critical`. Moderate and minor findings are
- * reported but do not fail, because axe's moderate bucket includes judgement calls (landmark
- * nesting, heading order in a widget grid) that a dashboard can reasonably decide differently —
- * and a suite that fails on judgement calls is a suite people disable.
+ * Axe scans of real renders. Only `serious` and `critical` fail; moderate and minor findings are
+ * logged, since axe's moderate bucket includes judgement calls a dashboard can reasonably make.
  */
 
 let harness: Harness
@@ -19,23 +15,17 @@ test.beforeAll(async () => {
   harness = started.harness
   stop = started.stop
 
-  // A bookmark tile, so the board carries the one element whose text sits on an accent FILL.
-  // Scanning an empty board would pass every preset while proving nothing about the buttons.
-  const target = await fetch(`${harness.baseURL}/api/targets`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      label: 'Link',
-      widgetType: 'service-link',
-      base: { scheme: 'http', host: '127.0.0.1', port: 9914 },
-      values: { label: 'Open', path: '/' },
-    }),
+  // A bookmark tile puts text on an accent fill; an empty board would pass every preset.
+  const { id } = await sendJson<{ id: string }>(`${harness.baseURL}/api/targets`, {
+    label: 'Link',
+    widgetType: 'service-link',
+    base: { scheme: 'http', host: '127.0.0.1', port: 9914 },
+    values: { label: 'Open', path: '/' },
   })
-  const { id } = (await target.json()) as { id: string }
-  await fetch(`${harness.baseURL}/api/widgets`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'service-link', targetId: id, config: { label: 'Open' } }),
+  await sendJson(`${harness.baseURL}/api/widgets`, {
+    type: 'service-link',
+    targetId: id,
+    config: { label: 'Open' },
   })
 })
 
@@ -54,7 +44,7 @@ async function scan(page: Page) {
   const other = results.violations.filter(
     (violation) => violation.impact !== 'serious' && violation.impact !== 'critical',
   )
-  return { blocking, other, results }
+  return { blocking, other }
 }
 
 function describeViolations(
@@ -66,8 +56,6 @@ function describeViolations(
 ): string {
   return violations
     .map((violation) => {
-      // Naming the element and the measured ratio: "something on the page fails contrast" is not
-      // a lead, and a colour failure is usually one selector rather than a palette-wide problem.
       const where = violation.nodes
         .map(
           (node) =>
@@ -79,43 +67,69 @@ function describeViolations(
     .join('\n')
 }
 
-test('the published board has no serious or critical violations', async ({ page }) => {
-  await page.goto(`${harness.baseURL}/`)
-  await page.waitForSelector('#neo-root')
-
+async function expectClean(page: Page): Promise<void> {
   const { blocking, other } = await scan(page)
   if (other.length > 0) console.log(`non-blocking:\n${describeViolations(other)}`)
   expect(describeViolations(blocking)).toBe('')
+}
+
+test('the published board has no serious or critical violations', async ({ page }) => {
+  await page.goto(`${harness.baseURL}/`)
+  await page.waitForSelector('#neo-root')
+  await expectClean(page)
 })
 
 test('the editor has no serious or critical violations', async ({ page }) => {
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
+  await expectClean(page)
+})
 
-  const { blocking, other } = await scan(page)
-  if (other.length > 0) console.log(`non-blocking:\n${describeViolations(other)}`)
-  expect(describeViolations(blocking)).toBe('')
+test('the sections editor is reachable, saves, and is clean with every kind expanded', async ({
+  page,
+}) => {
+  await page.goto(`${harness.baseURL}/`)
+  await page.getByRole('button', { name: /editor/i }).click()
+  await page.getByRole('button', { name: 'Sections', exact: true }).click()
+
+  // A page that never declared sections shows the implicit pair, and adding one saves whole.
+  await expect(page.getByRole('button', { name: /Header/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Bookmarks', exact: true }).click()
+  await page.getByRole('button', { name: '+ Add link' }).click()
+  await expect(page.getByRole('textbox', { name: 'URL' })).toBeVisible()
+  await expect
+    .poll(async () => {
+      const response = await fetch(`${harness.baseURL}/api/pages/home`)
+      const body = (await response.json()) as { sections: { kind: string }[] }
+      return body.sections.map((section) => section.kind)
+    })
+    .toEqual(['navbar', 'grid', 'bookmarks'])
+
+  await page.getByRole('button', { name: /Header/ }).click()
+  await page
+    .getByRole('button', { name: /Untitled/ })
+    .first()
+    .click()
+  await expectClean(page)
 })
 
 test('the widget catalog and its generated form are reachable and clean', async ({ page }) => {
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()
   await page.getByRole('button', { name: 'Widgets', exact: true }).click()
+  // The catalog opens on Browse (or on typing); the placed list is what the tab shows at rest.
+  await page.getByRole('button', { name: 'Browse', exact: true }).click()
   await page.getByRole('button', { name: /Sonarr queue/ }).click()
   await expect(page.getByRole('group', { name: /Where it lives/i })).toBeVisible()
-
-  const { blocking, other } = await scan(page)
-  if (other.length > 0) console.log(`non-blocking:\n${describeViolations(other)}`)
-  expect(describeViolations(blocking)).toBe('')
+  await expectClean(page)
 })
 
 test('every form control the generated form emits has a label', async ({ page }) => {
-  // The one thing a manifest-driven form gets wrong most easily: a new field kind renders an
-  // input the label was never wired to, and it is invisible unless something checks.
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()
   await page.getByRole('button', { name: 'Widgets', exact: true }).click()
+  await page.getByRole('button', { name: 'Browse', exact: true }).click()
   await page.getByRole('button', { name: /Calendar/ }).click()
 
   const unlabelled = await page.evaluate(() => {
@@ -134,14 +148,8 @@ test('every form control the generated form emits has a label', async ({ page })
   expect(unlabelled).toEqual([])
 })
 
-/**
- * Every preset, scanned by axe on a board that actually has widgets.
- *
- * The contrast unit test checks the token palette — every text token against every surface — and
- * it passes for a preset whose bookmark button paints a SOLID accent fill while the stylesheet
- * still colours the label with `accent`. That is red-on-red, and only a real render catches it,
- * because the failing pair is a rule's choice of token rather than a value in the palette.
- */
+// The palette unit test cannot catch a rule that colours a label with the same accent token the
+// button fills with; only a real render does.
 for (const preset of [
   'default',
   'nord',
@@ -157,16 +165,8 @@ for (const preset of [
 ]) {
   for (const mode of ['light', 'dark'] as const) {
     test(`the ${preset} preset reads in ${mode}`, async ({ page }) => {
-      await fetch(`${harness.baseURL}/api/theme`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ preset, mode }),
-      })
-      await fetch(`${harness.baseURL}/api/publish`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      })
+      await sendJson(`${harness.baseURL}/api/theme`, { preset, mode }, 'PATCH')
+      await sendJson(`${harness.baseURL}/api/publish`, {})
 
       await page.goto(`${harness.baseURL}/`)
       await page.waitForSelector('#neo-root')

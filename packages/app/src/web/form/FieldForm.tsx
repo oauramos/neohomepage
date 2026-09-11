@@ -2,16 +2,8 @@ import { useId, useState } from 'react'
 import type { Field } from '@neohomepage/catalog-schema'
 
 /**
- * The form for a widget, generated from its manifest.
- *
- * Hand-rolled over a CLOSED field-kind union with an exhaustive switch, rather than a JSON Schema
- * form library. The union is the point: the same declaration validates the file on disk, types the
- * MCP tool and draws this, and adding a kind without teaching every consumer about it is a type
- * error rather than a blank input nobody notices.
- *
- * The rejected alternatives, briefly: RJSF drags lodash, prop-types and Ajv into the browser
- * bundle and needs a second config surface (uiSchema) that we would generate from the manifest
- * anyway; AutoForm has been frozen since 2024; JSONForms ships no shadcn renderers.
+ * Widget form generated from its manifest. Hand-rolled over the closed field-kind union with an
+ * exhaustive switch, so adding a kind without a renderer is a type error.
  */
 
 export type FieldValues = Record<string, string | number | boolean | null>
@@ -43,11 +35,8 @@ function Row({ field, id, children }: { field: Field; id: string; children: Reac
 }
 
 /**
- * A secret input is structurally write-only.
- *
- * The value is never sent to the browser, so an already-saved credential shows as "saved" behind
- * a Replace button rather than as a masked string of the right length. A masked value is a lie
- * that leaks the length, and re-submitting it would round-trip a credential through a page.
+ * Write-only: a saved secret's value is never sent to the browser, so it shows as "saved" behind a
+ * Replace button. A masked placeholder would leak the length and round-trip the credential.
  */
 function SecretInput({
   field,
@@ -158,6 +147,8 @@ export function FieldForm({
 
           case 'integer':
           case 'number':
+          case 'duration': {
+            const min = field.kind === 'duration' ? (field.min ?? 1) : field.min
             return (
               <Row field={field} id={id} key={field.name}>
                 <input
@@ -165,8 +156,8 @@ export function FieldForm({
                   className="nh-input"
                   type="number"
                   disabled={disabled}
-                  step={field.kind === 'integer' ? 1 : 'any'}
-                  {...(field.min === undefined ? {} : { min: field.min })}
+                  step={field.kind === 'number' ? 'any' : 1}
+                  {...(min === undefined ? {} : { min })}
                   {...(field.max === undefined ? {} : { max: field.max })}
                   value={typeof value === 'number' ? value : ''}
                   aria-describedby={describedBy}
@@ -179,27 +170,7 @@ export function FieldForm({
                 />
               </Row>
             )
-
-          case 'duration':
-            return (
-              <Row field={field} id={id} key={field.name}>
-                <input
-                  id={id}
-                  className="nh-input"
-                  type="number"
-                  min={1}
-                  disabled={disabled}
-                  value={typeof value === 'number' ? value : ''}
-                  aria-describedby={describedBy}
-                  onChange={(event) =>
-                    onChange(
-                      field.name,
-                      event.target.value === '' ? null : Number(event.target.value),
-                    )
-                  }
-                />
-              </Row>
-            )
+          }
 
           case 'color':
             return (
@@ -235,8 +206,6 @@ export function FieldForm({
             )
 
           default: {
-            // Adding a field kind without teaching this renderer about it is a compile error, not
-            // a silently missing input.
             const exhaustive: never = field.kind
             throw new Error(`unhandled field kind ${String(exhaustive)}`)
           }
@@ -246,7 +215,6 @@ export function FieldForm({
   )
 }
 
-/** Defaults for a field set, so a fresh form is populated the way the manifest intends. */
 export function initialValues(fields: readonly Field[]): FieldValues {
   const values: FieldValues = {}
   for (const field of fields) {

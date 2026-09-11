@@ -1,0 +1,11 @@
+[
+  {
+    "key": "gpu_id",
+    "gpu_id": "amd0",
+    "name": "AMD GPU",
+    "mem": 1,
+    "proc": 0,
+    "temperature": 43,
+    "fan_speed": null
+  }
+]

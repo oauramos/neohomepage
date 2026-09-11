@@ -1,20 +1,14 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
+import { mkdir } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { exists } from './fs.ts'
 
 const run = promisify(execFile)
 
 /**
- * Backup and restore for people who would rather not use git.
- *
- * Shells out to the system `tar` rather than adding an archive library: it is present everywhere
- * this app runs, it handles permissions and symlinks correctly, and a tarball someone can open
- * with tools they already have beats a bespoke format.
- *
- * Secrets are never included. They are excluded structurally, not by an option the caller might
- * forget — an archive is the thing most likely to be emailed, dropped in a shared folder, or
- * attached to a support ticket.
+ * Backup and restore of config/ and assets/ through the system `tar`. Secrets are excluded
+ * structurally rather than by option, since an archive is the thing most likely to be shared.
  */
 
 export class TarUnavailableError extends Error {
@@ -32,23 +26,9 @@ async function requireTar(): Promise<void> {
   }
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 export type BackupResult = { readonly archive: string; readonly included: string[] }
 
-/**
- * Archive config/ and assets/ — the two directories that reconstruct a dashboard.
- *
- * state/ is left out because it is derived; restoring an old rendered page would just serve stale
- * HTML until the next publish.
- */
+/** Archives config/ and assets/; state/ is derived and left out. */
 export async function backup(options: {
   readonly dataDir: string
   readonly archive: string
@@ -69,7 +49,7 @@ export async function backup(options: {
     archive,
     '-C',
     dataDir,
-    // Excluded explicitly even though they live under config/: per-machine and local-only.
+    // Per-machine, local-only files.
     '--exclude=config/overrides.local.json',
     '--exclude=config/.audit.jsonl',
     ...included,
@@ -80,11 +60,8 @@ export async function backup(options: {
 export type RestoreResult = { readonly dataDir: string; readonly entries: string[] }
 
 /**
- * Unpack an archive into a data directory.
- *
- * Refuses an archive containing anything but `config/` and `assets/`. A tarball is an untrusted
- * input — it may have come from someone else — and `tar` will happily write `../../etc/anything`
- * or a symlink pointing outside the tree unless something checks first.
+ * Unpacks an archive into the data directory. The archive is untrusted input, so entries outside
+ * `config/` and `assets/` or escaping the tree are refused before `tar` runs.
  */
 export async function restore(options: {
   readonly archive: string
@@ -116,5 +93,3 @@ export async function restore(options: {
 export function defaultArchiveName(now: Date): string {
   return `neohomepage-backup-${now.toISOString().replace(/[:.]/g, '-')}.tar.gz`
 }
-
-export { basename }

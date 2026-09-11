@@ -1,0 +1,20 @@
+{
+  "stats": [
+    {
+      "label": "Songs",
+      "value": "2,108"
+    },
+    {
+      "label": "Folders",
+      "value": "57"
+    },
+    {
+      "label": "Last scan",
+      "value": {
+        "v": "2 weeks ago",
+        "iso": "2026-08-25T23:07:54.242Z",
+        "rel": true
+      }
+    }
+  ]
+}

@@ -1,13 +1,9 @@
 import { resolve } from 'node:path'
 
 /**
- * Every path is derived from one data directory so that `git init $NEOHOMEPAGE_DATA_DIR` is the
- * whole backup story, while each subdirectory stays individually overridable for people who want
- * `state/` on fast local disk and `config/` on a network share.
- *
- * The code default is `./data` because that is what makes `pnpm dev` work with no setup. The
- * container image sets NEOHOMEPAGE_DATA_DIR=/data explicitly rather than the code guessing
- * whether it is inside a container.
+ * Every path derives from one data directory so `git init $NEOHOMEPAGE_DATA_DIR` backs up
+ * everything; each subdirectory stays individually overridable. The container image sets
+ * NEOHOMEPAGE_DATA_DIR=/data explicitly rather than the code guessing it is in a container.
  */
 function dir(name: string, fallback: string): string {
   const value = process.env[name]
@@ -36,14 +32,11 @@ export const env = {
   secretsDir: dir('NEOHOMEPAGE_SECRETS_DIR', `${dataDir}/secrets`),
   /** Never committed. Fully regenerable — delete it and the app rebuilds it on boot. */
   stateDir: dir('NEOHOMEPAGE_STATE_DIR', `${dataDir}/state`),
+  /** The widget manifests this build ships. Not under the data dir: it is code, not user data. */
+  catalogDir: dir('NEOHOMEPAGE_CATALOG_DIR', 'catalog'),
 
   host: process.env.NEOHOMEPAGE_HOST ?? '::',
   port: int('NEOHOMEPAGE_PORT', 7575),
-
-  nodeEnv: process.env.NODE_ENV ?? 'development',
-  get isProduction(): boolean {
-    return this.nodeEnv === 'production'
-  },
 } as const
 
 export type Env = typeof env

@@ -1,60 +1,29 @@
 import { useEffect, useState } from 'react'
 import type { Field } from '@neohomepage/catalog-schema'
+import type { BindableRole, ManifestView } from '../../shared/manifest-view.ts'
 import { FieldForm, initialValues, type FieldValues } from '../form/FieldForm.tsx'
 
-/**
- * Add a widget: browse the catalog, fill in a generated form, test the connection, save.
- *
- * The whole point of the project is that this is the only way anyone needs to add a service. No
- * file is edited, and the form is not written per widget — it comes from the manifest.
- */
+/** Add a widget: pick from the catalog, fill in the manifest-generated form, test, save. */
 
 type CatalogEntry = {
   id: string
   displayName: string
   category: string
-  /** widget | bookmark | tool. Absent on a catalog older than the field, hence the fallback. */
-  kind?: string
+  /** widget | bookmark | tool. */
+  kind: string
   icon: string
+  iconUrl?: string | null
   template: string
   shape: 'single' | 'composite'
   needsCredential: boolean
   someKindsNeedNoCredential: boolean
 }
 
-type BindableKind = {
-  name: string
-  label: string
-  fields: Field[]
-  authKind: string
-  needsCredential: boolean
-}
-
-type BindableRole = {
-  name: string
-  label: string
-  help?: string
-  min: number
-  max: number
-  kinds: BindableKind[]
-}
-
-type WidgetSchema = {
-  id: string
-  displayName: string
-  shape: 'single' | 'composite'
-  target: { fields: Field[]; authKind: string } | null
-  roles: BindableRole[]
-  config: Field[]
-  operations: string[]
-}
+export type { CatalogEntry }
 
 /**
- * One source a person is binding into a role: where it is, what shape it is, and its own fields.
- *
- * Held as UI state rather than written straight to config because a calendar with four sources is
- * four targets and one widget, and none of them should exist on disk until the whole form is
- * saved. A half-saved calendar would leave orphan targets carrying API keys.
+ * One source being bound into a role. Held as UI state rather than written to config so no target
+ * (and its API key) exists on disk until the whole form is saved.
  */
 type DraftSource = {
   readonly uid: string
@@ -69,12 +38,31 @@ type DraftSource = {
 
 let nextDraftUid = 0
 
+type Where = { scheme: string; host: string; port: string; basePath: string }
+
 type TestResult = { ok: boolean; durationMs: number; code?: string; message?: string }
 
-export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: string }) {
-  const [entries, setEntries] = useState<CatalogEntry[] | null>(null)
-  const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<WidgetSchema | null>(null)
+const describeTest = (result: TestResult) =>
+  result.ok
+    ? `Connected in ${result.durationMs}ms`
+    : `Could not connect: ${result.code ?? 'unknown'}`
+
+export type AddWidgetProps = {
+  /** Fetched once by the panel: null while loading, empty when the catalog could not be read. */
+  readonly entries: readonly CatalogEntry[] | null
+  readonly onAdded: () => void
+  /** Narrow the catalog to one kind; absent shows everything. */
+  readonly kind?: string
+  /** The search text, owned by the panel so the box can sit above the widget list. */
+  readonly query: string
+  /** Called when the form opens or closes, so the panel can hide the list behind it. */
+  readonly onEditing?: (editing: boolean) => void
+  /** Called when the user backs out of the catalog without choosing. */
+  readonly onCancel?: () => void
+}
+
+export function AddWidget({ entries, onAdded, kind, query, onEditing, onCancel }: AddWidgetProps) {
+  const [selected, setSelected] = useState<ManifestView | null>(null)
   const [target, setTarget] = useState({ host: '', port: '', scheme: 'http', basePath: '' })
   const [targetValues, setTargetValues] = useState<FieldValues>({})
   const [configValues, setConfigValues] = useState<FieldValues>({})
@@ -84,26 +72,28 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    void fetch('/api/catalog')
-      .then((response) => response.json() as Promise<{ manifests: CatalogEntry[] }>)
-      .then((payload) => setEntries(payload.manifests))
-      .catch(() => setEntries([]))
-  }, [])
+    onEditing?.(selected !== null)
+  }, [selected, onEditing])
 
   const select = async (id: string) => {
     setError(null)
     setTest(null)
-    const response = await fetch(`/api/catalog/${id}/schema`)
-    if (!response.ok) {
-      setError('that widget type is not available')
+    let schema: ManifestView
+    try {
+      const response = await fetch(`/api/catalog/${id}/schema`)
+      if (!response.ok) {
+        setError('that widget type is not available')
+        return
+      }
+      schema = (await response.json()) as ManifestView
+    } catch {
+      setError('The server did not answer.')
       return
     }
-    const schema = (await response.json()) as WidgetSchema
     setSelected(schema)
     setTargetValues(initialValues(schema.target?.fields ?? []))
     setConfigValues(initialValues(schema.config))
-    // A composite opens with one empty source per role, because a role with `min: 1` that showed
-    // nothing until you found the "Add" button reads as a broken form.
+    // A required role opens with one empty source so the form does not read as broken.
     setSources(
       Object.fromEntries(
         schema.roles.map((role) => [role.name, role.min > 0 ? [emptySource(role)] : []]),
@@ -144,24 +134,46 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
     return { secrets, plain }
   }
 
+  // Fields are named explicitly: spreading a draft source here once leaked its API key into
+  // config/ in plaintext, because `base` accepted unknown keys.
+  const baseOf = (where: Where) => ({
+    scheme: where.scheme,
+    host: where.host,
+    port: Number(where.port),
+    basePath: where.basePath,
+  })
+
+  const probe = async (
+    type: string,
+    where: Where,
+    fields: readonly Field[],
+    values: FieldValues,
+    kind?: string,
+  ): Promise<TestResult> => {
+    const { secrets, plain } = splitValues(fields, values)
+    const response = await fetch('/api/targets/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        ...(kind === undefined ? {} : { kind }),
+        base: baseOf(where),
+        config: configValues,
+        fields: plain,
+        secrets,
+      }),
+    })
+    return (await response.json()) as TestResult
+  }
+
   const runTest = async () => {
     if (selected === null || selected.target === null) return
     setBusy(true)
     setError(null)
     try {
-      const { secrets, plain } = splitValues(selected.target.fields, targetValues)
-      const response = await fetch('/api/targets/test', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          type: selected.id,
-          base: { ...target, port: Number(target.port) },
-          config: configValues,
-          fields: plain,
-          secrets,
-        }),
-      })
-      setTest((await response.json()) as TestResult)
+      setTest(await probe(selected.id, target, selected.target.fields, targetValues))
+    } catch {
+      setError('The server did not answer.')
     } finally {
       setBusy(false)
     }
@@ -173,27 +185,11 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
     if (kind === undefined) return
     setBusy(true)
     try {
-      const { secrets, plain } = splitValues(kind.fields, source.values)
-      const response = await fetch('/api/targets/test', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          type: selected.id,
-          // The kind is what tells the server which source to probe. The browser still names no
-          // path and no method — it names a widget type and a shape, exactly as elsewhere.
-          kind: source.kind,
-          base: {
-            scheme: source.scheme,
-            host: source.host,
-            port: Number(source.port),
-            basePath: source.basePath,
-          },
-          config: configValues,
-          fields: plain,
-          secrets,
-        }),
+      patchSource(role.name, source.uid, {
+        test: await probe(selected.id, source, kind.fields, source.values, source.kind),
       })
-      patchSource(role.name, source.uid, { test: (await response.json()) as TestResult })
+    } catch {
+      setError('The server did not answer.')
     } finally {
       setBusy(false)
     }
@@ -203,7 +199,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
   const createTarget = async (
     label: string,
     widgetType: string,
-    where: { scheme: string; host: string; port: string; basePath: string },
+    where: Where,
     values: FieldValues,
   ): Promise<string | null> => {
     const response = await fetch('/api/targets', {
@@ -212,16 +208,8 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
       body: JSON.stringify({
         label,
         widgetType,
-        // Named explicitly, never spread from a wider object. Spreading a draft source here once
-        // put its API key into config/ in plaintext, because `base` accepted unknown keys.
-        base: {
-          scheme: where.scheme,
-          host: where.host,
-          port: Number(where.port),
-          basePath: where.basePath,
-        },
-        // One bag; the server splits it by what the manifest declares a secret. The browser has
-        // no business deciding which of these values is a credential.
+        base: baseOf(where),
+        // Unsplit: the server decides which values are secrets from the manifest.
         values,
       }),
     })
@@ -232,7 +220,12 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
     return ((await response.json()) as { id: string }).id
   }
 
-  const createWidget = async (body: Record<string, unknown>) => {
+  const createWidget = async (body: {
+    type: string
+    targetId?: string | null
+    bindings?: Record<string, string[]>
+    config: FieldValues
+  }) => {
     const created = await fetch('/api/widgets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -244,8 +237,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
     }
     const result = (await created.json()) as { refusedBreakpoints?: string[] }
     if (result.refusedBreakpoints !== undefined && result.refusedBreakpoints.length > 0) {
-      // maxRows refused a tier. Saying so beats a widget that silently exists on some screen
-      // sizes and not others.
+      // maxRows refused a tier; say so rather than let the widget be missing on some screen sizes.
       setError(`added, but there was no room on: ${result.refusedBreakpoints.join(', ')}`)
     }
     return true
@@ -271,8 +263,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
             const kind = role.kinds.find((one) => one.name === draft.kind)
             if (kind === undefined) continue
             const id = await createTarget(kind.label, draft.kind, draft, draft.values)
-            // Stop on the first failure rather than pressing on: a widget bound to three of the
-            // four sources someone entered is worse than none, because it looks like it worked.
+            // A widget bound to only some of the entered sources would look like it worked.
             if (id === null) return
             ids.push(id)
           }
@@ -293,6 +284,8 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
       if (!(await createWidget({ type: selected.id, targetId, config: configValues }))) return
       setSelected(null)
       onAdded()
+    } catch {
+      setError('The server did not answer.')
     } finally {
       setBusy(false)
     }
@@ -301,32 +294,24 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
   if (entries === null) return <p className="nh-panel-note">Loading the catalog…</p>
 
   if (selected === null) {
-    // The kind narrows the catalog to what the open tab is for; the search then narrows that.
-    // A manifest with no kind counts as a widget, so an older catalog still offers everything
-    // somewhere rather than disappearing.
     const visible = entries.filter(
       (entry) =>
-        (kind === undefined || (entry.kind ?? 'widget') === kind) &&
+        (kind === undefined || entry.kind === kind) &&
         `${entry.displayName} ${entry.category}`.toLowerCase().includes(query.toLowerCase()),
     )
     return (
       <div className="nh-catalog">
-        <input
-          className="nh-input"
-          type="search"
-          // A placeholder is not a label: it disappears the moment you type, and a screen reader
-          // announcing "edit text" with no name leaves the one control on this panel unnamed.
-          aria-label="Search widgets"
-          placeholder="Search widgets"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        {error !== null ? (
+          <p className="nh-test-result" data-neo-ok={false}>
+            {error}
+          </p>
+        ) : null}
         {visible.length === 0 ? (
           <p className="nh-panel-note">
             {entries.length === 0
               ? 'No widgets available. The catalog could not be read.'
-              : // "Nothing matches that search" is wrong when the search is empty and the KIND is
-                // what excluded everything — it blames the reader for a filter they did not set.
+              : // With an empty search it is the kind filter, not the search, that excluded
+                // everything.
                 query.trim() === '' && kind !== undefined
                 ? `The catalog has no ${kind}s yet.`
                 : 'Nothing matches that search.'}
@@ -340,19 +325,37 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                   className="nh-catalog-item"
                   onClick={() => void select(entry.id)}
                 >
-                  <span className="nh-catalog-name">{entry.displayName}</span>
-                  <span className="nh-catalog-meta">
-                    {entry.category}
-                    {entry.needsCredential
-                      ? entry.someKindsNeedNoCredential
-                        ? ' · some sources need an API key'
-                        : ' · needs an API key'
-                      : ''}
+                  {entry.iconUrl ? (
+                    <img
+                      className="nh-catalog-icon"
+                      src={entry.iconUrl}
+                      alt=""
+                      width={28}
+                      height={28}
+                    />
+                  ) : (
+                    <span className="nh-catalog-icon nh-catalog-glyph" aria-hidden="true">
+                      {entry.displayName.charAt(0)}
+                    </span>
+                  )}
+                  <span className="nh-catalog-text">
+                    <span className="nh-catalog-name">{entry.displayName}</span>
+                    <span className="nh-catalog-meta">{entry.category}</span>
                   </span>
+                  {entry.needsCredential ? (
+                    <span className="nh-badge" title="Needs an API key or a password">
+                      {entry.someKindsNeedNoCredential ? 'key · some' : 'key'}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             ))}
           </ul>
+        )}
+        {onCancel === undefined ? null : (
+          <button type="button" className="nh-button-quiet" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
     )
@@ -361,10 +364,23 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
   return (
     <div className="nh-add">
       <div className="nh-add-head">
-        <button type="button" className="nh-button-quiet" onClick={() => setSelected(null)}>
+        <button
+          type="button"
+          className="nh-button-quiet"
+          onClick={() => {
+            setSelected(null)
+            setError(null)
+          }}
+        >
           ← Back
         </button>
-        <strong>{selected.displayName}</strong>
+        <span className="nh-add-title">
+          <strong>Add {selected.displayName}</strong>
+          <span className="nh-panel-dim">
+            Step 2 of 2 ·{' '}
+            {selected.target === null && selected.shape === 'single' ? 'options' : 'connect it'}
+          </span>
+        </span>
       </div>
 
       {selected.shape === 'composite'
@@ -388,8 +404,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                           value={draft.kind}
                           onChange={(event) => {
                             const next = role.kinds.find((one) => one.name === event.target.value)
-                            // The fields belong to the kind, so switching kind resets them rather
-                            // than carrying a Sonarr API key over to an ICS feed that has none.
+                            // Fields belong to the kind, so switching kind resets them.
                             patchSource(role.name, draft.uid, {
                               kind: event.target.value,
                               values: initialValues(next?.fields ?? []),
@@ -462,6 +477,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                             value={draft.basePath}
                             placeholder="/calendar.ics"
                             disabled={busy}
+                            aria-describedby={`${draft.uid}-path-help`}
                             onChange={(event) =>
                               patchSource(role.name, draft.uid, { basePath: event.target.value })
                             }
@@ -497,9 +513,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                         </button>
                         {draft.test === null ? null : (
                           <span className="nh-test-result" data-neo-ok={draft.test.ok}>
-                            {draft.test.ok
-                              ? `Connected in ${draft.test.durationMs}ms`
-                              : `Could not connect: ${draft.test.code ?? 'unknown'}`}
+                            {describeTest(draft.test)}
                           </span>
                         )}
                       </div>
@@ -538,6 +552,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                 className="nh-input"
                 value={target.host}
                 placeholder="10.0.0.20"
+                disabled={busy}
                 onChange={(event) => setTarget({ ...target, host: event.target.value })}
               />
             </div>
@@ -551,6 +566,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                 type="number"
                 value={target.port}
                 placeholder="8989"
+                disabled={busy}
                 onChange={(event) => setTarget({ ...target, port: event.target.value })}
               />
             </div>
@@ -578,9 +594,7 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
 
       {test !== null ? (
         <p className="nh-test-result" data-neo-ok={test.ok}>
-          {test.ok
-            ? `Connected in ${test.durationMs}ms`
-            : `Could not connect: ${test.code ?? 'unknown'}`}
+          {describeTest(test)}
         </p>
       ) : null}
       {error !== null ? (

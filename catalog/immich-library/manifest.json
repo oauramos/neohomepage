@@ -1,0 +1,119 @@
+{
+  "manifestVersion": 1,
+  "id": "immich-library",
+  "version": "1.0.0",
+  "displayName": "Immich",
+  "category": "media",
+  "icon": "immich",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/immich-library",
+  "target": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "kind": "secret",
+        "label": "API key",
+        "required": true,
+        "help": "Account settings → API keys; needs the server.statistics permission"
+      }
+    ],
+    "auth": {
+      "kind": "header",
+      "header": "x-api-key",
+      "value": "{{secret:apiKey}}"
+    }
+  },
+  "config": [],
+  "operations": {
+    "statistics": {
+      "method": "GET",
+      "path": "/api/server/statistics",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Photos"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.photos"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Videos"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.videos"
+                },
+                "as": "number"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Storage"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.usage"
+                },
+                "as": "bytes"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 300000,
+    "minIntervalMs": 60000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "concat",
+      "const",
+      "format",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "header"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

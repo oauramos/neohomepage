@@ -2,15 +2,8 @@ import { cloneLayout, correctBounds, getCompactor } from 'react-grid-layout/core
 import type { LayoutItem } from './grid-geometry.ts'
 
 /**
- * Where a new widget goes.
- *
- * Shared by the editor and the MCP tools on purpose: a widget an agent adds must land exactly
- * where one added by hand would. Two placement implementations would mean "the AI put it
- * somewhere strange", which is unfalsifiable and unfixable.
- *
- * `correctBounds` mutates its argument — verified against react-grid-layout 2.2.4 — so every entry
- * point here clones first. Without that, placing a widget would rewrite the caller's layout array
- * in place.
+ * Widget placement, shared by the editor and the MCP tools so an agent-added widget lands where a
+ * hand-added one would.
  */
 
 export type PlacementRequest = {
@@ -36,22 +29,12 @@ function fits(layout: readonly LayoutItem[], candidate: LayoutItem): boolean {
 }
 
 /**
- * First fit, scanning left to right then top to bottom.
- *
- * Deliberately not "append at the bottom": a board with a gap in the middle and a new widget
- * parked below the fold looks broken, and the gap is usually exactly where the user expected the
- * thing to appear.
+ * First fit, scanning left to right then top to bottom, so a gap is filled before anything is
+ * appended below.
  */
 export function place(request: PlacementRequest): PlacementResult {
   const width = Math.max(1, Math.min(request.cols, request.w))
   const height = Math.max(1, request.h)
-
-  if (width > request.cols) {
-    return {
-      ok: false,
-      reason: `a widget ${request.w} columns wide does not fit in ${request.cols}`,
-    }
-  }
 
   const occupied = request.layout.filter((item) => item.i !== request.id)
   const bottom = occupied.reduce((max, item) => Math.max(max, item.y + item.h), 0)
@@ -66,8 +49,7 @@ export function place(request: PlacementRequest): PlacementResult {
     }
   }
 
-  // Only reachable with maxRows set. Refusing, and saying why, is the whole point of that
-  // setting: on a wall display a widget pushed below the fold is a widget that does not exist.
+  // Only reachable with maxRows set; without a cap searchRows always leaves room.
   return {
     ok: false,
     reason:
@@ -82,23 +64,20 @@ export function normaliseLayout(
   cols: number,
   compaction: 'vertical' | 'none' = 'vertical',
 ): LayoutItem[] {
+  // correctBounds mutates its argument (react-grid-layout 2.2.4), so clone first.
   const bounded = correctBounds(cloneLayout([...layout]), { cols })
   if (compaction === 'none') return bounded as LayoutItem[]
   return getCompactor('vertical').compact(bounded, cols) as LayoutItem[]
 }
 
-/** Does every item fit inside the page's row limit? */
 export function withinMaxRows(layout: readonly LayoutItem[], maxRows: number | null): boolean {
   if (maxRows === null) return true
   return layout.every((item) => item.y + item.h <= maxRows)
 }
 
 /**
- * Fan a placement out to the breakpoints nobody has authored.
- *
- * A widget that exists at one width and not another is invisible on a phone with no error, which
- * reads as data loss. Derived tiers are regenerated wholesale from the authoritative one, so this
- * only has to add the item where a tier IS authored.
+ * Places the item on every authored breakpoint; derived tiers are regenerated from the
+ * authoritative one, so they are left untouched.
  */
 export function fanOut(
   layouts: Readonly<Record<string, readonly LayoutItem[]>>,
@@ -121,7 +100,7 @@ export function fanOut(
       cols: columns,
       maxRows,
       id: item.id,
-      w: Math.min(item.w, columns),
+      w: item.w,
       h: item.h,
     })
     if (result.ok) out[breakpoint] = result.layout

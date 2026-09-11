@@ -1,12 +1,7 @@
 import type { ProjectionEnvelope } from '@neohomepage/catalog-schema'
 import type { Resolved } from '../shared/resolved.ts'
 
-/**
- * Client state: what the page knows, and how it finds out.
- *
- * The published HTML already contains everything needed to render, so the first paint owes nothing
- * to the network. This module's job is only to keep that picture current.
- */
+/** Client state: the published HTML renders without the network; this keeps it current. */
 
 export type DashboardState = {
   readonly resolved: Resolved
@@ -18,10 +13,8 @@ export type DashboardState = {
 }
 
 /**
- * Read the state the publish step baked into the document.
- *
- * Present on a published page and absent on the SPA shell fallback, which is why the caller
- * treats `null` as "ask the server" rather than as an error.
+ * State the publish step baked into the document; null on the SPA shell fallback, where the
+ * caller asks the server instead.
  */
 export function readEmbeddedState(): { resolved: Resolved } | null {
   const element = document.getElementById('__NEO_STATE__')
@@ -79,11 +72,8 @@ export class DashboardClient {
   }
 
   /**
-   * Connect the live feed.
-   *
-   * Reconnection backs off to 30 seconds rather than retrying tightly: a server that is restarting
-   * or a laptop that just closed its lid should not be hammered, and the staleness chip already
-   * tells the viewer the page is not live.
+   * Connects the live feed; reconnects with backoff capped at 30s so a restarting server is not
+   * hammered.
    */
   connect(): void {
     if (this.#events !== null) return
@@ -118,7 +108,6 @@ export class DashboardClient {
       })
     })
 
-    // A config change or a publish elsewhere means this page is looking at an older world.
     events.addEventListener('config', () => void this.refresh())
     events.addEventListener('published', () => void this.refresh())
 
@@ -138,8 +127,26 @@ export class DashboardClient {
     this.#set({ connected: false })
   }
 
-  async publish(): Promise<void> {
-    await fetch('/api/publish', { method: 'POST' })
+  /**
+   * JSON write, then a resync. The content type goes on every request, body or not: the write gate
+   * rejects anything a cross-site form could send, and a body-less DELETE without it looks like one.
+   * The refresh runs even when the write was refused, so the page shows the server's state.
+   */
+  async write(
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<void> {
+    const response = await fetch(path, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
     await this.refresh()
+    if (!response.ok) throw new Error(`${method} ${path} failed: ${response.status}`)
+  }
+
+  publish(): Promise<void> {
+    return this.write('POST', '/api/publish')
   }
 }

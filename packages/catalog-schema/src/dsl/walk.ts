@@ -1,9 +1,8 @@
 import type { Node, OpName } from './node.ts'
 
 /**
- * The one place that knows the shape of every node. Depth checks, node counts, the opcode set a
- * manifest requires, and any future analysis all derive from this, so adding an operator without
- * teaching the walker about it is a type error rather than a silent gap in every check at once.
+ * The one place that knows every node's children; every analysis derives from it, so an operator
+ * missing here is a type error.
  */
 export function children(node: Node): readonly Node[] {
   switch (node.op) {
@@ -81,9 +80,8 @@ export type Analysis = {
 }
 
 /**
- * Static analysis, run once when a manifest is loaded rather than on every poll. This is what
- * makes the fuel budget at run time a backstop instead of the only defence: a manifest that could
- * blow the budget is refused at install time, where the user can be told which widget is at fault.
+ * Static caps checked once at manifest load, so the run-time fuel budget is a backstop rather than
+ * the only defence.
  */
 export function analyse(root: Node, limits: Limits = DEFAULT_LIMITS): Analysis {
   let nodes = 0
@@ -91,8 +89,7 @@ export function analyse(root: Node, limits: Limits = DEFAULT_LIMITS): Analysis {
   let maxLoopNesting = 0
   const opcodes = new Set<OpName>()
 
-  // Explicit stack: a recursive walker would blow the JS stack on a hostile deeply-nested tree
-  // before our own depth check ever fired.
+  // Explicit stack: recursion would overflow on a hostile tree before the depth check fires.
   const stack: { node: Node; depth: number; loops: number }[] = [{ node: root, depth: 1, loops: 0 }]
 
   while (stack.length > 0) {

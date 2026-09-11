@@ -1,13 +1,9 @@
-import type { Decoder } from '@neohomepage/catalog-schema'
-import type { Json } from '@neohomepage/catalog-schema'
+import type { Decoder, Json } from '@neohomepage/catalog-schema'
 import { decodeIcs, DEFAULT_ICS_WINDOW, IcsParseError } from './ics.ts'
 
 /**
- * Decoders run server-side, before the projection DSL ever sees data.
- *
- * The DSL operates on JSON. Anything that is not JSON on the wire — iCalendar, a Prometheus text
- * exposition — is normalised here, in one swappable file per format, rather than by growing the
- * DSL a parser it would then have to keep total and terminating.
+ * Decoders normalise non-JSON bodies (iCalendar, ...) to JSON server-side, before the projection
+ * DSL sees data.
  */
 
 export class DecodeError extends Error {
@@ -25,8 +21,8 @@ function decodeJson(body: string): Json {
   try {
     return JSON.parse(body) as Json
   } catch (error) {
-    // The upstream message is never included: it can echo request content, and this reaches the
-    // browser. The code is what a widget shows.
+    // The upstream message can echo request content and this reaches the browser; only the code
+    // is shown.
     throw new DecodeError('bad-json', 'the target did not return valid JSON', { cause: error })
   }
 }
@@ -36,11 +32,8 @@ function decodeText(body: string): Json {
 }
 
 /**
- * What a decoder needs beyond the bytes.
- *
- * `now` is threaded from the request rather than read here so decoding stays a pure function of
- * its inputs: recurrence expansion needs a window, and a window anchored on a wall-clock read
- * would make the same calendar decode differently in a test than in production.
+ * `now` comes from the request rather than a wall-clock read so decoding is a pure function of
+ * its inputs.
  */
 export type DecodeContext = { readonly now: string }
 
@@ -61,7 +54,7 @@ export function decode(kind: Decoder, body: string, context: DecodeContext): Jso
 
 function decodeIcalendar(body: string, context: DecodeContext): Json {
   try {
-    return decodeIcs(body, { now: context.now, ...DEFAULT_ICS_WINDOW }) as unknown as Json
+    return decodeIcs(body, { now: context.now, ...DEFAULT_ICS_WINDOW })
   } catch (error) {
     if (error instanceof IcsParseError) {
       throw new DecodeError('bad-ics', 'the target did not return valid iCalendar data', {

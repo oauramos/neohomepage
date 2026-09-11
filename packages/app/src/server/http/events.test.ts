@@ -42,8 +42,6 @@ describe('broadcast', () => {
   })
 
   it('drops a subscriber whose write throws rather than buffering for it', () => {
-    // A phone that slept with the tab open is a slow consumer; buffering for it inflates RSS on
-    // a box that has none to spare.
     const hub = new EventHub()
     let closed = false
     hub.add({
@@ -89,10 +87,8 @@ describe('the wire format', () => {
   })
 
   it('never emits a raw newline inside a frame, whatever the payload contains', () => {
-    // An unprefixed continuation line silently truncates the frame at the receiver, and the
-    // symptom is "some updates just never arrive". JSON.stringify escapes newlines rather
-    // than emitting them, so this holds by construction — asserting it is what stops a future
-    // change to a non-JSON encoder from breaking it quietly.
+    // An unprefixed continuation line silently truncates the frame at the receiver. JSON.stringify
+    // escapes newlines, so this guards against a future non-JSON encoder.
     const payloads: unknown[] = ['line one\nline two', { note: 'a\nb' }, ['x\ny'], 'crlf\r\nhere']
     for (const payload of payloads) {
       const frame = formatEvent({ type: 'widget', data: payload })

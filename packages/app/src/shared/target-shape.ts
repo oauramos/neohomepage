@@ -2,12 +2,8 @@ import type { Field, Manifest } from '@neohomepage/catalog-schema'
 import { isComposite, sourceKinds } from '@neohomepage/catalog-schema'
 
 /**
- * The fields a target of a given shape is allowed to carry.
- *
- * A target's `widgetType` names either a single-source manifest or one source kind of a composite
- * — a calendar's Sonarr binding is a target shaped like `sonarr-queue`, and its ICS feed is one
- * shaped like `ics-feed`, which exists only inside the calendar manifest. Both have to resolve or
- * the server cannot tell which of a target's values are credentials.
+ * Fields a target of a given shape may carry. `widgetType` names either a single-source manifest
+ * or one source kind of a composite (e.g. `ics-feed`, which exists only inside the calendar one).
  */
 export function targetShapeFields(
   catalog: ReadonlyMap<string, Manifest>,
@@ -35,18 +31,9 @@ export type RoutedValues = {
 }
 
 /**
- * Split a caller's values into "may be written to config" and "must go to the vault".
- *
- * Where the manifest can speak, it decides — never the caller. The browser used to send `fields`
- * and `secrets` already separated, which meant a bug in the form, or a hostile client, could put
- * an API key in the bucket that gets committed to git. It did exactly that once: a whole draft
- * object was spread into `base` and the key landed in `config/targets/*.json` in plaintext.
- *
- * Where the manifest cannot speak — a hand-made `custom` target with no shape in the catalog —
- * the caller's own buckets are honoured, because the alternative is silently discarding a
- * credential and leaving the user with an unexplained "credential unavailable". The security
- * property that matters survives either way: a value the manifest declares secret has no path
- * into config. Marking something secret that is not merely stores a hostname in the vault.
+ * Splits a caller's values into config-safe fields and vault secrets. When the shape is declared
+ * the manifest decides, never the caller: a declared secret has no path into config. With no shape
+ * (a hand-made `custom` target) the caller's buckets are honoured rather than dropping a secret.
  */
 export function routeValues(
   declared: readonly Field[] | null,
@@ -74,8 +61,8 @@ export function routeValues(
       const plain = scalar(value)
       if (plain !== null) fields[name] = plain
     }
-    // An unclassified bag against an unknown shape cannot be sorted: writing it to config might
-    // commit a credential, and writing it to the vault might hide a hostname. Report, do neither.
+    // Unclassified values against an unknown shape: config might commit a credential, the vault
+    // might hide a hostname, so report them instead.
     unknown.push(...Object.keys(input.values ?? {}))
     return { fields, secrets, unknown }
   }

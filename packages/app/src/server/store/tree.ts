@@ -8,15 +8,9 @@ import type {
   Theme,
   Widget,
 } from '../config/schema.ts'
+import { gridSectionIds, sectionGeometry, sectionOf } from '../config/sections.ts'
 
-/**
- * The whole config tree in memory.
- *
- * Every mutation validates the *entire prospective tree*, not just the file being written. Almost
- * every interesting invariant is cross-file — a layout entry pointing at a deleted widget, a
- * widget pointing at a target that no longer exists — and per-file validation cannot see any of
- * them.
- */
+/** The whole config tree in memory; every mutation validates the entire prospective tree, since most invariants are cross-file. */
 export type ConfigTree = {
   readonly dashboard: Dashboard
   readonly theme: Theme
@@ -49,11 +43,7 @@ export function toMutable(tree: ConfigTree): MutableConfigTree {
   }
 }
 
-/**
- * A content revision for optimistic concurrency. The browser sends it back as `If-Match` and an
- * MCP agent as `baseRevision`; a mismatch is a 409 telling the caller to re-read rather than
- * clobber. Sorted map entries so the hash depends on content, never on insertion order.
- */
+/** Content revision for optimistic concurrency (`If-Match` / `baseRevision`); map entries are sorted so the hash depends on content, not insertion order. */
 export function treeRevision(tree: ConfigTree): string {
   const sorted = (map: ReadonlyMap<string, unknown>) =>
     [...map.entries()].sort(([a], [b]) => a.localeCompare(b, 'en-US'))
@@ -71,11 +61,7 @@ export function treeRevision(tree: ConfigTree): string {
 
 export type Problem = { readonly path: string; readonly message: string }
 
-/**
- * Cross-file invariants. Everything here is a state the UI, an importer or an MCP agent could
- * otherwise produce, and every one of them renders as a blank tile or a crash rather than an
- * error message if it reaches disk.
- */
+/** Cross-file invariants that per-file schema validation cannot see. */
 export function validateTree(tree: ConfigTree): Problem[] {
   const problems: Problem[] = []
 
@@ -111,8 +97,7 @@ export function validateTree(tree: ConfigTree): Problem[] {
     if (!page.grid.breakpoints.some((b) => b.minWidth === 0)) {
       problems.push({
         path: `pages/${id}.json`,
-        // Without a zero-width tier the narrowest screens get no rules at all and the board
-        // collapses into a single column stack with no positioning.
+        // Without a zero-width tier the narrowest screens have no grid rules at all.
         message: 'the narrowest breakpoint must start at minWidth 0',
       })
     }
@@ -126,6 +111,74 @@ export function validateTree(tree: ConfigTree): Problem[] {
       }
       seen.add(breakpoint.minWidth)
     }
+
+    // Section, group, link and navbar item ids become CSS selectors and React keys.
+    const sectionIds = new Set<string>()
+    for (const section of page.sections) {
+      if (sectionIds.has(section.id)) {
+        problems.push({
+          path: `pages/${id}.json`,
+          message: `section "${section.id}" is declared twice`,
+        })
+      }
+      sectionIds.add(section.id)
+      const unique = (scope: string, ids: readonly string[]) => {
+        const found = new Set<string>()
+        for (const entry of ids) {
+          if (found.has(entry)) {
+            problems.push({
+              path: `pages/${id}.json`,
+              message: `${scope} "${entry}" is declared twice in section "${section.id}"`,
+            })
+          }
+          found.add(entry)
+        }
+      }
+      if (section.kind === 'navbar') {
+        unique(
+          'navbar item',
+          section.items.map((item) => item.id),
+        )
+        for (const item of section.items) {
+          if (item.kind === 'links')
+            unique(
+              'link',
+              item.links.map((link) => link.id),
+            )
+        }
+      }
+      if (section.kind === 'bookmarks') {
+        unique(
+          'group',
+          section.groups.map((group) => group.id),
+        )
+        for (const group of section.groups)
+          unique(
+            'link',
+            group.links.map((link) => link.id),
+          )
+      }
+      const breakpointKeys =
+        section.kind === 'grid'
+          ? Object.keys(section.cols)
+          : section.kind === 'bookmarks'
+            ? Object.keys(section.columns)
+            : []
+      for (const key of breakpointKeys) {
+        if (!breakpointIds.has(key)) {
+          problems.push({
+            path: `pages/${id}.json`,
+            message: `section "${section.id}" sizes breakpoint "${key}", which the page does not define`,
+          })
+        }
+      }
+    }
+    if (page.sections.length > 0 && gridSectionIds(page).length === 0) {
+      problems.push({
+        path: `pages/${id}.json`,
+        message: 'a page that declares sections needs at least one grid section',
+      })
+    }
   }
 
   for (const [id, widget] of tree.widgets) {
@@ -135,8 +188,14 @@ export function validateTree(tree: ConfigTree): Problem[] {
         message: `id is "${widget.id}" but the file is ${id}.json`,
       })
     }
-    if (!tree.pages.has(widget.page)) {
+    const page = tree.pages.get(widget.page)
+    if (page === undefined) {
       problems.push({ path: `widgets/${id}.json`, message: `page "${widget.page}" does not exist` })
+    } else if (widget.section !== null && !gridSectionIds(page).includes(widget.section)) {
+      problems.push({
+        path: `widgets/${id}.json`,
+        message: `section "${widget.section}" is not a grid section of page "${widget.page}"`,
+      })
     }
     if (widget.targetId !== null && !tree.targets.has(widget.targetId)) {
       problems.push({
@@ -153,9 +212,18 @@ export function validateTree(tree: ConfigTree): Problem[] {
       continue
     }
     const breakpointIds = new Set(page.grid.breakpoints.map((b) => b.id))
-    const pageWidgets = new Set(
-      [...tree.widgets.values()].filter((w) => w.page === pageId).map((w) => w.id),
+    const pageWidgets = new Map(
+      [...tree.widgets.values()].filter((w) => w.page === pageId).map((w) => [w.id, w]),
     )
+    // A grid section may narrow the page's columns or cap its rows; the bounds are the section's.
+    const boundsOf = (widgetId: string, breakpointId: string) => {
+      const widget = pageWidgets.get(widgetId)
+      const { cols, maxRows } = sectionGeometry(
+        page,
+        widget === undefined ? undefined : sectionOf(widget, page),
+      )
+      return { cols: cols[breakpointId] ?? 0, maxRows }
+    }
 
     for (const [breakpointId, items] of Object.entries(layout.layouts)) {
       if (!breakpointIds.has(breakpointId)) {
@@ -165,13 +233,12 @@ export function validateTree(tree: ConfigTree): Problem[] {
         })
         continue
       }
-      const cols = page.grid.breakpoints.find((b) => b.id === breakpointId)?.cols ?? 0
       const placed = new Set<string>()
       for (const item of items) {
+        const { cols, maxRows } = boundsOf(item.i, breakpointId)
         if (!pageWidgets.has(item.i)) {
           problems.push({
             path: `layouts/${pageId}.json`,
-            // An orphaned entry is invisible until someone opens the editor and finds a ghost.
             message: `layout ${breakpointId} references widget "${item.i}", which is not on this page`,
           })
         }
@@ -188,10 +255,10 @@ export function validateTree(tree: ConfigTree): Problem[] {
             message: `widget "${item.i}" spans past column ${cols} in breakpoint ${breakpointId}`,
           })
         }
-        if (page.grid.maxRows !== null && item.y + item.h > page.grid.maxRows) {
+        if (maxRows !== null && item.y + item.h > maxRows) {
           problems.push({
             path: `layouts/${pageId}.json`,
-            message: `widget "${item.i}" exceeds the page's ${page.grid.maxRows}-row limit`,
+            message: `widget "${item.i}" exceeds the ${maxRows}-row limit of its section`,
           })
         }
       }

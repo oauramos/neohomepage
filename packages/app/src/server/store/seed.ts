@@ -1,13 +1,11 @@
-import { access, mkdir } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileDurable } from './atomic.ts'
+import { exists } from './fs.ts'
 
 /**
- * First-boot seeding of the data directory.
- *
- * The `.gitignore` is the load-bearing file here: `git init` on this directory has to be safe for
- * someone who has not read the documentation, which means secrets/ and state/ must already be
- * excluded before they can possibly be committed.
+ * First-boot seeding of the data directory. The .gitignore is written first so secrets/ and state/
+ * are excluded before anyone can `git init` and commit them.
  */
 
 export type SeedPaths = {
@@ -78,15 +76,6 @@ your compose file or systemd unit, which you already store somewhere safe.
 See https://oauramos.github.io/neohomepage/guide/backup for the other two options.
 `
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** Idempotent: never overwrites a file the user may have edited. */
 export async function seedDataDirectory(paths: SeedPaths): Promise<string[]> {
   const written: string[] = []
@@ -94,8 +83,7 @@ export async function seedDataDirectory(paths: SeedPaths): Promise<string[]> {
   await mkdir(paths.configDir, { recursive: true })
   await mkdir(paths.assetsDir, { recursive: true })
   await mkdir(paths.stateDir, { recursive: true })
-  // 0700: the directory itself, not just the files in it. A world-readable directory containing
-  // 0600 files still leaks the names of every service you run.
+  // 0700 on the directory too: a world-readable directory of 0600 files still leaks service names.
   await mkdir(paths.secretsDir, { recursive: true, mode: 0o700 })
 
   for (const [name, contents] of [

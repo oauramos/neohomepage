@@ -1,0 +1,31 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "serverVersion": "0.63.2 (be10f89c)",
+    "openSubsonic": true,
+    "nowPlaying": {
+      "entry": [
+        {
+          "id": "song-1",
+          "title": "Bala com Bala",
+          "artist": "Jorge Ben",
+          "album": "Ben",
+          "username": "otavio",
+          "playerName": "DSub",
+          "minutesAgo": 0
+        },
+        {
+          "id": "song-2",
+          "title": "Lonely Life",
+          "artist": "Ed Motta",
+          "album": "Lonely Life",
+          "username": "guest",
+          "playerName": "Feishin",
+          "minutesAgo": 3
+        }
+      ]
+    }
+  }
+}

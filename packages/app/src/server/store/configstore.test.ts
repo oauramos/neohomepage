@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pageSchema, targetSchema, widgetSchema } from '../config/schema.ts'
@@ -138,7 +138,6 @@ describe('optimistic concurrency', () => {
         baseRevision: stale,
       }),
     ).rejects.toThrow(ConfigConflictError)
-    // And the other writer's work survived.
     expect((await s.load()).tree.widgets.has('w1')).toBe(true)
   })
 })
@@ -173,8 +172,6 @@ describe('resilience to hand edits', () => {
   })
 
   it('keeps unknown keys through a read/write round trip and warns instead of dropping them', async () => {
-    // Someone tries a newer release, it writes a field this build has never heard of, and they
-    // roll back. Losing their data silently would be the worst possible outcome.
     const s = await store()
     await writeFile(s.paths.dashboard, '{"schemaVersion":1,"futureFeature":{"enabled":true}}\n')
     const loaded = await s.load()
@@ -211,7 +208,6 @@ describe('a fresh directory', () => {
   it('loads as an empty but valid tree', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'neo-empty-'))
     created.push(dir)
-    await mkdir(dir, { recursive: true })
     const s = new ConfigStore(dir)
     const { tree, warnings } = await s.load()
     expect(tree.dashboard.schemaVersion).toBe(1)
@@ -222,10 +218,7 @@ describe('a fresh directory', () => {
 
 describe('formatting self-heals', () => {
   it('normalises a badly formatted file on the next transaction that touches the tree', async () => {
-    // The change detector compares against the BYTES on disk, not against a re-render of the
-    // parsed value. Comparing render-to-render would make formatting invisible forever: a file
-    // left alphabetical by an older release would never be tidied, and a serialiser improvement
-    // would silently never reach an existing install.
+    // Change detection compares against the bytes on disk, so stale formatting counts as a change.
     const s = await store()
     await writeFile(
       join(s.paths.widgets, 'w1.json'),

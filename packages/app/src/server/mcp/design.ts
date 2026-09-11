@@ -34,44 +34,13 @@ import {
   resolveTokens,
   THEME_TOKENS,
 } from '../../shared/theme-tokens.ts'
+import { fail, ok, revisionOption } from './result.ts'
 
 /**
- * The design surface: everything the panel in the bottom-right corner can change, over MCP.
- *
- * The point is not parity for its own sake. It is that "make the board look like that site" is a
- * request a person can now make of an agent, and an agent has a browser: it can read a brand's
- * colours and hand them over. What it must not be able to hand over is CSS — so nothing here
- * accepts any. A caller names a preset, a token and a colour, a number in a range, or a member of
- * a closed set this project authored, and every string that reaches a stylesheet is one of ours.
- *
- * Three tools rather than one, and the split is by what a call costs. Reading the current look and
- * browsing the seventy-five presets are separate because the second is a catalogue and the first
- * is what you check before and after every write. Writing is ONE tool because a look is one
- * thought — "these colours, that shape, this background" — and splitting it would turn one
- * transaction, one generation and one republish into four of each.
- *
- * Two absences are deliberate and worth naming. There is no import-a-theme tool: `config/theme.json`
- * round-trips through the editor's own box because a person pasting their own file is exercising
- * their own judgement, while the same payload from an agent is arbitrary CSS text with a prompt
- * behind it. And there is no way to add a background image — an agent may choose one a person
- * already uploaded, by the content-addressed id the server gave it, and can never supply bytes or
- * name a URL.
- *
- * On spelling: this module says `colors` where the rest of the repository says `colour`. The names
- * in a tool schema are read by a model that will otherwise type the American form and — because
- * zod strips unknown keys rather than rejecting them — get a cheerful success and an unchanged
- * board. That failure is silent, so the schema takes the spelling the caller is likeliest to use
- * and the prose keeps ours.
+ * MCP tools over the design panel. Nothing here accepts CSS: every string that reaches a stylesheet
+ * is a preset, token value or closed-set member this project authored. Schema keys say `colors`
+ * because zod strips unknown keys, so the American spelling would otherwise be a silent no-op.
  */
-
-const ok = (data: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-})
-
-const fail = (message: string) => ({
-  content: [{ type: 'text' as const, text: message }],
-  isError: true,
-})
 
 const SCHEMES = ['light', 'dark'] as const
 type Scheme = (typeof SCHEMES)[number]
@@ -80,21 +49,11 @@ type Bucket = (typeof BUCKETS)[number]
 
 const COLOUR_TOKENS = new Set<string>(THEME_TOKENS)
 
-/** Ids of the things a caller may name, built from the tables rather than restated beside them. */
-const ids = (values: readonly { id: string }[]) =>
-  values.map((value) => value.id) as [string, ...string[]]
+const ids = (values: readonly { id: string }[]) => values.map((value) => value.id)
 
 /**
- * A colour, in either of the two forms it can honestly arrive in, re-emitted as one of ours.
- *
- * Hex is what a brand publishes and what a person reads off a screenshot; `oklch(L C H)` is what
- * this project stores, because `contrastRatio` parses nothing else and a hex in `cssVars` would
- * make every ratio in the design panel and in `theme-contrast.test.ts` come back null.
- *
- * Both forms are PARSED and then rebuilt, never passed through: `rgb(0,0,0)`, `red`, `var(--x)`
- * and `#fff;background:url(…)` all fail the same parse, and a value that survives it is re-emitted
- * by `formatInGamut` — so what lands in the file is a colour a screen can show, written by the one
- * function in the codebase that produces token text.
+ * Accepts hex or `oklch(L C H)` and re-emits oklch, the only form `contrastRatio` reads. Parsed and
+ * rebuilt, never passed through, so no caller text reaches the stylesheet.
  */
 function parseColour(value: string): string | null {
   const trimmed = value.trim()
@@ -102,7 +61,6 @@ function parseColour(value: string): string | null {
   return parsed === null ? null : formatInGamut(parsed.l, parsed.c, parsed.h)
 }
 
-/** The reverse, for reporting: what the stored `surface.background` string means. */
 function describeBackdrop(background: string | null) {
   if (background === null) return { kind: 'none' as const, id: null }
   if (background.startsWith(GRADIENT_PREFIX)) {
@@ -112,17 +70,15 @@ function describeBackdrop(background: string | null) {
   return { kind: 'image' as const, id: background.slice(background.lastIndexOf('/') + 1) }
 }
 
-/** Both palettes as hex, which is the form a caller thinks in and the one it will send back. */
+/** The resolved palette as hex, the form callers send back. */
 function paletteOf(theme: Theme, scheme: Scheme): Record<string, string | null> {
   const tokens = resolveTokens(theme, scheme)
   return Object.fromEntries(
-    // Never the raw stored string: a value that is not a colour is reported as one that could not
-    // be read, rather than echoed back into a model's context as text.
+    // A non-colour value reports as null rather than being echoed back as text.
     THEME_TOKENS.map((token) => [token, toHex(tokens[token] ?? '')]),
   )
 }
 
-/** The contrast verdict, short enough to put in every result: the count, then only the failures. */
 function contrastOf(theme: Theme, scheme: Scheme) {
   const checks = contrastChecks(resolveTokens(theme, scheme))
   const failures = checks.filter((check) => !check.passes)
@@ -138,11 +94,8 @@ function contrastOf(theme: Theme, scheme: Scheme) {
 }
 
 /**
- * The edit, as the tool's own vocabulary rather than the file's.
- *
  * Every field is `| undefined` as well as optional because `exactOptionalPropertyTypes` is on and
- * zod infers an absent input field as present-and-undefined. Spelling it out here is what lets the
- * handler pass what it parsed straight through instead of rebuilding the object key by key.
+ * zod infers an absent input field as present-and-undefined.
  */
 export type DesignPatch = {
   mode?: Theme['mode'] | undefined
@@ -175,14 +128,8 @@ export type DesignReport = {
   unfittable: Partial<Record<Scheme, Unfittable[]>>
 }
 
-/**
- * What each `reset` word deletes.
- *
- * A Map rather than an object literal, because the word comes off the wire: `RESET_SETS['toString']`
- * on a plain object finds `Object.prototype.toString`, and the code then tried to iterate a
- * function — so `reset: ["toString"]` answered "tokens is not iterable" instead of the sentence
- * that tells the caller what the words are.
- */
+// A Map, not an object literal: the word comes off the wire, and `toString` on a plain object
+// would find `Object.prototype.toString`.
 const RESET_SETS = new Map<string, readonly string[]>([
   ['colors', [...COLOUR_TOKENS]],
   ['shape', SHAPE_RESET_TOKENS],
@@ -190,22 +137,15 @@ const RESET_SETS = new Map<string, readonly string[]>([
   ['all', [...COLOUR_TOKENS, ...SHAPE_TOKENS]],
 ])
 
-/** The two words that put COLOUR back, and therefore the two that make a repair pass worth running. */
+/** Reset words that touch colour and so warrant a repair pass. */
 const COLOUR_RESETS = new Set(['colors', 'all'])
 
 const RESET_WORDS = [...RESET_SETS.keys(), 'background']
 
 /**
- * The whole edit, as one pure function from the theme on disk to the theme that replaces it.
- *
- * Pure and synchronous so it can run INSIDE the store transaction, against the draft rather than
- * against a copy read a moment earlier. That is not tidiness: a fit is solved from the resolved
- * palette, and resolving against a stale theme would write overrides computed for colours somebody
- * else had already replaced. It is also the only implementation — `dryRun` calls this same
- * function, so a preview cannot describe an edit the write would not make.
- *
- * Throws with a message a caller can act on. The store hands the mutator a deep copy and discards
- * it on a throw, so a half-applied look is not a state this can reach.
+ * Pure and synchronous so it runs inside the store transaction against the draft: a fit solved
+ * against a stale theme would write overrides for colours already replaced. `dryRun` uses this same
+ * function. Throws with an actionable message; the store discards the draft on a throw.
  */
 export function applyDesign(
   theme: Theme,
@@ -223,10 +163,8 @@ export function applyDesign(
     for (const bucket of BUCKETS) for (const token of tokens) delete cssVars[bucket][token]
   }
 
-  // Reset first, so `{preset, reset:["all"]}` means "that preset, clean" rather than "that preset
-  // under whatever I had already changed" — which is the request people actually make. Only the
-  // token sets these tools own are deleted, never a whole bucket: a key this surface cannot write
-  // came from somewhere else, and clearing someone else's is not what "reset the colours" says.
+  // Reset first so `{preset, reset:["all"]}` means that preset, clean. Only the token sets these
+  // tools own are deleted, never a whole bucket.
   for (const word of patch.reset ?? []) {
     if (word === 'background') {
       surface = { background: null, blur: 0, overlayOpacity: 0 }
@@ -253,15 +191,12 @@ export function applyDesign(
   if (patch.preset !== undefined) {
     const preset = presetById(patch.preset)
     if (preset === undefined) {
-      // `theme.preset` is a free string in the schema and an unknown one resolves to no preset at
-      // all, so accepting this would write a file, report a revision and paint stock grey.
+      // `theme.preset` is a free string; an unknown one resolves to no preset and paints grey.
       throw new Error(
         `no preset "${patch.preset}" — search_presets lists all ${String(ALL_PRESETS.length)}`,
       )
     }
     applied.preset = preset.id
-    // A preset may nominate a background, and picking one in the panel applies it. Only when the
-    // call does not name its own, so "this preset, keep my wallpaper" stays expressible.
     const wantsOwn = patch.backdrop !== undefined || patch.backdropImage !== undefined
     if (preset.background !== undefined && !wantsOwn) {
       surface = { ...surface, background: `${GRADIENT_PREFIX}${preset.background}` }
@@ -284,8 +219,7 @@ export function applyDesign(
       }
       if (value === null) {
         delete cssVars[scheme][token]
-        // The shared bucket outranks both schemes, so clearing only this one puts the token back
-        // to whatever was pinned there rather than to the preset — which is not what was asked.
+        // The shared bucket outranks both schemes; left pinned it would mask the clear.
         if (cssVars.theme[token] !== undefined) {
           delete cssVars.theme[token]
           unpinned.push(token)
@@ -300,9 +234,7 @@ export function applyDesign(
         )
       }
       cssVars[scheme][token] = parsed
-      // The shared bucket resolves LAST, above both schemes, so a colour pinned there makes this
-      // write invisible: the caller asks for blue, the board stays red, and the tool reports
-      // success. A colour has no business being scheme-independent, so the pin goes.
+      // The shared bucket resolves above both schemes and would mask this write.
       if (cssVars.theme[token] !== undefined) {
         delete cssVars.theme[token]
         unpinned.push(token)
@@ -317,8 +249,7 @@ export function applyDesign(
   const shape: string[] = []
   if (patch.shape?.radius !== undefined) {
     cssVars.theme.radius = `${String(patch.shape.radius)}px`
-    // The control radius tracks the tile's, at the ratio the panel's slider uses. Two sliders for
-    // one decision was a choice nobody wanted to make twice.
+    // Same ratio as the panel's radius slider.
     cssVars.theme['radius-control'] = `${String(Math.round(patch.shape.radius * 0.7))}px`
     shape.push('radius', 'radius-control')
   }
@@ -362,8 +293,8 @@ export function applyDesign(
     applied.backdrop = patch.backdrop
   }
   if (patch.backdropImage !== undefined) {
-    // The stored value is a path, and the caller supplies only the id half of it: the prefix is
-    // built here, so there is no input that reaches the filesystem or the `url()`.
+    // The caller supplies only the id; the path prefix is built here so no input reaches the
+    // filesystem or the `url()`.
     if (!isAssetId(patch.backdropImage))
       throw new Error(`"${patch.backdropImage}" is not an image id`)
     surface = { ...surface, background: `/assets/${BACKGROUNDS_SUBDIR}/${patch.backdropImage}` }
@@ -386,20 +317,9 @@ export function applyDesign(
     surface,
   })
 
-  /**
-   * The repair pass.
-   *
-   * It runs on the schemes a call actually touched, because a brand palette is chosen to look like
-   * a brand and not to clear 4.5:1 on an inset grey, and a board whose labels cannot be read is not
-   * what anyone asked for. It does NOT run on a call that only moved a slider: silently rewriting
-   * colours somebody else chose is the other way to get this wrong. `fit:"aa"` forces a pass over
-   * both schemes, `fit:"off"` refuses one, `fit:"refuse"` makes an unreadable palette an error
-   * instead of a repair — and every one of them reports the whole contrast verdict either way.
-   */
+  // The contrast repair runs only on the schemes this call changed colours in, so a slider-only or
+  // shape-reset call never rewrites colours it did not mention.
   const touched = new Set<Scheme>()
-  // A shape or type reset is not a colour change, and running the repair on one would rewrite
-  // colours the call never mentioned — a request to put the corner radius back should not come
-  // out having pinned four new palette overrides.
   if (patch.preset !== undefined || (patch.reset ?? []).some((word) => COLOUR_RESETS.has(word))) {
     for (const scheme of SCHEMES) touched.add(scheme)
   }
@@ -416,10 +336,7 @@ export function applyDesign(
       if (fitted.adjustments.length === 0) continue
       if (patch.fit === 'refuse') continue
       adjustments[scheme] = fitted.adjustments
-      // Unpinned for the same reason a colour write is: an adjustment landing in the scheme
-      // bucket under a token pinned in the shared one is a repair the report claims and the board
-      // never shows. The fit is solved from the RESOLVED palette, so the pinned value is what it
-      // measured — leaving it in place would contradict the number it just printed.
+      // As with a colour write: a repair under a token pinned in the shared bucket never shows.
       const repaired = new Set(fitted.adjustments.map((entry) => entry.token))
       const shared = Object.fromEntries(
         Object.entries(next.cssVars.theme).filter(([token]) => !repaired.has(token)),
@@ -457,11 +374,8 @@ export function applyDesign(
     applied.unpinned = [...new Set([...unpinned, ...unpinnedByFit])]
   }
 
-  // A call that recognised nothing has to say so. Zod strips unknown keys rather than rejecting
-  // them, so a misspelled section would otherwise be a successful no-op with a revision attached.
-  // An explicit `fit` counts as something recognised: "check the palette and repair it" is a
-  // request, and answering it with "nothing to change" made the same call succeed or fail
-  // depending on state the caller could not see without another round trip.
+  // Zod strips unknown keys, so without this a misspelled section would be a successful no-op. An
+  // explicit `fit` alone is a request to check and repair, so it counts.
   if (Object.keys(applied).length === 0 && patch.fit === undefined) {
     throw new Error(
       'nothing to change: name a preset, a mode, colors, shape, typography, a backdrop, a reset ' +
@@ -500,8 +414,6 @@ export function registerDesignTools(
       return ok({
         revision,
         mode: theme.mode,
-        // No "effective scheme" is invented here. Under `system` the page carries BOTH palettes
-        // and the viewer's OS picks; the server cannot know which, so it says so instead.
         modeNote:
           theme.mode === 'system'
             ? 'both palettes are published and each viewer’s OS chooses, so a colour change ' +
@@ -515,16 +427,13 @@ export function registerDesignTools(
           known: preset !== undefined,
         },
         palette: { light: paletteOf(theme, 'light'), dark: paletteOf(theme, 'dark') },
-        // Which values are custom rather than the preset's, per bucket. The panel shows this as a
-        // count; an agent needs the names, and needs to see that `theme` outranks both schemes.
+        // Names, not the panel's counts: an agent needs to see `theme` outranks both schemes.
         overrides: {
           theme: Object.keys(theme.cssVars.theme),
           light: Object.keys(theme.cssVars.light),
           dark: Object.keys(theme.cssVars.dark),
         },
-        // Ids where one fits, and the raw value always: a preset finish can set a board width or a
-        // tracking that no id names, and reporting the nearest id would make a round trip through
-        // this tool quietly rewrite it.
+        // Id and raw value both: a preset finish can set a width or tracking no id names.
         shape: {
           radius: tokens.radius ?? null,
           radiusControl: tokens['radius-control'] ?? null,
@@ -551,15 +460,11 @@ export function registerDesignTools(
           dim: theme.surface.overlayOpacity,
         },
         contrast: { light: contrastOf(theme, 'light'), dark: contrastOf(theme, 'dark') },
-        // The labels are what stop an agent guessing which grey is which: `muted` is the inset a
-        // stat sits in, `border` is a card's edge, `control-border` is a field's. A brand's greys
-        // land wrong precisely there.
         colorTokens: COLOUR_GROUPS.map((group) => ({
           group: group.title,
           tokens: group.tokens.map((token) => `${token.name} — ${token.label}`),
         })),
-        // Uploaded through the design panel by a person. An agent may choose one by id and can
-        // never add one: no tool here accepts an image, a URL or a path.
+        // An agent may pick an upload by id but never add one.
         uploadedImages: uploads.map((asset) => ({ id: asset.id, bytes: asset.bytes })),
       })
     },
@@ -605,10 +510,7 @@ export function registerDesignTools(
           blurb: preset.blurb,
           finish: kindOf(preset.id),
           background: preset.background ?? null,
-          // The four bars the gallery card draws, as hex — enough to tell a slate from a citron
-          // without seventy-five full token maps. Read through the defaults rather than from the
-          // preset alone: "Default" overrides nothing by design, so its own maps are empty and
-          // browsing the presets reported it as a palette of five nulls.
+          // Read through the defaults: "Default" overrides nothing, so its own maps are empty.
           swatch: Object.fromEntries(
             (['background', 'surface', 'accent', 'ok', 'bad'] as const).map((token) => [
               token,
@@ -624,8 +526,6 @@ export function registerDesignTools(
     },
   )
 
-  // Described once on the pair rather than on each half: the same sentence under `light` and again
-  // under `dark` is a quarter of this tool's schema spent saying one thing twice.
   const colourMap = z.record(z.string().max(48), z.string().max(64).nullable())
   const colours = z
     .object({ light: colourMap.optional(), dark: colourMap.optional() })
@@ -673,9 +573,7 @@ export function registerDesignTools(
           })
           .optional(),
         /** A generated backdrop, by name. Recolours itself with the theme; needs no image. */
-        backdrop: z
-          .enum(['none', ...BACKGROUNDS.map((entry) => entry.id)] as [string, ...string[]])
-          .optional(),
+        backdrop: z.enum(['none', ...ids(BACKGROUNDS)]).optional(),
         /** An image already uploaded through the design panel, by the id describe_theme lists. */
         backdropImage: z.string().max(64).optional(),
         backdropBlur: z.number().int().min(0).max(40).optional(),
@@ -704,8 +602,6 @@ export function registerDesignTools(
       },
     },
     async (input) => {
-      // The parsed input IS the patch: `DesignPatch` is written to accept zod's
-      // present-but-undefined optionals, so there is no field-by-field rebuild to fall out of date.
       const patch: DesignPatch = input
 
       const answer = (theme: Theme, report: DesignReport, extra: Record<string, unknown>) => {
@@ -713,8 +609,6 @@ export function registerDesignTools(
           (report.adjustments[scheme] ?? []).map((adjustment) => ({
             scheme,
             token: adjustment.token,
-            // Named rather than buried in a boolean: a colour that is not the one the caller sent
-            // has to be visible, or the next call sends the same failing value again.
             from: adjustment.fromHex ?? adjustment.from,
             to: adjustment.toHex ?? adjustment.to,
             why: adjustment.reason,
@@ -743,8 +637,7 @@ export function registerDesignTools(
       }
 
       try {
-        // An image has to still be there. The id is content-addressed and the panel can delete
-        // one, so a stale id would otherwise write a background that 404s on every viewer.
+        // The panel can delete an upload, so a stale id would write a background that 404s.
         if (input.backdropImage !== undefined) {
           const uploads = await listBackgrounds(env.assetsDir)
           if (!uploads.some((asset) => asset.id === input.backdropImage)) {
@@ -761,20 +654,18 @@ export function registerDesignTools(
           return answer(theme, report, { dryRun: true })
         }
 
-        const outcome: { value: { theme: Theme; report: DesignReport } | null } = { value: null }
+        let applied: { theme: Theme; report: DesignReport } | undefined
         const result = await context.store.transaction(
           deps.actor,
           (draft) => {
-            // Inside the transaction, against the draft: a fit solved from a theme read a moment
-            // ago would be solved for colours a concurrent edit had already replaced.
-            outcome.value = applyDesign(draft.theme, patch)
-            draft.theme = outcome.value.theme
+            applied = applyDesign(draft.theme, patch)
+            draft.theme = applied.theme
           },
-          input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision },
+          revisionOption(input),
         )
+        if (applied === undefined) throw new Error('theme transaction did not run')
         await context.reload()
         void context.requestPublish(deps.actor)
-        const applied = outcome.value as unknown as { theme: Theme; report: DesignReport }
         return answer(applied.theme, applied.report, { revision: result.revision })
       } catch (error) {
         return fail(error instanceof Error ? error.message : String(error))

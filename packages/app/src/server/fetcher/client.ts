@@ -1,17 +1,9 @@
-import type { LookupFunction } from 'node:net'
+import { isIP, type LookupFunction } from 'node:net'
 import { Agent, request } from 'undici'
 import { pinnedLookup, resolveAndCheck, type PolicyOptions } from './policy.ts'
 
-/**
- * The upstream HTTP client.
- *
- * Every constraint here exists because of a specific way a dashboard that proxies user-configured
- * endpoints has been broken before, in this product's own predecessor.
- */
-
 export type FetchLimits = {
-  /** Abort the body at this size. One misconfigured target returning a 500 MB response is
-   *  otherwise an instant OOM on a 1 GB box. */
+  /** The body is cut here and marked truncated rather than buffered. */
   readonly maxBodyBytes: number
   readonly connectTimeoutMs: number
   readonly headersTimeoutMs: number
@@ -28,8 +20,7 @@ export const DEFAULT_FETCH_LIMITS: FetchLimits = {
 }
 
 export class UpstreamError extends Error {
-  /** A stable code. Never a URL and never an upstream message: verbose errors have leaked API
-   *  keys from a dashboard before, and this string reaches the browser. */
+  /** Stable code; never a URL or an upstream message, since it reaches the browser. */
   readonly code: string
 
   constructor(code: string, message: string, options?: { cause?: unknown }) {
@@ -47,41 +38,41 @@ export type UpstreamRequest = {
   readonly allowLoopback?: boolean
   readonly insecureSkipVerify?: boolean
   readonly limits?: Partial<FetchLimits>
+  /** Keep the response as bytes rather than decoding it as UTF-8 text. */
+  readonly binary?: boolean
 }
 
 export type UpstreamResponse = {
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
   readonly body: string
+  /** Present only for a `binary` request; `body` is then empty. */
+  readonly bytes?: Uint8Array
   readonly truncated: boolean
 }
 
 async function readCapped(
   body: AsyncIterable<Buffer>,
   maxBytes: number,
-): Promise<{ text: string; truncated: boolean }> {
+): Promise<{ bytes: Buffer; truncated: boolean }> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of body) {
     total += chunk.length
     if (total > maxBytes) {
-      // Keep the prefix so a decoder can still report something useful, then stop reading. The
-      // remote end is disconnected by leaving the iterator.
+      // Returning from the loop closes the iterator, which disconnects the remote end.
       chunks.push(chunk.subarray(0, chunk.length - (total - maxBytes)))
-      return { text: Buffer.concat(chunks).toString('utf8'), truncated: true }
+      return { bytes: Buffer.concat(chunks), truncated: true }
     }
     chunks.push(chunk)
   }
-  return { text: Buffer.concat(chunks).toString('utf8'), truncated: false }
+  return { bytes: Buffer.concat(chunks), truncated: false }
 }
 
 /**
- * Perform one upstream request.
- *
- * The hostname is resolved and checked ONCE, then the connection is pinned to those addresses.
- * Redirects are surfaced, never followed: no LAN service API needs a redirect, and following one
- * reopens the whole validate-then-redirect bypass class — the exact bug that broke gethomepage's
- * first SSRF fix within hours of shipping it.
+ * The hostname is resolved and checked once, then the connection is pinned to those addresses.
+ * Redirects are surfaced, never followed: following one reopens the validate-then-redirect SSRF
+ * bypass.
  */
 export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamResponse> {
   const limits = { ...DEFAULT_FETCH_LIMITS, ...input.limits }
@@ -90,14 +81,13 @@ export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamRes
 
   const agent = new Agent({
     connect: {
-      // Cast: Node's LookupFunction type only describes the three-argument callback, while the
-      // HTTP layer actually calls it with {all: true} and requires the array form. The runtime
-      // contract is covered by policy.test.ts, which exercises both shapes.
+      // Cast: Node's LookupFunction type omits the {all: true} array form the HTTP layer calls.
       lookup: pinnedLookup(resolved) as unknown as LookupFunction,
       timeout: limits.connectTimeoutMs,
       rejectUnauthorized: input.insecureSkipVerify !== true,
-      // SNI and virtual hosts still work: the name travels, only the address is pinned.
-      servername: resolved.hostname,
+      // Only the address is pinned; the name still travels for SNI. Node rejects an IP literal as
+      // servername, so none is set for one.
+      ...(isIP(resolved.hostname) === 0 ? { servername: resolved.hostname } : {}),
     },
     headersTimeout: limits.headersTimeoutMs,
     bodyTimeout: limits.bodyTimeoutMs,
@@ -112,14 +102,12 @@ export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamRes
       headers: { accept: 'application/json, text/plain;q=0.9, */*;q=0.5', ...input.headers },
       ...(input.body === undefined ? {} : { body: input.body }),
       dispatcher: agent,
-      // No redirect interceptor is composed onto the agent, so undici does not follow redirects.
-      // That is the intent: a 3xx is surfaced below as an actionable error.
+      // No redirect interceptor on the agent, so undici does not follow redirects.
       signal: abort,
     })
 
     if (response.statusCode >= 300 && response.statusCode < 400) {
-      // dump() drains and discards; destroy() emits UND_ERR_ABORTED as an unhandled rejection,
-      // which surfaces as a spurious error long after the request has been dealt with.
+      // dump() drains; destroy() would emit UND_ERR_ABORTED as an unhandled rejection.
       await response.body.dump()
       throw new UpstreamError(
         'redirect',
@@ -127,12 +115,14 @@ export async function fetchUpstream(input: UpstreamRequest): Promise<UpstreamRes
       )
     }
 
-    const { text, truncated } = await readCapped(response.body, limits.maxBodyBytes)
+    const { bytes, truncated } = await readCapped(response.body, limits.maxBodyBytes)
     const headers: Record<string, string> = {}
     for (const [key, value] of Object.entries(response.headers)) {
       if (typeof value === 'string') headers[key.toLowerCase()] = value
     }
-    return { status: response.statusCode, headers, body: text, truncated }
+    return input.binary === true
+      ? { status: response.statusCode, headers, body: '', bytes: new Uint8Array(bytes), truncated }
+      : { status: response.statusCode, headers, body: bytes.toString('utf8'), truncated }
   } catch (error) {
     if (error instanceof UpstreamError) throw error
     const code = (error as { code?: string }).code

@@ -1,9 +1,6 @@
 /**
- * A disposable homelab: one stub per widget, and a real neohomepage server in front of it.
- *
- * The server is the product's own entry point on a temporary data directory, so nothing here can
- * touch the dashboard of whoever is running the script — the same guarantee the e2e fixtures make,
- * for the same reason.
+ * A disposable homelab: one stub per widget, with the real neohomepage server on a temporary data
+ * directory in front of it.
  */
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -14,8 +11,7 @@ import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { TILES, VALUES } from './board.mjs'
 
-const HERE = resolve(import.meta.dirname)
-export const ROOT = resolve(HERE, '../..')
+export const ROOT = resolve(import.meta.dirname, '../..')
 const CATALOG = join(ROOT, 'catalog')
 
 const APP_PORT = 7581
@@ -26,11 +22,8 @@ async function manifest(slug) {
 }
 
 /**
- * One stub, bound to one widget, so routing is never a guess.
- *
- * Sonarr and Radarr both answer `/api/v3/queue` and their fixtures differ; a single shared stub
- * would have to disambiguate by something it does not know. A port per widget makes the question
- * disappear rather than answering it cleverly.
+ * One stub per widget: Sonarr and Radarr both answer `/api/v3/queue` with different fixtures, so a
+ * shared stub could not route.
  */
 async function startStub(slug, port) {
   const spec = await manifest(slug)
@@ -40,12 +33,9 @@ async function startStub(slug, port) {
       return { op, decode: definition.decode ?? 'json', body }
     }),
   )
-  // Every operation of a given widget gets the same stub, and the widget only has one on the
-  // board, so the first is always the right answer.
+  // The stub answers every request with the first operation; each board widget only uses one.
   const answer = operations[0]
-  // qBittorrent logs in before it can be read. Answering the exchange rather than skipping the
-  // widget keeps the recording honest: the session code runs, and a stub that stopped issuing the
-  // cookie would show the same "Unavailable" a real broken login does.
+  // qBittorrent's session-exchange login is answered so the real session code runs.
   const auth = spec.target?.auth
   const loginPath = auth?.kind === 'session-exchange' ? auth.loginPath : null
 
@@ -96,7 +86,7 @@ const json = (baseURL, path, method, body) =>
 async function seed(baseURL, ports) {
   await json(baseURL, '/api/dashboard', 'PATCH', {
     title: 'Homelab',
-    // The controls fading out mid-take reads as the recording glitching, not as a feature.
+    // Controls fading out mid-take look like a glitch in the recording.
     features: { autoHideControls: false },
   })
 
@@ -121,15 +111,15 @@ async function seed(baseURL, ports) {
     ids.push({ id, tile })
   }
 
-  // Auto-placement packs them in the order they arrived; the board is a picture, so place it.
+  // Auto-placement packs tiles in arrival order; the demo needs the fixed layout.
   await json(baseURL, '/api/pages/home/layout', 'PUT', {
     breakpoint: 'lg',
     items: ids.map(({ id, tile }) => ({ i: id, x: tile.x, y: tile.y, w: tile.w, h: tile.h })),
   })
   await json(baseURL, '/api/publish', 'POST', {})
 
-  // The published HTML renders every tile pending by design — data arrives with the poller. A
-  // recording that starts before it has is a recording of the empty state.
+  // Published HTML renders tiles pending until the poller has fetched; wait so the recording is
+  // not of the empty state.
   const deadline = Date.now() + 30_000
   for (;;) {
     const state = await (await fetch(`${baseURL}/api/state`)).json()

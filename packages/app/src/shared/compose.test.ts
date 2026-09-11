@@ -40,8 +40,7 @@ describe('merging', () => {
   })
 
   it('keeps items with no sort key at the bottom in BOTH directions', () => {
-    // The direction flip is applied to the comparator's result, so a naive implementation floats
-    // everything unsortable to the top under `desc`.
+    // Flipping the whole comparator result under `desc` would float missing keys to the top.
     const items = [{ title: 'no key' }, at('2026-09-07T00:00:00.000Z', 'dated')]
     for (const direction of ['asc', 'desc'] as const) {
       const composed = composeSources(compose({ sortBy: [{ path: 'badge.iso', direction }] }), [
@@ -69,7 +68,6 @@ describe('merging', () => {
   })
 
   it('drops duplicates by the chosen keys, keeping the first', () => {
-    // Two *arr instances that both track the same show would otherwise show every episode twice.
     const composed = composeSources(compose({ distinctBy: ['title'] }), [
       part({ key: 'a', items: [{ title: 'S02E03', subtitle: 'from sonarr-a' }] }),
       part({ key: 'b', items: [{ title: 'S02E03', subtitle: 'from sonarr-b' }] }),
@@ -78,8 +76,6 @@ describe('merging', () => {
   })
 
   it('keeps two items that share one key but differ on another', () => {
-    // The bug this fixes: the calendar deduped on `title` alone, and every episode of a series
-    // after the first vanished — they all carry the series name and differ only by their instant.
     const composed = composeSources(compose({ distinctBy: ['title', 'badge.iso'] }), [
       part({
         items: [
@@ -142,8 +138,6 @@ describe('partial failure', () => {
   })
 
   it('distinguishes "not fetched yet" from "down"', () => {
-    // Otherwise every composite accuses its services of being down for the first few seconds
-    // after a restart, and people learn to ignore the badge.
     const composed = composeSources(compose(), [part({ pending: true, ok: false, state: 'error' })])
     expect(composed.meta.errorCode).toBe('pending')
     expect(composed.sources).toEqual({ total: 1, ok: 0 })
@@ -167,8 +161,6 @@ describe('partial failure', () => {
 
 describe('freshness', () => {
   it('reports the age of the STALEST answering source', () => {
-    // A widget is only as fresh as its oldest part; reporting the newest would let one lively
-    // source hide four that stopped updating an hour ago.
     const composed = composeSources(compose(), [
       part({ key: 'a', ageMs: 1_000, items: [{ title: 'a' }] }),
       part({ key: 'b', ageMs: 600_000, items: [{ title: 'b' }] }),

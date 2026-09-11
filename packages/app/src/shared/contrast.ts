@@ -1,33 +1,19 @@
 /**
- * Colour maths, so the theme's contrast is a test rather than an opinion.
- *
- * The tokens are authored in OKLCH because it is the space where "same lightness" looks like the
- * same lightness. WCAG contrast, though, is defined on sRGB relative luminance — a different
- * quantity — so a palette that looks evenly weighted can still fail AA. Converting here lets the
- * theme test say WHICH token pair fails and by how much, instead of waiting for axe to happen to
- * render the one element that uses it.
- *
- * Implemented rather than pulled in: this is forty lines of published matrices, and a colour
- * library in the shared tree would be shipped to the browser for a check that only runs in CI.
+ * OKLCH to sRGB colour maths so theme tokens can be checked against WCAG contrast, which is
+ * defined on sRGB luminance. Implemented inline: a colour library in the shared tree would ship to
+ * the browser for a check that only runs in CI.
  */
 
-export type Rgb = { readonly r: number; readonly g: number; readonly b: number }
+type Rgb = { readonly r: number; readonly g: number; readonly b: number }
+
+export type Oklch = { readonly l: number; readonly c: number; readonly h: number }
 
 /**
- * Parse `oklch(L C H)` — the only form the token defaults use.
- *
- * The number pattern is `\d+(\.\d+)?` and not `[\d.]+`, which is a one-character difference with
- * a long tail: `[\d.]+` matches `0.5.5`, `Number` turns that into `NaN`, and NaN then travels. It
- * is not caught downstream either — `contrastRatio` returns NaN rather than null, so a ratio
- * reads "NaN:1" instead of "—", `toHex` returns `#NaNNaNNaN`, and a solver looking for a value
- * that clears a floor finds every candidate equally hopeless and calls the first one a solution.
- * Lightness and chroma are range-checked for the same reason: `oklch(9 0 0)` is not a colour, and
- * the honest answer to it is the same as to `rebeccapurple`. Hue is NOT — it is modular in CSS, so
- * `oklch(0.5 0.1 400)` is a perfectly good colour a browser paints as hue 40. Rejecting it made the
- * panel read "—" and the design tools refuse a value the board renders fine, which is the
- * report-disagrees-with-the-screen failure this module exists to prevent.
+ * Parse `oklch(L C H)`, the only form the token defaults use. The number pattern is strict so
+ * `0.5.5` cannot reach `Number` and become a NaN that travels; lightness and chroma are
+ * range-checked, hue is not because CSS treats it as modular.
  */
-export function parseOklch(value: string): { l: number; c: number; h: number } | null {
+export function parseOklch(value: string): Oklch | null {
   const match = /^oklch\(\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\)$/.exec(
     value.trim(),
   )
@@ -40,7 +26,7 @@ export function parseOklch(value: string): { l: number; c: number; h: number } |
 }
 
 /** OKLCH to LINEAR sRGB. Linear is what luminance is defined on; no gamma is applied. */
-export function oklchToLinearRgb(value: { l: number; c: number; h: number }): Rgb {
+function oklchToLinearRgb(value: Oklch): Rgb {
   const hRad = (value.h * Math.PI) / 180
   const a = value.c * Math.cos(hRad)
   const b = value.c * Math.sin(hRad)
@@ -59,7 +45,7 @@ export function oklchToLinearRgb(value: { l: number; c: number; h: number }): Rg
 const clamp = (value: number) => Math.min(1, Math.max(0, value))
 
 /** WCAG 2.x relative luminance. */
-export function relativeLuminance(linear: Rgb): number {
+function relativeLuminance(linear: Rgb): number {
   return 0.2126 * clamp(linear.r) + 0.7152 * clamp(linear.g) + 0.0722 * clamp(linear.b)
 }
 
@@ -74,7 +60,7 @@ export function contrastRatio(foreground: string, background: string): number | 
   return (lighter + 0.05) / (darker + 0.05)
 }
 
-/** For a message a human can act on: `oklch(0.63 0.16 149)` -> `#2aa34f`. */
+/** `oklch(0.63 0.16 149)` -> `#2aa34f`. */
 export function toHex(value: string): string | null {
   const parsed = parseOklch(value)
   if (parsed === null) return null
@@ -90,15 +76,9 @@ export function toHex(value: string): string | null {
 }
 
 /**
- * `#2aa34f` -> `oklch(0.63 0.16 149)`, the inverse of `toHex`.
- *
- * The design panel offers a colour picker and a hex field because that is how people think about
- * colour, but a token has to stay OKLCH: `parseOklch` is the only form `contrastRatio` reads, and
- * a hex value stored in `cssVars` would make every ratio in the panel and in
- * `theme-contrast.test.ts` come back null — which the test counts as a failure. Converting on the
- * way IN keeps the picker friendly and the stored palette checkable.
- *
- * Returns null for anything that is not a 3- or 6-digit hex, rather than a plausible wrong colour.
+ * `#2aa34f` -> `oklch(0.63 0.16 149)`, the inverse of `toHex`. Stored tokens must stay OKLCH
+ * because `parseOklch` is the only form `contrastRatio` reads. Returns null for anything that is
+ * not a 3- or 6-digit hex.
  */
 export function hexToOklch(value: string): string | null {
   const hex = value.trim().replace(/^#/, '')
@@ -113,14 +93,15 @@ export function hexToOklch(value: string): string | null {
   // sRGB -> linear, undoing the same transfer function `toHex` applies.
   const toLinear = (channel: number) =>
     channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-  const [r, g, b] = [0, 2, 4].map((at) =>
-    toLinear(Number.parseInt(full.slice(at, at + 2), 16) / 255),
-  )
+  const channel = (at: number) => toLinear(Number.parseInt(full.slice(at, at + 2), 16) / 255)
+  const r = channel(0)
+  const g = channel(2)
+  const b = channel(4)
 
   // Linear sRGB -> LMS -> OKLab: the inverse matrices of the pair in `oklchToLinearRgb`.
-  const lCube = 0.4122214708 * (r ?? 0) + 0.5363325363 * (g ?? 0) + 0.0514459929 * (b ?? 0)
-  const mCube = 0.2119034982 * (r ?? 0) + 0.6806995451 * (g ?? 0) + 0.1073969566 * (b ?? 0)
-  const sCube = 0.0883024619 * (r ?? 0) + 0.2817188376 * (g ?? 0) + 0.6299787005 * (b ?? 0)
+  const lCube = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+  const mCube = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+  const sCube = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
   const l_ = Math.cbrt(lCube)
   const m_ = Math.cbrt(mCube)
   const s_ = Math.cbrt(sCube)
@@ -130,38 +111,26 @@ export function hexToOklch(value: string): string | null {
   const bAxis = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_
 
   const chroma = Math.sqrt(a * a + bAxis * bAxis)
-  // A neutral has no meaningful hue; pinning it to 0 keeps the round trip stable instead of
-  // letting floating-point noise pick an arbitrary angle.
+  // A neutral has no meaningful hue; pin it to 0 so floating-point noise cannot pick an angle.
   const hue = chroma < 1e-6 ? 0 : ((Math.atan2(bAxis, a) * 180) / Math.PI + 360) % 360
 
   return formatOklch(lightness, chroma, hue)
 }
 
 /**
- * The one place a token's text form is produced.
- *
- * `parseOklch` above is the only reader, and it accepts a narrow shape — three space-separated
- * numbers, no units, no alpha. Anything that builds a token by hand is one comma away from a value
- * that stores fine and then makes every ratio in the design panel read "—", so nothing builds one
- * by hand.
+ * The only producer of a token's text form; `parseOklch` accepts exactly this shape (three
+ * unitless numbers, no alpha).
  */
-export function formatOklch(lightness: number, chroma: number, hue: number): string {
+function formatOklch(lightness: number, chroma: number, hue: number): string {
   return `oklch(${lightness.toFixed(4)} ${chroma.toFixed(4)} ${hue.toFixed(2)})`
 }
 
 /**
- * Whether a colour is one an sRGB screen can actually show.
- *
- * It matters because `relativeLuminance` above CLIPS each channel into [0,1] after the matrix,
- * and a browser does not: CSS gamut-maps an out-of-range `oklch()` by pulling chroma down at
- * constant lightness and hue, which lands on a different colour with a different luminance. So a
- * ratio computed here for an out-of-gamut value is a ratio for a colour nobody will see — measured
- * at up to 0.8 of a point, which is the difference between passing AA and only appearing to.
- *
- * Every colour these tools write is brought inside the gamut first, which is what makes the number
- * they report the number the screen shows.
+ * Whether an sRGB screen can show the colour. `relativeLuminance` clips channels into [0,1] but a
+ * browser gamut-maps by reducing chroma, so a ratio for an out-of-gamut value is for a colour
+ * nobody sees (off by up to 0.8 of a point).
  */
-export function inSrgbGamut(value: { l: number; c: number; h: number }): boolean {
+export function inSrgbGamut(value: Oklch): boolean {
   const linear = oklchToLinearRgb(value)
   return [linear.r, linear.g, linear.b].every(
     (channel) => channel >= -0.00001 && channel <= 1.00001,
@@ -169,13 +138,10 @@ export function inSrgbGamut(value: { l: number; c: number; h: number }): boolean
 }
 
 /**
- * The largest chroma this lightness and hue can carry in sRGB, found by bisection.
- *
- * Chroma is the axis to give up because it is the one a browser gives up: reducing it holds the
- * hue and the lightness, which are what make a colour recognisably itself. Twenty-four halvings
- * put the answer within 0.00002 of the boundary, which is far below what a screen resolves.
+ * Largest chroma this lightness and hue can carry in sRGB, by bisection. Chroma is the axis a
+ * browser gives up too; 24 halvings land within 0.00002 of the boundary.
  */
-export function clampChroma(value: { l: number; c: number; h: number }): number {
+function clampChroma(value: Oklch): number {
   if (inSrgbGamut(value)) return value.c
   let low = 0
   let high = value.c
@@ -188,26 +154,21 @@ export function clampChroma(value: { l: number; c: number; h: number }): number 
 }
 
 /**
- * A token string that is both well-formed and inside sRGB — the only producer these tools use.
- *
- * Doing this in one place is what makes the guarantee hold: `clampChroma` finds the boundary for a
- * given lightness and hue, but `formatOklch` then ROUNDS, and rounding chroma up by 0.00005 steps
- * back outside. So the rounding is done first, the clamp is solved at the values that will
- * actually be written, and the chroma is floored rather than rounded. The string this returns
- * parses back to exactly the numbers it was solved for.
+ * A well-formed token string inside sRGB. Rounds first and clamps at the values that will be
+ * written, flooring chroma, because rounding chroma up after clamping can step back outside; the
+ * result parses back to exactly the numbers it was solved for.
  */
 export function formatInGamut(lightness: number, chroma: number, hue: number): string {
   const l = Number(lightness.toFixed(4))
   const h = Number((hue % 360).toFixed(2))
   const c = Number(chroma.toFixed(4))
-  // Only a colour actually outside gets moved. Flooring unconditionally cost a ten-thousandth of
-  // chroma on values already inside — `0.1944 * 1e4` is 1943.9999999 in binary floating point —
-  // which broke the hex round trip for one colour in twenty, for nothing.
+  // Flooring unconditionally loses a ten-thousandth of chroma to floating point
+  // (`0.1944 * 1e4` is 1943.9999999) and breaks the hex round trip.
   if (inSrgbGamut({ l, c, h })) return formatOklch(l, c, h)
   return formatOklch(l, Math.floor(clampChroma({ l, c, h }) * 1e4) / 1e4, h)
 }
 
-/** AA for body text. Large text (18.66px bold / 24px) would be 3:1, which nothing here relies on. */
+/** AA for body text. */
 export const AA_NORMAL_TEXT = 4.5
 /** AA for UI components and graphical objects: borders, focus rings, a status dot. */
 export const AA_NON_TEXT = 3

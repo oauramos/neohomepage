@@ -1,12 +1,6 @@
 #!/bin/sh
-# Publish wiki/ to the GitHub wiki.
-#
-# The pages are written in this repository so a correction goes through review and cannot be lost
-# with the wiki; the wiki is a publishing target, the same relationship docs/ has with Pages.
-#
-# GitHub creates a wiki's git repository lazily, when the first page is saved through the web
-# interface, and offers no API for it. So the very first run needs one manual step, and this
-# script says which one rather than failing with "repository not found".
+# Publish wiki/ to the GitHub wiki. GitHub creates the wiki's git repository only when a first
+# page is saved through the web interface, so the very first run needs that one manual step.
 set -eu
 
 REPO="${WIKI_REPO:-oauramos/neohomepage}"

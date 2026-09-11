@@ -10,14 +10,11 @@ import { seedStarterConfig } from './store/starter.ts'
 import { ConfigTooNewError, migrateConfig } from './store/migrations.ts'
 
 /**
- * Boot order: env, seed, load, resolve, publish, listen.
- *
- * Publishing before listening means the first request is answered by a file that already exists,
- * rather than by a render happening while someone waits.
+ * Boot order: env, seed, migrate, load, publish, listen. Publishing before listening means the
+ * first request is served from a file that already exists.
  */
 async function main(): Promise<void> {
-  // Seeding first means `git init` on the data directory is safe before the user has read
-  // anything: secrets/ and state/ are already excluded by the time either exists.
+  // Seed first so secrets/ and state/ are gitignored before either exists.
   const seeded = await seedDataDirectory({
     dataDir: env.dataDir,
     configDir: env.configDir,
@@ -28,14 +25,8 @@ async function main(): Promise<void> {
   const starter = await seedStarterConfig(env.configDir)
   for (const path of [...seeded, ...starter]) console.log(`seeded ${path}`)
 
-  /**
-   * Migrate before anything reads the tree.
-   *
-   * Restoring an older backup is the ordinary case, not the exotic one: `git clone` and start is
-   * the documented restore, and the clone can be from any point in the repository's life. Config
-   * from a NEWER build stops the boot here rather than being parsed, because parsing would drop
-   * the fields this version does not know and the next save would write that loss to disk.
-   */
+  // Migrate before anything reads the tree. Config from a newer build stops the boot here:
+  // parsing it would drop unknown fields and the next save would write that loss to disk.
   const migration = await migrateConfig({
     configDir: env.configDir,
     stateDir: env.stateDir,
@@ -49,10 +40,9 @@ async function main(): Promise<void> {
 
   const webDistDir =
     process.env.NEOHOMEPAGE_WEB_DIST ?? resolve(import.meta.dirname, '../../dist/web')
-  const catalogDir = process.env.NEOHOMEPAGE_CATALOG_DIR ?? resolve(process.cwd(), 'catalog')
 
   const context = await createContext({
-    catalogDir,
+    catalogDir: env.catalogDir,
     webDistDir,
     ...(process.env.NEOHOMEPAGE_PUBLISH_MODE === 'manual'
       ? { publishMode: 'manual' as const }
@@ -60,8 +50,7 @@ async function main(): Promise<void> {
   })
   await context.reload()
 
-  // A generation may be missing (first boot) or stale (someone edited config with the app down).
-  // Either way, publishing now costs milliseconds and means `GET /` serves a file immediately.
+  // The generation may be missing (first boot) or stale (config edited with the app down).
   const pending = await context.pending()
   if (pending.pending) {
     const result = await context.publishNow('boot', 'boot')
@@ -95,12 +84,8 @@ function formatHost(address: string): string {
   return address.includes(':') ? `[${address}]` : address
 }
 
-/**
- * A config this build cannot understand is a one-line message, not a stack trace.
- *
- * The person seeing it restored a backup from a newer release onto an older one — a thing that
- * happens on a rollback — and needs to be told to upgrade, not shown a trace of the parser.
- */
+// A config from a newer release (restored onto an older build on a rollback) gets a one-line
+// "upgrade" message, not a parser stack trace.
 try {
   await main()
 } catch (error) {

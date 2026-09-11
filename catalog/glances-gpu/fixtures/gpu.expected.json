@@ -1,0 +1,16 @@
+{
+  "stats": [
+    {
+      "label": "Load",
+      "value": "0%"
+    },
+    {
+      "label": "Memory",
+      "value": "1%"
+    },
+    {
+      "label": "Temp",
+      "value": "43°"
+    }
+  ]
+}

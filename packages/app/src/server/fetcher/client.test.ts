@@ -1,36 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createServer, type Server } from 'node:http'
-import { once } from 'node:events'
 import { fetchUpstream, UpstreamError } from './client.ts'
+import { closeLatest, closeServers, serve } from './fixtures.ts'
 
-/**
- * These run against a real loopback HTTP server rather than a mocked dispatcher: the behaviours
- * that matter — a body abort mid-stream, a redirect not being followed, a timeout — are all
- * properties of the socket layer, and a mock would only test the mock.
- *
- * `allowLoopback` is set throughout, because loopback is blocked by default and that is the
- * policy module's job to enforce, not this one's.
- */
+// Runs against a real loopback server. `allowLoopback` is set throughout because loopback is
+// blocked by default; the policy module's tests cover that.
 
-const servers: Server[] = []
-
-async function serve(handler: Parameters<typeof createServer>[1]): Promise<URL> {
-  const server = createServer(handler)
-  servers.push(server)
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('no address')
-  return new URL(`http://127.0.0.1:${address.port}/`)
-}
-
-afterEach(async () => {
-  while (servers.length > 0) {
-    const server = servers.pop() as Server
-    server.closeAllConnections()
-    await new Promise((resolve) => server.close(resolve))
-  }
-})
+afterEach(closeServers)
 
 describe('ordinary requests', () => {
   it('returns status, headers and body', async () => {
@@ -67,7 +42,6 @@ describe('ordinary requests', () => {
 
 describe('the body cap', () => {
   it('aborts a huge response at the limit instead of buffering it', async () => {
-    // One misconfigured target returning a 500 MB body is otherwise an instant OOM on a 1 GB box.
     const url = await serve((_req, res) => {
       res.writeHead(200)
       const chunk = 'x'.repeat(64 * 1024)
@@ -104,8 +78,6 @@ describe('the body cap', () => {
 
 describe('redirects', () => {
   it('refuses to follow one, and says what to do instead', async () => {
-    // Following a redirect reopens the whole validate-then-redirect bypass class — the exact bug
-    // that broke gethomepage's first SSRF fix within hours of shipping.
     const url = await serve((_req, res) => {
       res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' })
       res.end()
@@ -117,8 +89,6 @@ describe('redirects', () => {
   })
 
   it('does not leak the redirect destination into the message', async () => {
-    // The message reaches the browser. A dashboard has leaked API keys through verbose errors
-    // before, so upstream detail never travels with it.
     const url = await serve((_req, res) => {
       res.writeHead(301, { location: 'http://secret-host.internal/?token=abc123' })
       res.end()
@@ -148,15 +118,30 @@ describe('failures carry a code, not a URL', () => {
   it('reports a refused connection without echoing the address', async () => {
     const url = await serve((_req, res) => res.end('{}'))
     const dead = new URL(url.toString())
-    // Close the server, then dial the port nothing is listening on any more.
-    const server = servers.pop() as Server
-    await new Promise((resolve) => server.close(resolve))
+    await closeLatest()
 
     const error = (await fetchUpstream({ url: dead, method: 'GET', allowLoopback: true }).catch(
       (e) => e,
     )) as UpstreamError
     expect(['refused', 'unreachable']).toContain(error.code)
     expect(error.message).not.toContain(dead.port)
+  })
+
+  it('reaches the socket for an https target named by IP literal', async () => {
+    // Node rejects an IP literal as TLS servername before dialing, so the dial must get as far as
+    // the closed port and be refused by it.
+    const url = await serve((_req, res) => res.end('{}'))
+    await closeLatest()
+    const dead = new URL(`https://127.0.0.1:${url.port}/`)
+
+    const error = (await fetchUpstream({
+      url: dead,
+      method: 'GET',
+      allowLoopback: true,
+      insecureSkipVerify: true,
+    }).catch((e) => e)) as UpstreamError
+    expect(error.code).toBe('refused')
+    expect((error.cause as { code?: string }).code).not.toBe('ERR_INVALID_ARG_VALUE')
   })
 })
 

@@ -1,11 +1,7 @@
 /**
- * @neohomepage/catalog-schema
- *
- * The versioned contract between the app and the widget catalog. Published to npm so the
- * catalog's own CI can validate a community pull request without vendoring anything, and so
- * extracting `catalog/` into its own repository later is a dependency bump rather than a break.
- *
- * Nothing here may import from the app, touch the filesystem, or reach the network.
+ * The versioned contract between the app and the widget catalog, published to npm so the catalog's
+ * CI can validate manifests without vendoring the app. Must not import from the app, touch the
+ * filesystem or reach the network.
  */
 
 export type { Json, JsonObject } from './json.ts'
@@ -73,5 +69,3 @@ export { displayValueSchema, projectionSchema } from './projection.ts'
 /** Manifest schema revisions this build understands. Refuse anything outside the list. */
 export const SUPPORTED_MANIFEST_VERSIONS = [1] as const
 export type ManifestVersion = (typeof SUPPORTED_MANIFEST_VERSIONS)[number]
-
-export const CATALOG_SCHEMA_VERSION = '0.0.1'

@@ -47,8 +47,6 @@ describe('cutting', () => {
   })
 
   it('excludes per-machine overrides and the audit log from the snapshot', async () => {
-    // overrides.local.json is gitignored and machine-specific: restoring someone's laptop URLs
-    // onto the NAS would be a regression, not a restore.
     const { generations, configDir } = await scratch()
     await writeFile(join(configDir, 'overrides.local.json'), '{"laptop":true}\n')
     await writeFile(join(configDir, '.audit.jsonl'), '{"ts":"x"}\n')
@@ -78,7 +76,6 @@ describe('rollback', () => {
 
     await generations.rollback(1)
     expect(await generations.current()).toBe(1)
-    // Reversible: generation 2 is still there to roll forward to.
     expect(await generations.list()).toEqual([1, 2])
     await generations.rollback(2)
     expect(await generations.current()).toBe(2)
@@ -109,7 +106,6 @@ describe('pruning', () => {
   })
 
   it('never prunes the generation currently being served', async () => {
-    // Pruning the active generation is the one bug in this module that takes the site down.
     const { generations, configDir } = await scratch()
     for (let i = 0; i < 6; i++)
       await generations.cut({ configDir, configRevision: `r${i}`, actor: 'ui' })

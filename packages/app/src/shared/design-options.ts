@@ -1,16 +1,8 @@
-import { SHAPE_TOKENS, type ShapeToken } from './theme-presets.ts'
+import { SHAPE_DEFAULTS, SHAPE_TOKENS, type ShapeToken } from './theme-presets.ts'
 
 /**
- * The closed sets of things a look can be made of.
- *
- * These lived inside `DesignPanel.tsx` for as long as the panel was the only way to change a
- * theme. It is not any more: the MCP surface offers the same choices to an agent, and `src/server`
- * may not import `src/web`. Two lists would be two chances to add a font to one and not the other,
- * so there is one, here, and both sides read it.
- *
- * Everything in this module is an ENUM of values the project authored. That is what lets the MCP
- * tools honour the rule that no agent writes CSS: a caller names `sans` or `narrow`, and the CSS
- * that reaches a stylesheet is a string from this file.
+ * Closed option tables shared by the design panel and the MCP tools. A caller names an id, and the
+ * CSS that reaches a stylesheet is always a string from this file: no agent writes CSS.
  */
 
 export type FontStack = { readonly id: string; readonly label: string; readonly value: string }
@@ -30,13 +22,7 @@ export const FONT_STACKS: readonly FontStack[] = [
   { id: 'serif', label: 'Serif', value: 'ui-serif,Georgia,"Iowan Old Style",Palatino,serif' },
 ]
 
-/**
- * The board's width cap.
- *
- * `inset` is the panel icon's margin in viewBox units — the reason the four icons read as a scale
- * rather than four unrelated glyphs. It lives with the value it draws so a fifth width cannot be
- * added with no picture of it.
- */
+/** Board width cap; `inset` is the panel icon's margin in viewBox units. */
 export type BoardWidth = {
   readonly id: string
   readonly label: string
@@ -51,16 +37,11 @@ export const BOARD_WIDTHS: readonly BoardWidth[] = [
   { id: 'full', label: 'Full bleed', value: 'none', inset: 0 },
 ]
 
-/**
- * Tile titles, as the two tokens that carry the treatment.
- *
- * Transform and tracking move together: uppercase without extra tracking is a wall, and tracked
- * sentence case is a ransom note. Storing them as one choice is what stops half of it being set.
- */
+/** Title treatment as one choice: transform and tracking only work when set together. */
 export type TitleCase = {
   readonly id: string
   readonly label: string
-  readonly tokens: Readonly<Record<string, string>>
+  readonly tokens: Readonly<Record<'title-transform' | 'title-tracking', string>>
 }
 
 export const TITLE_CASES: readonly TitleCase[] = [
@@ -76,12 +57,7 @@ export const TITLE_CASES: readonly TitleCase[] = [
   },
 ]
 
-/**
- * The colour tokens, grouped the way someone thinks about a dashboard rather than alphabetically.
- *
- * The panel renders these as fieldsets and the MCP surface reports them under the same headings,
- * so "Tiles" means the same six tokens whether a person or an agent is reading.
- */
+/** Colour tokens under the headings both the panel and the MCP surface use. */
 export const COLOUR_GROUPS: readonly {
   readonly title: string
   readonly tokens: readonly { readonly name: string; readonly label: string }[]
@@ -121,19 +97,50 @@ export const COLOUR_GROUPS: readonly {
   },
 ]
 
-/**
- * The non-colour tokens, split by which reset button owns them.
- *
- * "Reset to the preset" under Shape used to name four tokens by hand and therefore missed the ones
- * only a finish sets — a button that says it undoes everything and undoes most of it is worse than
- * one that does nothing, because you believe it.
- *
- * So only the type half is authored, and the shape half is its complement: a token added to
- * `SHAPE_TOKENS` lands in a reset whatever anyone remembers to do. That is a property of the
- * construction, not something a test could catch — what `design-options.test.ts` can catch, and
- * does, is this list naming a token that no longer exists.
- */
+/** How a reading is drawn on a tile: bare, or boxed in the muted fill. */
+export type StatStyle = {
+  readonly id: 'plain' | 'boxed'
+  readonly label: string
+  readonly tokens: Readonly<Record<'stat-bg' | 'stat-padding', string>>
+}
+export const STAT_STYLES: readonly StatStyle[] = [
+  { id: 'plain', label: 'Plain', tokens: { 'stat-bg': 'transparent', 'stat-padding': '0' } },
+  {
+    id: 'boxed',
+    label: 'Boxed',
+    tokens: { 'stat-bg': 'var(--nh-muted)', 'stat-padding': '8px 10px' },
+  },
+]
+
+export type StatAlign = {
+  readonly id: 'start' | 'center'
+  readonly label: string
+  readonly tokens: Readonly<Record<'stat-align', string>>
+}
+export const STAT_ALIGNS: readonly StatAlign[] = [
+  { id: 'start', label: 'Left', tokens: { 'stat-align': 'start' } },
+  { id: 'center', label: 'Centred', tokens: { 'stat-align': 'center' } },
+]
+
+export function statStyleOf(bg: string | undefined): StatStyle {
+  return (
+    STAT_STYLES.find((entry) => entry.tokens['stat-bg'] === bg) ?? (STAT_STYLES[0] as StatStyle)
+  )
+}
+
+export function statAlignOf(align: string | undefined): StatAlign {
+  return (
+    STAT_ALIGNS.find((entry) => entry.tokens['stat-align'] === align) ??
+    (STAT_ALIGNS[0] as StatAlign)
+  )
+}
+
+// Only the type half is authored; SHAPE_RESET_TOKENS is its complement, so a token added to
+// SHAPE_TOKENS always lands in one of the two resets.
 export const TYPE_RESET_TOKENS: readonly ShapeToken[] = [
+  'stat-bg',
+  'stat-padding',
+  'stat-align',
   'font-sans',
   'font-mono',
   'title-transform',
@@ -158,20 +165,12 @@ export function titleCaseById(id: string): TitleCase | undefined {
 }
 
 /**
- * The first family in a font stack, normalised.
- *
- * Whole stacks cannot be compared: a preset is free to append families ("Nord" adds Helvetica Neue
- * and Arial) and to write its list with spaces after the commas, so exact equality marked NOTHING
- * as active on six of the seven presets — the control looked broken because it never showed which
- * option you were on. The first family is what actually identifies the choice.
+ * The first family in a font stack, normalised. Whole stacks cannot be compared: presets append
+ * families and vary spacing after commas, so the first family is what identifies the choice.
  */
 export function firstFamily(stack: string | undefined): string {
-  return (stack ?? '')
-    .split(',')[0]
-    ?.trim()
-    .replaceAll('"', '')
-    .replaceAll("'", '')
-    .toLowerCase() as string
+  const first = (stack ?? '').split(',')[0] ?? ''
+  return first.trim().replaceAll('"', '').replaceAll("'", '').toLowerCase()
 }
 
 /** Which font stack a resolved `font-sans` is, or undefined for one no list here describes. */
@@ -181,7 +180,7 @@ export function fontStackOf(value: string | undefined): FontStack | undefined {
 
 /** Which width cap a resolved `max-width` is. */
 export function boardWidthOf(value: string | undefined): BoardWidth | undefined {
-  return BOARD_WIDTHS.find((width) => width.value === (value ?? '1600px'))
+  return BOARD_WIDTHS.find((width) => width.value === (value ?? SHAPE_DEFAULTS['max-width']))
 }
 
 /** Which title treatment a resolved `title-transform` is. Anything but uppercase is sentence. */

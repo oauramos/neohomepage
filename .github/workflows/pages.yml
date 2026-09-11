@@ -1,17 +1,9 @@
 name: Pages
 
-# The documentation site and the widget catalog are one deployment, because GitHub Pages allows
-# one site per repository. The catalog lands at /catalog/v1/ rather than on its own subdomain;
-# the pointer file's `movedTo` field is what makes that safe to bake into clients, so moving the
-# catalog to its own repository later costs a one-line change to a JSON file and no client release.
+# Docs and catalog are one deployment (GitHub Pages allows one site per repository); the catalog
+# lives at /catalog/v1/ and the pointer file's `movedTo` lets it move later without a client release.
 
-# Only after CI has passed on that exact commit.
-#
-# This used to trigger directly on a push to main, sharing nothing with ci.yml — so a commit that
-# failed lint, typecheck, the test suite, the catalog's byte-identical rebuild or its 256 KiB
-# ceiling would still deploy the site AND republish `catalog/v1/latest.json` to every installed
-# client. The two gates that exist specifically to protect the published catalog ran in a
-# workflow that had no say in whether it got published.
+# Runs only after CI has passed on the same commit, so the catalog gates in ci.yml gate publishing.
 on:
   workflow_run:
     workflows: [CI]
@@ -24,17 +16,15 @@ permissions:
   pages: write
   id-token: write
 
-# Never cancel a deploy in progress: a half-published catalog pointer would name a payload that is
-# not there yet, and every client that refreshed in that window would fall back to its cache.
+# Never cancel a deploy in progress: a half-published catalog pointer would name a payload that
+# is not there yet.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
   build:
-    # A failed CI run must not publish. `workflow_dispatch` has no conclusion, so it is allowed
-    # through explicitly — that is the manual escape hatch for republishing after fixing Pages
-    # settings or the like.
+    # `workflow_dispatch` has no conclusion; it is the manual escape hatch for republishing.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
@@ -55,14 +45,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Validate every manifest against its recorded fixtures
-        # The catalog is published from the same commit that passes this, so a manifest that fails
-        # its own fixture can never reach a user's install.
         run: pnpm catalog:test
 
       - name: The widget reference matches the manifests
-        # The same staleness check ci.yml runs, repeated here because this is the job that
-        # actually publishes the page. A stale reference passing in CI and then being deployed
-        # from a later commit is the gap this closes.
+        # Repeated from ci.yml because this is the job that publishes the page.
         run: |
           pnpm catalog:docs
           git diff --exit-code docs/widgets/index.md || {

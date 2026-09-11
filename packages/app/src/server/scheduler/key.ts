@@ -1,16 +1,9 @@
 import { createHash } from 'node:crypto'
 
 /**
- * The schedulable unit is a fetch, not a widget.
- *
- * Two widgets pointing at the same Sonarr queue are one upstream request, and a calendar built
- * from three Radarr sources with byte-identical parameters collapses to one request too — not
- * through a special case, but because they derive the same key. Widgets subscribe; keys are
- * scheduled.
- *
- * `targetRevision` is part of the key so changing a target's address or credentials invalidates
- * everything cached against it, rather than leaving a stale projection attributed to a service
- * the user has since repointed.
+ * The schedulable unit is a fetch, not a widget: widgets with identical parts share one key.
+ * `targetRevision` is part of the key so repointing a target invalidates everything cached
+ * against it.
  */
 export type FetchKeyParts = {
   readonly targetId: string

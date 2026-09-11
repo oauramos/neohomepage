@@ -2,24 +2,13 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import process from 'node:process'
 
 /**
- * Authentication.
- *
- * Open reads, authenticated writes. A start page you open fifty times a day should not ask for a
- * password, but the write API turns a stray cross-site POST into "an attacker re-pointed your
- * Sonarr widget at their server" — and the realistic attacker here is the user's own browser
- * visiting any website, which is precisely why Chrome is shipping Local Network Access prompts.
- *
- * The session cookie is an HMAC over the expiry, keyed from the password itself. Two consequences
- * worth having: sessions survive a restart (an in-memory store would log everyone out every
- * upgrade), and changing the password invalidates every existing session for free.
+ * Open reads, authenticated writes. The session cookie is an HMAC over the expiry keyed from the
+ * password, so sessions survive a restart and a password change revokes them all.
  */
 
 /**
- * Content types a write may carry, besides JSON.
- *
- * The set exists so the CSRF property is checkable rather than argued: a cross-site <form> can only
- * produce application/x-www-form-urlencoded, multipart/form-data or text/plain, and a test asserts
- * none of those can ever appear here.
+ * Content types a write may carry besides JSON. Must never include a type a cross-site <form> can
+ * produce (urlencoded, multipart, text/plain); a test asserts this.
  */
 export const UPLOADABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']
 
@@ -60,13 +49,7 @@ export function readAuthConfig(): AuthConfig {
   }
 }
 
-/**
- * Refuse to start in a configuration that looks secure and is not.
- *
- * Forward-auth without a trusted-proxy list believes an identity header from anyone who can reach
- * the port, which is strictly worse than no auth at all because it looks like auth. Failing at
- * boot with an actionable message beats discovering it from a stranger.
- */
+/** Refuses configurations that look secure and are not, e.g. forward-auth with no trusted proxies. */
 export function assertAuthUsable(config: AuthConfig): void {
   if (config.mode === 'forward' && config.trustedProxies.length === 0) {
     throw new Error(
@@ -124,13 +107,6 @@ export function checkPassword(config: AuthConfig, username: string, password: st
   return userOk && passOk
 }
 
-/**
- * Is this request allowed to change something?
- *
- * The CSRF defences below stay on in EVERY mode, including `none`, because they cost nothing and
- * the attack they stop — a page on the internet POSTing to a LAN address — does not care whether
- * the target has a password.
- */
 export type WriteCheck =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly status: 401 | 403; readonly reason: string }
@@ -148,12 +124,15 @@ export type RequestFacts = {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+/**
+ * The CSRF checks run in every mode, including `none`: a page on the internet POSTing to a LAN
+ * address does not care whether the target has a password.
+ */
 export function checkWrite(config: AuthConfig, request: RequestFacts, now: number): WriteCheck {
   if (SAFE_METHODS.has(request.method.toUpperCase())) return { allowed: true }
 
-  // Sec-Fetch-Site is sent by every browser that matters and cannot be forged by page JavaScript.
-  // Absent means a non-browser client (curl, an MCP bridge), which is allowed through to the
-  // credential check below rather than blocked outright.
+  // Sec-Fetch-Site cannot be forged by page JavaScript. Absent means a non-browser client (curl,
+  // an MCP bridge), which falls through to the credential check.
   if (request.secFetchSite !== undefined && request.secFetchSite !== 'same-origin') {
     return { allowed: false, status: 403, reason: 'cross-site writes are refused' }
   }
@@ -175,14 +154,8 @@ export function checkWrite(config: AuthConfig, request: RequestFacts, now: numbe
     }
   }
 
-  // A form POST cannot set an arbitrary content type, so requiring JSON blocks the simplest
-  // cross-site write there is.
-  //
-  // Image types are allowed alongside it for one route — uploading a background — and that costs
-  // nothing here, because the property being relied on is not "JSON" but "a type a cross-site
-  // <form> cannot produce". A form can send exactly three: application/x-www-form-urlencoded,
-  // multipart/form-data and text/plain. None of them is in this list, and none can be, which is
-  // what UPLOADABLE_TYPES is asserted on in the tests.
+  // A cross-site <form> can only send urlencoded, multipart or text/plain, so requiring JSON (or
+  // an image type, for the background upload) blocks it.
   const contentType = request.contentType ?? ''
   const allowed =
     contentType.startsWith('application/json') ||
@@ -209,10 +182,8 @@ export function checkWrite(config: AuthConfig, request: RequestFacts, now: numbe
 }
 
 /**
- * Is the peer one of the configured proxies?
- *
- * Only the SOCKET address is consulted. Reading a forwarded-for header here would let anyone
- * claim to be the proxy, which is the whole failure this list exists to prevent.
+ * Only the socket address is consulted; a forwarded-for header would let anyone claim to be the
+ * proxy.
  */
 export function isTrusted(trusted: readonly string[], remoteAddress: string | undefined): boolean {
   if (remoteAddress === undefined) return false
@@ -237,12 +208,7 @@ function inCidr(address: string, cidr: string): boolean {
     ) {
       return null
     }
-    return (
-      ((parts[0] as number) << 24) +
-      ((parts[1] as number) << 16) +
-      ((parts[2] as number) << 8) +
-      (parts[3] as number)
-    )
+    return parts.reduce((acc, part) => acc * 256 + part, 0)
   }
 
   const a = toInt(address)
@@ -266,13 +232,11 @@ export function sessionCookie(token: string, ttlMs: number, secure: boolean): st
     `${SESSION_COOKIE}=${token}`,
     'Path=/',
     'HttpOnly',
-    // Strict, not Lax: there is no cross-site flow this app needs, and Lax still sends the cookie
-    // on a top-level navigation someone else initiated.
+    // Strict, not Lax: Lax still sends the cookie on a top-level navigation someone else initiated.
     'SameSite=Strict',
     `Max-Age=${Math.floor(ttlMs / 1000)}`,
   ]
-  // Only when the connection is already HTTPS: setting Secure on a plain-http LAN install would
-  // make the cookie silently never arrive, which presents as "logging in does nothing".
+  // Secure on a plain-http LAN install would make the cookie silently never arrive.
   if (secure) attributes.push('Secure')
   return attributes.join('; ')
 }

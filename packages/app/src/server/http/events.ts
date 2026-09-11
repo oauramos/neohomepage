@@ -1,11 +1,6 @@
 /**
- * The server-sent-events hub.
- *
- * One EventSource per tab, deliberately. Cross-tab leader election would save a connection, but
- * its failure mode — the leader tab dies, nobody takes over, every widget silently freezes — is
- * invisible and only reproduces with multiple tabs, which is the hardest class of bug to act on
- * from a user report. One connection per tab plus a visible staleness chip is the honest trade;
- * leader election can arrive when someone actually reports connection exhaustion.
+ * Server-sent-events hub. One EventSource per tab, deliberately: cross-tab leader election fails
+ * invisibly when the leader tab dies, and only reproduces with several tabs open.
  */
 
 export type ServerEvent = {
@@ -62,10 +57,8 @@ export class EventHub {
   }
 
   /**
-   * Deliver to everyone.
-   *
-   * A subscriber whose write throws is dropped rather than retried: a phone that slept with the
-   * tab open is a slow consumer, and buffering for it inflates RSS on a box that has none spare.
+   * A subscriber whose write throws is dropped, not retried: buffering for a slow consumer
+   * inflates RSS.
    */
   broadcast(event: ServerEvent): number {
     let delivered = 0

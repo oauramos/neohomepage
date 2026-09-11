@@ -76,8 +76,6 @@ describe('doing nothing', () => {
 
 describe('refusing config from the future', () => {
   it('throws before opening anything', async () => {
-    // Parsing it would drop the fields this build does not know, and the next save would write
-    // that loss to disk — a downgrade that silently deletes work.
     await writeTree(9)
     await expect(migrateConfig({ configDir, stateDir, now: NOW })).rejects.toThrow(
       ConfigTooNewError,
@@ -111,23 +109,19 @@ describe('migrating forward', () => {
     const restored = JSON.parse(
       await readFile(join(backup, 'config', 'dashboard.json'), 'utf8'),
     ) as Record<string, unknown>
-    // The whole tree, not just the files a migration touched: a half-applied migration is exactly
-    // the case the backup is kept for.
     expect(restored).toEqual({ schemaVersion: 0, title: 'home' })
     expect(await readFile(join(backup, 'config', 'widgets', 'w1.json'), 'utf8')).toContain('w1')
     expect(await readFile(join(backup, 'README.md'), 'utf8')).toContain('rename title to heading')
   })
 
   it('leaves the per-machine overrides file alone', async () => {
-    // It is gitignored and hand-maintained on one box; rewriting it would be rewriting something
-    // the user owns and nothing else reads.
     await writeTree(0)
     const before = await readFile(join(configDir, 'overrides.local.json'), 'utf8')
     await migrateConfig({ configDir, stateDir, now: NOW, migrations: [renameTitle] })
     expect(await readFile(join(configDir, 'overrides.local.json'), 'utf8')).toBe(before)
   })
 
-  it('applies several migrations in ascending order, whatever order they are declared', async () => {
+  it('skips a migration whose target version is not ahead of the current one', async () => {
     const trail: number[] = []
     const step = (to: number): Migration => ({
       to,
@@ -142,7 +136,7 @@ describe('migrating forward', () => {
       configDir,
       stateDir,
       now: NOW,
-      // Declared out of order on purpose: ordering must come from `to`, not from the array.
+      // to: -1 is below `from`, so it must be filtered out, not run.
       migrations: [step(1), step(-1)],
     })
     expect(trail).toEqual([1])
@@ -165,8 +159,6 @@ describe('when a migration fails', () => {
       migrateConfig({ configDir, stateDir, now: NOW, migrations: [explode] }),
     ).rejects.toThrow(MigrationFailedError)
 
-    // Untouched: migrations are applied in memory and written in one pass at the end, so a crash
-    // between two of them leaves the tree exactly as it was.
     expect(await read('dashboard.json')).toEqual({ schemaVersion: 0, title: 'home' })
   })
 

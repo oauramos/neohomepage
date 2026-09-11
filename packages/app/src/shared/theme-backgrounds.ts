@@ -1,19 +1,7 @@
 /**
- * Generated backgrounds, as CSS rather than as a renderer.
- *
- * The obvious way to offer "a nice background without uploading a photo" is a WebGL shader
- * gradient. It is the wrong trade here twice over: the board is served as static HTML that has to
- * render with JavaScript disabled — a canvas paints nothing under `curl` or under the no-JS
- * Playwright profile — and three.js is around 600 KB of script for a page whose whole claim is
- * 46 MB resident with no bundler on the box.
- *
- * Layered `radial-gradient`s reach the same place: they are painted by the compositor, cost no
- * bytes of JavaScript, survive with scripting off, and — because each one is written in terms of
- * `--nh-accent`, `--nh-ok` and `--nh-bad` via `color-mix` — they recolour themselves when the
- * preset changes instead of needing one variant per theme.
- *
- * Referenced from `theme.surface.background` as `gradient:<id>`. Anything without that prefix is
- * still treated as an asset URL, so an uploaded image keeps working unchanged.
+ * Generated backgrounds as layered CSS gradients over theme tokens: they render with JavaScript
+ * off and recolour per preset. Referenced from `theme.surface.background` as `gradient:<id>`;
+ * anything else is an asset URL.
  */
 
 export const GRADIENT_PREFIX = 'gradient:'
@@ -25,10 +13,7 @@ export type Background = {
   readonly css: string
 }
 
-/**
- * `background-color` is listed last in each value so the gradients composite over the theme's own
- * page colour: that is what keeps a light preset's version of a gradient light.
- */
+/** `background-color` is last in each value so gradients composite over the theme's page colour. */
 export const BACKGROUNDS: readonly Background[] = [
   {
     id: 'mesh',
@@ -86,17 +71,12 @@ export const BACKGROUNDS: readonly Background[] = [
       'radial-gradient(100% 70% at 50% 50%,color-mix(in oklch,var(--nh-accent) 14%,transparent),transparent 75%),' +
       'var(--nh-background)',
   },
-  /**
-   * The four era backgrounds.
-   *
-   * Each is still written in terms of the theme's tokens rather than in fixed colours, so it works
-   * under any preset — but each was shaped for one, and the console presets ask for theirs by name.
-   */
+  // The four era backgrounds: still token-based, but shaped for the console presets, which ask for
+  // them by name.
   {
     id: 'dmg-matrix',
     label: 'DMG matrix',
-    // A reflective LCD is a grid of square cells with a visible gap. Two hard repeating gradients
-    // give the cell edges; no blur, because that screen had none.
+    // Reflective LCD: square cells with a visible gap, no blur.
     css:
       'repeating-linear-gradient(0deg,color-mix(in oklch,var(--nh-foreground) 9%,transparent) 0 1px,transparent 1px 4px),' +
       'repeating-linear-gradient(90deg,color-mix(in oklch,var(--nh-foreground) 9%,transparent) 0 1px,transparent 1px 4px),' +
@@ -146,30 +126,15 @@ export function backgroundById(id: string): Background | undefined {
   return BACKGROUNDS.find((background) => background.id === id)
 }
 
-/**
- * Resolve `theme.surface.background` to a generated gradient, or to nothing.
- *
- * Returns undefined for an asset path so the caller keeps its existing `url()` branch — including
- * the escaping that branch does, which a gradient does not need because none of this is
- * caller-supplied text.
- */
+/** Returns undefined for an asset path so the caller keeps its escaped `url()` branch. */
 export function gradientFor(background: string | null): Background | undefined {
   if (background === null || !background.startsWith(GRADIENT_PREFIX)) return undefined
   return backgroundById(background.slice(GRADIENT_PREFIX.length))
 }
 
-/**
- * An uploaded background is an asset path the app itself stored, but it still gets escaped: a
- * quote or a parenthesis would end the `url()` early and let the rest be read as CSS.
- *
- * `<` and `>` are in the class for a different reason, and they were missing: this string is
- * baked into an inline `<style>`, where the HTML parser — not the CSS one — is what ends the
- * element. A value containing `</style>` closes the sheet from inside a perfectly valid `url()`
- * and everything after it is markup.
- *
- * The form feed is the third character CSS counts as a newline, alongside the two everyone
- * remembers, and an unescaped one ends the quoted string it sits in just as a line break does.
- */
+// Escapes what would end the `url()` early; `<`/`>` because the string is baked into an inline
+// `<style>`, where `</style>` closes the sheet from inside a valid url(); form feed because CSS
+// counts it as a newline.
 function cssUrl(value: string): string {
   return value.replace(
     /["'()<>\\\n\r\f]/g,
@@ -184,16 +149,9 @@ export type Surface = {
 }
 
 /**
- * The two fixed layers behind the page, as CSS.
- *
- * Shared rather than server-only because the background is the one part of a theme that is NOT a
- * custom property: it is a rule on `body::before`. The publish step bakes this into the generation
- * and the design panel injects the identical string into a `<style>` so a background previews
- * immediately — without which picking one did nothing visible until the next publish and reload,
- * which reads as a broken control rather than a deferred one.
- *
- * Returns an empty string when no background is set, so the caller can clear its style element by
- * assigning the result unconditionally.
+ * The two fixed layers behind the page, as CSS. Shared with the web side because the background is
+ * a `body::before` rule, not a custom property, and the design panel injects the same string for
+ * preview. Returns '' when no background is set so the caller can assign unconditionally.
  */
 export function surfaceLayerCss(surface: Surface): string {
   if (surface.background === null) return ''

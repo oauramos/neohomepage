@@ -1,0 +1,86 @@
+{
+  "manifestVersion": 1,
+  "id": "glances-fs",
+  "version": "1.0.0",
+  "displayName": "Glances · disks",
+  "category": "monitoring",
+  "icon": "glances",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/glances-fs",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [],
+  "operations": {
+    "fs": {
+      "method": "GET",
+      "path": "/api/4/fs",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "gauges": {
+        "op": "limit",
+        "n": 8,
+        "over": {
+          "op": "map",
+          "as": "d",
+          "over": {
+            "op": "get",
+            "path": "$"
+          },
+          "body": {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "get",
+                "path": "d.mnt_point"
+              },
+              "used": {
+                "op": "get",
+                "path": "d.used"
+              },
+              "total": {
+                "op": "get",
+                "path": "d.size"
+              },
+              "unit": {
+                "op": "const",
+                "value": "bytes"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "presentation": {
+    "template": "gauge-set"
+  },
+  "poll": {
+    "defaultIntervalMs": 60000,
+    "minIntervalMs": 15000
+  },
+  "requires": {
+    "templates": [
+      "gauge-set"
+    ],
+    "opcodes": [
+      "const",
+      "get",
+      "limit",
+      "map",
+      "pick"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

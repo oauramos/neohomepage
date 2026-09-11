@@ -1,13 +1,7 @@
 import { defineConfig } from 'vitepress'
 
-/**
- * The site is served from a project page — `oauramos.github.io/neohomepage/` — so every asset URL
- * needs that prefix or the page loads with no stylesheet and no script. It does not fail loudly:
- * the HTML returns 200 and the browser 404s each asset separately.
- *
- * Overridable, so pointing a custom domain at this later is an environment variable in one
- * workflow rather than an edit here.
- */
+// Served from a project page, so asset URLs need the prefix or the page loads with no assets.
+// DOCS_BASE lets a custom domain override it from the workflow.
 const base = process.env.DOCS_BASE ?? '/neohomepage/'
 
 export default defineConfig({
@@ -37,6 +31,7 @@ export default defineConfig({
       {
         text: 'Guide',
         items: [
+          { text: 'Sections', link: '/guide/sections' },
           { text: 'Backup and restore', link: '/guide/backup' },
           { text: 'Signing in', link: '/guide/auth' },
           { text: 'Configuring with an AI', link: '/mcp/' },

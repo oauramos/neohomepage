@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
 
-/**
- * env is read once at module load, so each case re-imports it with a fresh module registry.
- */
+/** env is read once at module load, so each case re-imports it with a fresh module registry. */
 async function loadEnv(overrides: Record<string, string | undefined>) {
   vi.resetModules()
   const saved = { ...process.env }
