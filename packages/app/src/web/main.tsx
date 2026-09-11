@@ -4,6 +4,7 @@ import { board, dashboard } from '../shared/board.ts'
 import type { Resolved, ResolvedPage } from '../shared/resolved.ts'
 import { emitPageCss } from '../shared/section-css.ts'
 import { AboutPanel, ConfigPanel, ThemePanel, WidgetsPanel } from './fab/panels.tsx'
+import { SectionsPanel } from './fab/SectionsPanel.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
 import { DesignFab } from './design/DesignFab.tsx'
@@ -62,6 +63,13 @@ function TabPanel({
             {editing ? 'Done editing' : 'Edit layout'}
           </button>
         </div>
+      )
+    case 'sections':
+      return (
+        <SectionsPanel
+          pageId={state.resolved.pages[0]?.id ?? state.resolved.defaultPage}
+          onChanged={onChanged}
+        />
       )
     case 'widgets':
       return <WidgetsPanel state={state} onChanged={onChanged} onRemove={onRemove} />

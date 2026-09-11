@@ -11,10 +11,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
  * discoverable rather than hunted for.
  */
 
-export type Tab = 'edit' | 'widgets' | 'theme' | 'config' | 'about'
+export type Tab = 'edit' | 'sections' | 'widgets' | 'theme' | 'config' | 'about'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'edit', label: 'Edit layout' },
+  { id: 'sections', label: 'Sections' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'theme', label: 'Theme' },
   { id: 'config', label: 'Config' },

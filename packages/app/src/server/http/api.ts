@@ -434,6 +434,31 @@ export function createApiRoutes(options: ApiOptions): Hono {
   })
 
   /**
+   * A page as the editor edits it: the stored sections made explicit.
+   *
+   * The resolved page is dense — every column count filled in, every href composed — which is
+   * right for rendering and wrong for editing: a form should show what the user SET and leave the
+   * rest blank. So this returns the sparse config, with only the implicit navbar-and-grid pair
+   * materialised when the page declares nothing, because that is what the user is about to edit.
+   */
+  api.get('/pages/:id', async (c) => {
+    const { tree } = await context.state()
+    const page = tree.pages.get(c.req.param('id'))
+    if (page === undefined) return c.json({ error: 'unknown page' }, 404)
+    return c.json({
+      id: page.id,
+      title: page.title,
+      sections: effectiveSections(page),
+      breakpoints: page.grid.breakpoints.map((breakpoint) => ({
+        id: breakpoint.id,
+        cols: breakpoint.cols,
+        minWidth: breakpoint.minWidth,
+      })),
+      maxRows: page.grid.maxRows,
+    })
+  })
+
+  /**
    * A page's title and its sections, replaced whole.
    *
    * Whole rather than patched because a section list is an ORDER as much as a set, and the editor

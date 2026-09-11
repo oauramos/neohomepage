@@ -63,6 +63,18 @@ export function WidgetsPanel({
   }, [])
 
   const placed = state.resolved.widgets.filter((widget) => kindOf(widget.type, catalog) === kind)
+  const page = state.resolved.pages[0]
+  const grids = (page?.sections ?? []).filter((section) => section.kind === 'grid')
+  const sectionOf = (widgetId: string) =>
+    grids.find((section) => section.widgetIds.includes(widgetId))?.id ?? grids[0]?.id ?? ''
+  const moveTo = async (widgetId: string, section: string) => {
+    await fetch(`/api/widgets/${widgetId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ section }),
+    })
+    onChanged()
+  }
   const counts = new Map(
     WIDGET_KINDS.map((entry) => [
       entry.id,
@@ -100,6 +112,21 @@ export function WidgetsPanel({
             <li key={widget.id}>
               <strong>{widget.title}</strong> <code>{widget.type}</code>{' '}
               <span className="nh-panel-dim">{state.data[widget.id]?.meta.state ?? 'pending'}</span>{' '}
+              {grids.length > 1 ? (
+                // Which board the tile sits on. Only offered once there is a choice to make.
+                <select
+                  className="nh-input nh-select"
+                  aria-label={`Section for ${widget.title}`}
+                  value={sectionOf(widget.id)}
+                  onChange={(event) => void moveTo(widget.id, event.target.value)}
+                >
+                  {grids.map((section) => (
+                    <option key={section.id} value={section.id}>
+                      {section.title ?? section.id}
+                    </option>
+                  ))}
+                </select>
+              ) : null}{' '}
               <button
                 type="button"
                 className="nh-button-quiet"

@@ -98,6 +98,38 @@ test('the editor has no serious or critical violations', async ({ page }) => {
   expect(describeViolations(blocking)).toBe('')
 })
 
+test('the sections editor is reachable, saves, and is clean with every kind expanded', async ({
+  page,
+}) => {
+  await page.goto(`${harness.baseURL}/`)
+  await page.getByRole('button', { name: /editor/i }).click()
+  await page.getByRole('button', { name: 'Sections', exact: true }).click()
+
+  // A page that never declared sections shows the implicit pair, and adding one saves whole.
+  await expect(page.getByRole('button', { name: /Header/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Bookmarks', exact: true }).click()
+  await page.getByRole('button', { name: '+ Add link' }).click()
+  await expect(page.getByRole('textbox', { name: 'URL' })).toBeVisible()
+  await expect
+    .poll(async () => {
+      const response = await fetch(`${harness.baseURL}/api/pages/home`)
+      const body = (await response.json()) as { sections: { kind: string }[] }
+      return body.sections.map((section) => section.kind)
+    })
+    .toEqual(['navbar', 'grid', 'bookmarks'])
+
+  // Expand the other two kinds as well, so the scan covers every form this panel can show.
+  await page.getByRole('button', { name: /Header/ }).click()
+  await page
+    .getByRole('button', { name: /Untitled/ })
+    .first()
+    .click()
+
+  const { blocking, other } = await scan(page)
+  if (other.length > 0) console.log(`non-blocking:\n${describeViolations(other)}`)
+  expect(describeViolations(blocking)).toBe('')
+})
+
 test('the widget catalog and its generated form are reachable and clean', async ({ page }) => {
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()

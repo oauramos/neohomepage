@@ -41,7 +41,7 @@ export type AppContext = {
   readonly hub: EventHub
   readonly watcher: ConfigWatcher
   reload(): Promise<void>
-  state(): Promise<{ resolved: Resolved; revision: string }>
+  state(): Promise<{ resolved: Resolved; revision: string; tree: ConfigTree }>
   widgetData(): Record<string, unknown>
   pending(): Promise<{ pending: boolean; generation: number | null; revision: string }>
   refreshWidget(widgetId: string): Promise<boolean>
@@ -314,7 +314,7 @@ export async function createContext(options: ContextOptions = {}): Promise<AppCo
 
     async state() {
       if (resolved === null) await rebuild()
-      return { resolved: resolved as Resolved, revision }
+      return { resolved: resolved as Resolved, revision, tree: tree as ConfigTree }
     },
 
     /**
