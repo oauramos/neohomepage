@@ -49,6 +49,23 @@
   service that answers with a login redirect, a 401 or a self-signed certificate is still a
   bookmark. The probe's verdict stays in the chip.
 
+### Catalog
+
+- **Eight widgets from one homelab's `services.yaml`**: `glances-quicklook` (CPU, memory, swap
+  and load of a host), `glances-sensors` (every Celsius reading), `glances-gpu`, `glances-fs`
+  (a bar per mount), `nextcloud-server` (who is on, users, files, free space — the serverinfo
+  app over Basic auth with an app password), `immich-library` (photos, videos, storage),
+  `navidrome-library` (songs, folders, last scan) and `navidrome-playing` (who is listening to
+  what). Each written clean-room from the vendor's API documentation, with a recorded fixture
+  trimmed to what the projection reads; the Navidrome idle shape — `"nowPlaying": {}`, an object
+  where a list is expected — has a unit test of its own because a fixture cannot wait for someone
+  to press play.
+- **A query or path template can read the target's own fields**, beneath the widget's options.
+  Subsonic's username and salt are properties of the server and travel as query parameters, and
+  before this the operation could only reach the widget's config, so the request went out with an
+  empty user and the tile showed dashes. Secrets are still refused in a URL whichever bag they are
+  in.
+
 ### The editor
 
 - **Widgets have a kind** — widget, bookmark or tool — declared on the manifest and defaulted, so no

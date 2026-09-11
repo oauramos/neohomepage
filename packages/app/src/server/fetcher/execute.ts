@@ -154,12 +154,19 @@ async function dial(
     return { sessionKey: exchanged.key, applied: exchanged.applied }
   }
 
+  // A `{{config:name}}` hole in a path or a query string reads the widget's options and, beneath
+  // them, the target's own non-secret fields — the same bag `target.auth` reads. Subsonic is the
+  // case that needs it: the username and salt are properties of the server, so they belong on the
+  // target, and they travel as query parameters, so the operation has to reach them. A secret is
+  // still refused here whichever bag it is in.
+  const templateScope = { ...auth.context.config, ...config }
+
   const request = async (applied: {
     headers: Readonly<Record<string, string>>
     query: Readonly<Record<string, string>>
   }) =>
     fetchUpstream({
-      url: buildOperationUrl(operation, target, config, applied.query),
+      url: buildOperationUrl(operation, target, templateScope, applied.query),
       method: operation.method,
       headers: { ...operation.headers, ...applied.headers },
       allowLoopback: target.allowLoopback ?? false,

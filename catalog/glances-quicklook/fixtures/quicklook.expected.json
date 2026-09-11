@@ -1,0 +1,28 @@
+{
+  "gauges": [
+    {
+      "label": "CPU",
+      "used": 2.3,
+      "total": 100,
+      "unit": "percent"
+    },
+    {
+      "label": "Memory",
+      "used": 40.6,
+      "total": 100,
+      "unit": "percent"
+    },
+    {
+      "label": "Swap",
+      "used": 15.4,
+      "total": 100,
+      "unit": "percent"
+    },
+    {
+      "label": "Load",
+      "used": 2.1,
+      "total": 100,
+      "unit": "percent"
+    }
+  ]
+}

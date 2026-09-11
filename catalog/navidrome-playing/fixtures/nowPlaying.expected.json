@@ -1,0 +1,20 @@
+{
+  "stats": [
+    {
+      "label": "Playing",
+      "value": 2
+    }
+  ],
+  "items": [
+    {
+      "title": "Bala com Bala",
+      "subtitle": "Jorge Ben",
+      "badge": "otavio"
+    },
+    {
+      "title": "Lonely Life",
+      "subtitle": "Ed Motta",
+      "badge": "guest"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "title": "Composite",
+      "badge": "44°"
+    },
+    {
+      "title": "Composite 1",
+      "badge": "41°"
+    },
+    {
+      "title": "Sensor 1",
+      "badge": "44°"
+    },
+    {
+      "title": "Sensor 2",
+      "badge": "48°"
+    },
+    {
+      "title": "Tctl",
+      "badge": "51°"
+    },
+    {
+      "title": "edge",
+      "badge": "43°"
+    },
+    {
+      "title": "r8169_0_100:00 0",
+      "badge": "50°"
+    },
+    {
+      "title": "r8169_0_200:00 0",
+      "badge": "45°"
+    }
+  ]
+}

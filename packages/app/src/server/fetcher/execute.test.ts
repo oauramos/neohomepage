@@ -167,6 +167,48 @@ describe('executing an operation end to end', () => {
     })
   })
 
+  it('lets a query parameter read a target field, beneath the widget options', async () => {
+    // Subsonic: the username and salt are properties of the server, so they are target fields,
+    // and they travel as query parameters — so the operation has to reach them. The token stays
+    // in auth; a secret in a query template is still refused.
+    const subsonic: SingleManifest = singleManifestSchema.parse({
+      ...MANIFEST,
+      id: 'subsonic-now',
+      target: {
+        fields: [
+          { name: 'username', kind: 'string', label: 'User', required: true },
+          { name: 'salt', kind: 'string', label: 'Salt', required: true },
+          { name: 'token', kind: 'secret', label: 'Token', required: true },
+        ],
+        auth: { kind: 'query', param: 't', value: '{{secret:token}}' },
+      },
+      operations: {
+        queue: {
+          method: 'GET',
+          path: '/rest/getNowPlaying.view',
+          query: { u: '{{config:username}}', s: '{{config:salt}}', c: '{{config:client}}' },
+        },
+      },
+      config: [{ name: 'client', kind: 'string', label: 'Client', default: 'neo' }],
+      requires: { ...MANIFEST.requires, authKinds: ['query'] },
+    })
+    let seenUrl: string | undefined
+    const origin = await serve((req, res) => {
+      seenUrl = req.url
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"records":[]}')
+    })
+    await executeOperation({
+      manifest: subsonic,
+      operation: 'queue',
+      target: target(origin),
+      config: { client: 'neo' },
+      auth: { secrets: { token: 'T0K' }, config: { username: 'otavio', salt: 'abc' } },
+      now: '2026-09-06T12:00:00.000Z',
+    })
+    expect(seenUrl).toBe('/rest/getNowPlaying.view?u=otavio&s=abc&c=neo&t=T0K')
+  })
+
   it('reports a missing credential as a code, not as a crash', async () => {
     const origin = await serve((_req, res) => res.end('{}'))
     const result = await executeOperation({

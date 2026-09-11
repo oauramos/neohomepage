@@ -1,0 +1,31 @@
+{
+  "ocs": {
+    "meta": {
+      "status": "ok",
+      "statuscode": 200,
+      "message": "OK"
+    },
+    "data": {
+      "nextcloud": {
+        "system": {
+          "version": "32.0.0.13",
+          "freespace": 117244002304
+        },
+        "storage": {
+          "num_users": 1,
+          "num_files": 75168
+        }
+      },
+      "activeUsers": {
+        "last5minutes": 1,
+        "last1hour": 1,
+        "last24hours": 1,
+        "last7days": 1,
+        "last1month": 1,
+        "last3months": 1,
+        "last6months": 1,
+        "lastyear": 1
+      }
+    }
+  }
+}

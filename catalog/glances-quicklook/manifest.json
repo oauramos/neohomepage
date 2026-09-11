@@ -1,0 +1,147 @@
+{
+  "manifestVersion": 1,
+  "id": "glances-quicklook",
+  "version": "1.0.0",
+  "displayName": "Glances · host",
+  "category": "monitoring",
+  "icon": "glances",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/glances-quicklook",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [],
+  "operations": {
+    "quicklook": {
+      "method": "GET",
+      "path": "/api/4/quicklook",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "gauges": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "CPU"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.cpu"
+              },
+              "total": {
+                "op": "const",
+                "value": 100
+              },
+              "unit": {
+                "op": "const",
+                "value": "percent"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Memory"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.mem"
+              },
+              "total": {
+                "op": "const",
+                "value": 100
+              },
+              "unit": {
+                "op": "const",
+                "value": "percent"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Swap"
+              },
+              "used": {
+                "op": "get",
+                "path": "$.swap"
+              },
+              "total": {
+                "op": "const",
+                "value": 100
+              },
+              "unit": {
+                "op": "const",
+                "value": "percent"
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Load"
+              },
+              "used": {
+                "op": "clamp",
+                "of": {
+                  "op": "get",
+                  "path": "$.load"
+                },
+                "min": 0,
+                "max": 100
+              },
+              "total": {
+                "op": "const",
+                "value": 100
+              },
+              "unit": {
+                "op": "const",
+                "value": "percent"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "gauge-set"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "gauge-set"
+    ],
+    "opcodes": [
+      "clamp",
+      "concat",
+      "const",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

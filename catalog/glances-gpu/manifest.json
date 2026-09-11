@@ -1,0 +1,130 @@
+{
+  "manifestVersion": 1,
+  "id": "glances-gpu",
+  "version": "1.0.0",
+  "displayName": "Glances · GPU",
+  "category": "monitoring",
+  "icon": "glances",
+  "docs": "https://oauramos.github.io/neohomepage/widgets/glances-gpu",
+  "target": {
+    "fields": [],
+    "auth": {
+      "kind": "none"
+    }
+  },
+  "config": [],
+  "operations": {
+    "gpu": {
+      "method": "GET",
+      "path": "/api/4/gpu",
+      "decode": "json"
+    }
+  },
+  "projection": {
+    "op": "pick",
+    "fields": {
+      "stats": {
+        "op": "concat",
+        "of": [
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Load"
+              },
+              "value": {
+                "op": "format",
+                "as": "percent",
+                "of": {
+                  "op": "arith",
+                  "fn": "div",
+                  "of": [
+                    {
+                      "op": "get",
+                      "path": "$.0.proc"
+                    },
+                    {
+                      "op": "const",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Memory"
+              },
+              "value": {
+                "op": "format",
+                "as": "percent",
+                "of": {
+                  "op": "arith",
+                  "fn": "div",
+                  "of": [
+                    {
+                      "op": "get",
+                      "path": "$.0.mem"
+                    },
+                    {
+                      "op": "const",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "op": "pick",
+            "fields": {
+              "label": {
+                "op": "const",
+                "value": "Temp"
+              },
+              "value": {
+                "op": "format",
+                "of": {
+                  "op": "get",
+                  "path": "$.0.temperature"
+                },
+                "as": "temperature"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "presentation": {
+    "template": "stat-grid"
+  },
+  "poll": {
+    "defaultIntervalMs": 30000,
+    "minIntervalMs": 10000
+  },
+  "requires": {
+    "templates": [
+      "stat-grid"
+    ],
+    "opcodes": [
+      "arith",
+      "concat",
+      "const",
+      "format",
+      "get",
+      "pick"
+    ],
+    "authKinds": [
+      "none"
+    ],
+    "fetchKinds": [
+      "json"
+    ]
+  }
+}

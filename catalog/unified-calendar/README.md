@@ -10,7 +10,7 @@ shape. Four things it demonstrates that a single-target manifest cannot:
   the target's own `widgetType` picks the source kind, so a Sonarr bound into a calendar is fetched
   as a Sonarr and there is nothing for the user to get wrong.
 - **Fan-out without a `flatMap` opcode.** A film has up to three dated events — in cinemas,
-  physical, digital — and none of them is *the* date. Radarr is therefore three `emits` over ONE
+  physical, digital — and none of them is _the_ date. Radarr is therefore three `emits` over ONE
   `/api/v3/calendar` response: three item streams, one HTTP request, one scheduler entry.
 - **A decoder the DSL could not be.** RFC 5545 recurrence expansion, `EXDATE`, `RECURRENCE-ID`
   overrides and VTIMEZONE conversion happen in the `ics` decoder, before any projection runs. The
