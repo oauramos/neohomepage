@@ -88,16 +88,25 @@ export function renderDocument(options: {
 
   const body = renderToStaticMarkup(dashboard(resolved, {}))
 
-  // Only non-secret resolved state is embedded. `curl` against the page therefore reveals the
-  // layout and the widget names, and nothing about credentials or upstream responses.
-  const state = JSON.stringify({
+  // What the browser boots from, under the key it reads. Only what the page already shows is
+  // embedded — layout, widget names, theme — never a target: a target names a host and which
+  // credentials exist, and the page is served to anyone the API is not. The editor fetches the
+  // rest the moment it takes over. It used to be embedded flat, which the reader never matched,
+  // so every load booted from an empty dashboard, painted the default theme over the baked one,
+  // and then fetched what it already had: a flash of the wrong look on every open.
+  const embedded: Resolved = {
+    schemaVersion: resolved.schemaVersion,
     title: resolved.title,
     defaultPage: resolved.defaultPage,
     generatedAt: resolved.generatedAt,
     pages: resolved.pages,
     widgets: resolved.widgets,
+    targets: [],
     theme: resolved.theme,
-  })
+    features: resolved.features,
+    diagnostics: [],
+  }
+  const state = JSON.stringify({ resolved: embedded })
 
   return `<!doctype html>
 <html lang="en" ${resolved.theme.mode === 'system' ? '' : `data-theme="${resolved.theme.mode}"`}>

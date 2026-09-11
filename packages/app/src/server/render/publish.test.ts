@@ -262,3 +262,18 @@ describe('publishing', () => {
     expect(await generations.current()).toBe(1)
   })
 })
+
+describe('the embedded state', () => {
+  it('is the resolved tree under the key the browser reads, so the first paint is the real one', () => {
+    const html = renderDocument({ resolved: resolved(), assets: '' })
+    const start = html.indexOf('type="application/json">') + 'type="application/json">'.length
+    const json = html.slice(start, html.indexOf('</script>', start))
+    const embedded = JSON.parse(json.replaceAll('\\u003c', '<').replaceAll('\\u003e', '>')) as {
+      resolved: { theme: { preset: string }; pages: unknown[]; targets: { secretRefs: unknown }[] }
+    }
+    expect(embedded.resolved.pages).toHaveLength(1)
+    expect(embedded.resolved.theme.preset).toBeDefined()
+    // Targets stay out: a host and the names of its credentials are for the editor, which asks.
+    expect(embedded.resolved.targets).toEqual([])
+  })
+})

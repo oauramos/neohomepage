@@ -220,6 +220,10 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
   box-shadow:var(--nh-shadow),inset 3px 0 0 0 var(--nh-bad)}
 .nh-tile[data-neo-state="stale"]{box-shadow:var(--nh-shadow),inset 3px 0 0 0 var(--nh-warn)}
 .nh-tile[data-neo-state="pending"] .nh-tile-body{opacity:0.7}
+/* A bookmark is never "waiting for data": its link is there from the first render. Dimming it
+   like a reading that has not arrived also dropped a solid-filled button below 4.5:1 on four
+   presets, which axe saw the moment link tiles stopped rendering as placeholders. */
+.nh-tile[data-neo-template="link-tile"][data-neo-state="pending"] .nh-tile-body{opacity:1}
 .nh-tile-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .nh-tile-title{margin:0;font-size:var(--nh-title-size);font-weight:600;
   letter-spacing:var(--nh-title-tracking);text-transform:var(--nh-title-transform);
