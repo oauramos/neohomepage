@@ -8,6 +8,7 @@ import type {
   Theme,
   Widget,
 } from '../config/schema.ts'
+import { effectiveSections, gridSectionIds, sectionOf } from '../config/sections.ts'
 
 /**
  * The whole config tree in memory.
@@ -126,6 +127,76 @@ export function validateTree(tree: ConfigTree): Problem[] {
       }
       seen.add(breakpoint.minWidth)
     }
+
+    // Section, group, link and navbar item ids all end up in CSS selectors and React keys, and a
+    // duplicate is a tile drawn twice or a group that cannot be addressed for removal.
+    const sectionIds = new Set<string>()
+    for (const section of page.sections) {
+      if (sectionIds.has(section.id)) {
+        problems.push({
+          path: `pages/${id}.json`,
+          message: `section "${section.id}" is declared twice`,
+        })
+      }
+      sectionIds.add(section.id)
+      const unique = (scope: string, ids: readonly string[]) => {
+        const found = new Set<string>()
+        for (const entry of ids) {
+          if (found.has(entry)) {
+            problems.push({
+              path: `pages/${id}.json`,
+              message: `${scope} "${entry}" is declared twice in section "${section.id}"`,
+            })
+          }
+          found.add(entry)
+        }
+      }
+      if (section.kind === 'navbar') {
+        unique(
+          'navbar item',
+          section.items.map((item) => item.id),
+        )
+        for (const item of section.items) {
+          if (item.kind === 'links')
+            unique(
+              'link',
+              item.links.map((link) => link.id),
+            )
+        }
+      }
+      if (section.kind === 'bookmarks') {
+        unique(
+          'group',
+          section.groups.map((group) => group.id),
+        )
+        for (const group of section.groups)
+          unique(
+            'link',
+            group.links.map((link) => link.id),
+          )
+      }
+      const breakpointKeys =
+        section.kind === 'grid'
+          ? Object.keys(section.cols)
+          : section.kind === 'bookmarks'
+            ? Object.keys(section.columns)
+            : []
+      for (const key of breakpointKeys) {
+        if (!breakpointIds.has(key)) {
+          problems.push({
+            path: `pages/${id}.json`,
+            message: `section "${section.id}" sizes breakpoint "${key}", which the page does not define`,
+          })
+        }
+      }
+    }
+    if (page.sections.length > 0 && gridSectionIds(page).length === 0) {
+      problems.push({
+        path: `pages/${id}.json`,
+        // Widgets need somewhere to be; a page of only bookmarks is fine until one is added.
+        message: 'a page that declares sections needs at least one grid section',
+      })
+    }
   }
 
   for (const [id, widget] of tree.widgets) {
@@ -135,8 +206,14 @@ export function validateTree(tree: ConfigTree): Problem[] {
         message: `id is "${widget.id}" but the file is ${id}.json`,
       })
     }
-    if (!tree.pages.has(widget.page)) {
+    const page = tree.pages.get(widget.page)
+    if (page === undefined) {
       problems.push({ path: `widgets/${id}.json`, message: `page "${widget.page}" does not exist` })
+    } else if (widget.section !== null && !gridSectionIds(page).includes(widget.section)) {
+      problems.push({
+        path: `widgets/${id}.json`,
+        message: `section "${widget.section}" is not a grid section of page "${widget.page}"`,
+      })
     }
     if (widget.targetId !== null && !tree.targets.has(widget.targetId)) {
       problems.push({
@@ -153,9 +230,25 @@ export function validateTree(tree: ConfigTree): Problem[] {
       continue
     }
     const breakpointIds = new Set(page.grid.breakpoints.map((b) => b.id))
-    const pageWidgets = new Set(
-      [...tree.widgets.values()].filter((w) => w.page === pageId).map((w) => w.id),
+    const pageWidgets = new Map(
+      [...tree.widgets.values()].filter((w) => w.page === pageId).map((w) => [w.id, w]),
     )
+    // A grid section may narrow the page's columns or cap its rows; the bounds are the section's.
+    const sections = new Map(
+      effectiveSections(page)
+        .filter((section) => section.kind === 'grid')
+        .map((section) => [section.id, section]),
+    )
+    const boundsOf = (widgetId: string, breakpointId: string) => {
+      const widget = pageWidgets.get(widgetId)
+      const section = widget === undefined ? undefined : sections.get(sectionOf(widget, page) ?? '')
+      const pageCols = page.grid.breakpoints.find((b) => b.id === breakpointId)?.cols ?? 0
+      return {
+        cols: section?.kind === 'grid' ? (section.cols[breakpointId] ?? pageCols) : pageCols,
+        maxRows:
+          section?.kind === 'grid' ? (section.maxRows ?? page.grid.maxRows) : page.grid.maxRows,
+      }
+    }
 
     for (const [breakpointId, items] of Object.entries(layout.layouts)) {
       if (!breakpointIds.has(breakpointId)) {
@@ -165,9 +258,9 @@ export function validateTree(tree: ConfigTree): Problem[] {
         })
         continue
       }
-      const cols = page.grid.breakpoints.find((b) => b.id === breakpointId)?.cols ?? 0
       const placed = new Set<string>()
       for (const item of items) {
+        const { cols, maxRows } = boundsOf(item.i, breakpointId)
         if (!pageWidgets.has(item.i)) {
           problems.push({
             path: `layouts/${pageId}.json`,
@@ -188,10 +281,10 @@ export function validateTree(tree: ConfigTree): Problem[] {
             message: `widget "${item.i}" spans past column ${cols} in breakpoint ${breakpointId}`,
           })
         }
-        if (page.grid.maxRows !== null && item.y + item.h > page.grid.maxRows) {
+        if (maxRows !== null && item.y + item.h > maxRows) {
           problems.push({
             path: `layouts/${pageId}.json`,
-            message: `widget "${item.i}" exceeds the page's ${page.grid.maxRows}-row limit`,
+            message: `widget "${item.i}" exceeds the ${maxRows}-row limit of its section`,
           })
         }
       }

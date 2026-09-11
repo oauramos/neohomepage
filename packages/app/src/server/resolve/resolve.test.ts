@@ -54,6 +54,13 @@ function tree(overrides: Partial<ConfigTree> = {}): ConfigTree {
 const widget = (id: string, extra: Record<string, unknown> = {}) =>
   widgetSchema.parse({ id, page: 'home', type: 'sonarr-queue', ...extra })
 
+/** The first grid section of the first page — where every pre-sections config puts its widgets. */
+const mainGrid = (r: ReturnType<typeof resolve>) => {
+  const section = r.pages[0]?.sections.find((candidate) => candidate.kind === 'grid')
+  if (section === undefined || section.kind !== 'grid') throw new Error('no grid section')
+  return section
+}
+
 describe('purity', () => {
   it('produces byte-identical output for identical input', () => {
     const input = {
@@ -263,11 +270,11 @@ describe('layout derivation', () => {
       catalog: CATALOG,
       generatedAt: NOW,
     })
-    const page = r.pages[0]
-    expect(page?.layouts.lg).toHaveLength(1)
-    expect(page?.layouts.md).toHaveLength(1)
-    expect(page?.layouts.sm).toHaveLength(1)
-    expect(page?.layouts.sm?.[0]?.w).toBeLessThanOrEqual(2)
+    const grid = mainGrid(r)
+    expect(grid.layouts.lg).toHaveLength(1)
+    expect(grid.layouts.md).toHaveLength(1)
+    expect(grid.layouts.sm).toHaveLength(1)
+    expect(grid.layouts.sm?.[0]?.w).toBeLessThanOrEqual(2)
   })
 
   it('keeps an authored narrow layout instead of overwriting it with a derived one', () => {
@@ -289,7 +296,7 @@ describe('layout derivation', () => {
       catalog: CATALOG,
       generatedAt: NOW,
     })
-    expect(r.pages[0]?.layouts.sm?.[0]?.h).toBe(9)
+    expect(mainGrid(r).layouts.sm?.[0]?.h).toBe(9)
   })
 
   it('drops layout entries for widgets that no longer exist', () => {
@@ -304,7 +311,7 @@ describe('layout derivation', () => {
       ],
     ])
     const r = resolve({ tree: tree({ layouts }), catalog: CATALOG, generatedAt: NOW })
-    expect(r.pages[0]?.layouts.lg).toEqual([])
+    expect(mainGrid(r).layouts.lg).toEqual([])
   })
 
   it('reports a widget that has no placement anywhere', () => {
@@ -314,5 +321,142 @@ describe('layout derivation', () => {
       generatedAt: NOW,
     })
     expect(r.diagnostics.some((d) => d.includes('no layout entry'))).toBe(true)
+  })
+})
+
+describe('sections', () => {
+  const layoutsFor = (
+    items: Record<string, { i: string; x: number; y: number; w: number; h: number }[]>,
+  ) =>
+    new Map([
+      [
+        'home',
+        layoutFileSchema.parse({
+          page: 'home',
+          layouts: items,
+          meta: Object.fromEntries(
+            Object.keys(items).map((bp) => [bp, { origin: 'authored', cols: 12 }]),
+          ),
+        }),
+      ],
+    ])
+
+  it('gives a page that declares none the header-over-one-grid it always had', () => {
+    const r = resolve({ tree: tree(), catalog: CATALOG, generatedAt: NOW })
+    expect(r.pages[0]?.sections.map((s) => s.kind)).toEqual(['navbar', 'grid'])
+    const nav = r.pages[0]?.sections[0]
+    expect(nav?.kind === 'navbar' && nav.items.map((i) => i.kind)).toEqual(['title'])
+  })
+
+  it('slices the flat layout file per grid section, each board starting at row zero', () => {
+    const page = pageSchema.parse({
+      id: 'home',
+      sections: [
+        { id: 'top', kind: 'grid' },
+        { id: 'bottom', kind: 'grid', cols: { lg: 6 } },
+      ],
+    })
+    const t = tree({
+      pages: new Map([['home', page]]),
+      widgets: new Map([
+        ['w1', widget('w1')],
+        ['w2', widget('w2', { section: 'bottom' })],
+      ]),
+      layouts: layoutsFor({
+        lg: [
+          { i: 'w1', x: 0, y: 0, w: 4, h: 3 },
+          { i: 'w2', x: 0, y: 0, w: 4, h: 3 },
+        ],
+      }),
+    })
+    const r = resolve({ tree: t, catalog: CATALOG, generatedAt: NOW })
+    // Declared sections replace the implicit pair wholesale: no navbar unless one is listed.
+    const [top, bottom] = r.pages[0]?.sections ?? []
+    expect(top?.kind === 'grid' && top.widgetIds).toEqual(['w1'])
+    expect(bottom?.kind === 'grid' && bottom.widgetIds).toEqual(['w2'])
+    expect(top?.kind === 'grid' && top.layouts.lg?.map((i) => i.i)).toEqual(['w1'])
+    expect(bottom?.kind === 'grid' && bottom.layouts.lg?.map((i) => i.i)).toEqual(['w2'])
+    // The narrower section derives its other tiers from ITS column count, not the page's.
+    expect(
+      bottom?.kind === 'grid' && bottom.grid.breakpoints.find((b) => b.id === 'lg')?.cols,
+    ).toBe(6)
+    expect(r.diagnostics).toEqual([])
+  })
+
+  it('composes a bookmark href from its parts and drops a default port', () => {
+    const page = pageSchema.parse({
+      id: 'home',
+      sections: [
+        { id: 'main', kind: 'grid' },
+        {
+          id: 'links',
+          kind: 'bookmarks',
+          columns: { lg: 3 },
+          groups: [
+            {
+              id: 'g1',
+              title: 'Router',
+              links: [
+                { id: 'l1', label: 'FriendlyWrt', base: { host: '192.168.2.1', port: 80 } },
+                {
+                  id: 'l2',
+                  label: 'Tailscale',
+                  base: { scheme: 'https', host: 'login.tailscale.com', port: 443 },
+                  path: '/admin/',
+                },
+                { id: 'l3', label: 'Proxy', base: { host: '10.0.0.5', port: 81 } },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    const r = resolve({
+      tree: tree({ pages: new Map([['home', page]]) }),
+      catalog: CATALOG,
+      generatedAt: NOW,
+    })
+    const section = r.pages[0]?.sections[1]
+    if (section?.kind !== 'bookmarks') throw new Error('expected a bookmarks section')
+    expect(section.groups[0]?.links.map((l) => l.href)).toEqual([
+      'http://192.168.2.1/',
+      'https://login.tailscale.com/admin/',
+      'http://10.0.0.5:81/',
+    ])
+    // Dense: every breakpoint gets a column count, the unspecified ones from the grid's width.
+    expect(section.columns).toEqual({ sm: 1, md: 2, lg: 3 })
+  })
+
+  it('resolves navbar links and passes the other items through', () => {
+    const page = pageSchema.parse({
+      id: 'home',
+      sections: [
+        {
+          id: 'nav',
+          kind: 'navbar',
+          items: [
+            { id: 'a', kind: 'title' },
+            {
+              id: 'b',
+              kind: 'links',
+              links: [{ id: 'l', label: 'NAS', base: { host: 'nas.home', port: 80 } }],
+            },
+            { id: 'c', kind: 'clock' },
+            { id: 'd', kind: 'search', engine: 'google' },
+          ],
+        },
+        { id: 'main', kind: 'grid' },
+      ],
+    })
+    const r = resolve({
+      tree: tree({ pages: new Map([['home', page]]) }),
+      catalog: CATALOG,
+      generatedAt: NOW,
+    })
+    const nav = r.pages[0]?.sections[0]
+    if (nav?.kind !== 'navbar') throw new Error('expected a navbar')
+    expect(nav.items.map((i) => i.kind)).toEqual(['title', 'links', 'clock', 'search'])
+    const links = nav.items[1]
+    expect(links?.kind === 'links' && links.links[0]?.href).toBe('http://nas.home/')
   })
 })

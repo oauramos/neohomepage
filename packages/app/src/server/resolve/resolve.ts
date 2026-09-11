@@ -2,7 +2,9 @@ import { cloneLayout, correctBounds, getCompactor } from 'react-grid-layout/core
 import type { Manifest } from '@neohomepage/catalog-schema'
 import { isComposite } from '@neohomepage/catalog-schema'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
-import type { Target, Widget } from '../config/schema.ts'
+import type { BookmarkLink, NavItem, Page, Section, Target, Widget } from '../config/schema.ts'
+import { effectiveSections, sectionOf } from '../config/sections.ts'
+import { composeHref } from '../../shared/links.ts'
 import type { Overrides } from '../config/overrides.ts'
 import { EMPTY_OVERRIDES } from '../config/overrides.ts'
 import type { ConfigTree } from '../store/tree.ts'
@@ -28,7 +30,10 @@ import type { ConfigTree } from '../store/tree.ts'
 
 import type {
   Resolved,
+  ResolvedLink,
+  ResolvedNavItem,
   ResolvedPage,
+  ResolvedSection,
   ResolvedTarget,
   ResolvedWidget,
 } from '../../shared/resolved.ts'
@@ -164,6 +169,118 @@ export function deriveLayout(
   return getCompactor('vertical').compact(bounded, toCols) as LayoutItem[]
 }
 
+function resolveLink(link: BookmarkLink): ResolvedLink {
+  return {
+    id: link.id,
+    label: link.label,
+    href: composeHref(link.base, link.path),
+    icon: link.icon,
+  }
+}
+
+function resolveNavItem(item: NavItem): ResolvedNavItem {
+  switch (item.kind) {
+    case 'title':
+      return { id: item.id, kind: 'title' }
+    case 'text':
+      return { id: item.id, kind: 'text', text: item.text }
+    case 'links':
+      return { id: item.id, kind: 'links', links: item.links.map(resolveLink) }
+    case 'clock':
+      return { id: item.id, kind: 'clock', showDate: item.showDate, hour12: item.hour12 }
+    case 'search':
+      return { id: item.id, kind: 'search', engine: item.engine, placeholder: item.placeholder }
+    case 'spacer':
+      return { id: item.id, kind: 'spacer' }
+  }
+}
+
+/** Groups per row when a bookmarks section says nothing: a third of the grid's columns, at least one. */
+function defaultBookmarkColumns(gridCols: number): number {
+  return Math.max(1, Math.min(12, Math.round(gridCols / 3)))
+}
+
+/**
+ * One section, dense.
+ *
+ * A grid section gets the page grid with its own column counts and row cap substituted in, and
+ * its slice of the page's layout file: the file is flat per breakpoint, and a section's layout is
+ * the entries whose widget lives in it. Coordinates are therefore per section — every board
+ * starts at row zero — which is also what the editor renders, one grid per section.
+ */
+function resolveSection(
+  section: Section,
+  page: Page,
+  pageWidgets: readonly Widget[],
+  stored: Readonly<Record<string, readonly LayoutItem[]>>,
+  meta: Readonly<Record<string, { readonly origin: 'authored' | 'derived' }>>,
+): ResolvedSection {
+  switch (section.kind) {
+    case 'navbar':
+      return {
+        id: section.id,
+        kind: 'navbar',
+        title: section.title,
+        items: section.items.map(resolveNavItem),
+      }
+
+    case 'bookmarks':
+      return {
+        id: section.id,
+        kind: 'bookmarks',
+        title: section.title,
+        columns: Object.fromEntries(
+          page.grid.breakpoints.map((breakpoint) => [
+            breakpoint.id,
+            section.columns[breakpoint.id] ?? defaultBookmarkColumns(breakpoint.cols),
+          ]),
+        ),
+        display: section.display,
+        groups: section.groups.map((group) => ({
+          id: group.id,
+          title: group.title,
+          links: group.links.map(resolveLink),
+        })),
+      }
+
+    case 'grid': {
+      const grid: Page['grid'] = {
+        ...page.grid,
+        breakpoints: page.grid.breakpoints.map((breakpoint) => ({
+          ...breakpoint,
+          cols: section.cols[breakpoint.id] ?? breakpoint.cols,
+        })),
+        maxRows: section.maxRows ?? page.grid.maxRows,
+      }
+      const widgetIds = pageWidgets
+        .filter((widget) => sectionOf(widget, page) === section.id)
+        .map((widget) => widget.id)
+      const authoritative = grid.breakpoints.find((b) => b.id === grid.authoritative)
+      const layouts: Record<string, readonly LayoutItem[]> = {}
+
+      for (const breakpoint of grid.breakpoints) {
+        const items = stored[breakpoint.id]
+        if (items !== undefined && meta[breakpoint.id]?.origin !== 'derived') {
+          layouts[breakpoint.id] = items.filter((item) => widgetIds.includes(item.i))
+          continue
+        }
+        const source = authoritative === undefined ? undefined : stored[authoritative.id]
+        if (source === undefined || authoritative === undefined) {
+          layouts[breakpoint.id] = []
+          continue
+        }
+        layouts[breakpoint.id] = deriveLayout(
+          source.filter((item) => widgetIds.includes(item.i)),
+          authoritative.cols,
+          breakpoint.cols,
+        )
+      }
+
+      return { id: section.id, kind: 'grid', title: section.title, grid, layouts, widgetIds }
+    }
+  }
+}
+
 export function resolve(input: ResolveInput): Resolved {
   const { tree, catalog, generatedAt } = input
   const overrides = input.overrides ?? EMPTY_OVERRIDES
@@ -185,41 +302,31 @@ export function resolve(input: ResolveInput): Resolved {
     if (page === undefined) continue
 
     const layoutFile = tree.layouts.get(pageId)
-    const pageWidgets = widgets.filter((w) => w.page === pageId).map((w) => w.id)
-    const authoritative = page.grid.breakpoints.find((b) => b.id === page.grid.authoritative)
-    const layouts: Record<string, readonly LayoutItem[]> = {}
-
-    for (const breakpoint of page.grid.breakpoints) {
-      const stored = layoutFile?.layouts[breakpoint.id]
-      const origin = layoutFile?.meta[breakpoint.id]?.origin
-      if (stored !== undefined && origin !== 'derived') {
-        layouts[breakpoint.id] = stored.filter((item) => pageWidgets.includes(item.i))
-        continue
-      }
-      const source = authoritative === undefined ? undefined : layoutFile?.layouts[authoritative.id]
-      if (source === undefined || authoritative === undefined) {
-        layouts[breakpoint.id] = []
-        continue
-      }
-      layouts[breakpoint.id] = deriveLayout(
-        source.filter((item) => pageWidgets.includes(item.i)),
-        authoritative.cols,
-        breakpoint.cols,
-      )
-    }
+    const pageWidgets = [...tree.widgets.values()]
+      .filter((w) => w.page === pageId)
+      .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
+    const sections = effectiveSections(page).map((section) =>
+      resolveSection(section, page, pageWidgets, layoutFile?.layouts ?? {}, layoutFile?.meta ?? {}),
+    )
 
     // A widget with no placement anywhere is invisible with no error, which reads as data loss.
-    for (const id of pageWidgets) {
-      const placed = Object.values(layouts).some((items) => items.some((item) => item.i === id))
-      if (!placed) diagnostics.push(`widget "${id}" has no layout entry on any breakpoint`)
+    for (const widget of pageWidgets) {
+      const placed = sections.some(
+        (section) =>
+          section.kind === 'grid' &&
+          Object.values(section.layouts).some((items) =>
+            items.some((item) => item.i === widget.id),
+          ),
+      )
+      if (!placed) diagnostics.push(`widget "${widget.id}" has no layout entry on any breakpoint`)
     }
 
     pages.push({
       id: page.id,
       title: page.title,
       grid: page.grid,
-      layouts,
-      widgetIds: pageWidgets,
+      sections,
+      widgetIds: pageWidgets.map((w) => w.id),
     })
   }
 

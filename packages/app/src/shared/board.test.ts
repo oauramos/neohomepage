@@ -190,7 +190,23 @@ describe('the dashboard shell', () => {
       defaultPage: 'home',
       generatedAt: '2026-09-06T12:00:00.000Z',
       pages: [
-        { id: 'home', title: 'Home', grid: {}, layouts: {}, widgetIds: widgets.map((w) => w.id) },
+        {
+          id: 'home',
+          title: 'Home',
+          grid: {},
+          sections: [
+            { id: 'nav', kind: 'navbar', title: null, items: [{ id: 't', kind: 'title' }] },
+            {
+              id: 'main',
+              kind: 'grid',
+              title: null,
+              grid: {},
+              layouts: {},
+              widgetIds: widgets.filter((w) => w.page === 'home').map((w) => w.id),
+            },
+          ],
+          widgetIds: widgets.filter((w) => w.page === 'home').map((w) => w.id),
+        },
       ],
       widgets,
       targets: [],
@@ -212,5 +228,123 @@ describe('the dashboard shell', () => {
   it('says so plainly when there are no pages at all', () => {
     const empty = { ...resolved([]), pages: [] } as unknown as Resolved
     expect(html(dashboard(empty, {}))).toContain('No pages configured yet')
+  })
+})
+
+describe('sections', () => {
+  const link = (id: string, label: string, href: string) => ({ id, label, href, icon: null })
+  const withSections = (sections: unknown[]): Resolved =>
+    ({
+      schemaVersion: 1,
+      title: 'Home lab',
+      defaultPage: 'home',
+      generatedAt: '2026-09-06T12:00:00.000Z',
+      pages: [{ id: 'home', title: 'Home', grid: {}, sections, widgetIds: [] }],
+      widgets: [],
+      targets: [],
+      theme: {},
+      diagnostics: [],
+    }) as unknown as Resolved
+
+  it('renders every navbar item kind, with the search box as a plain GET form', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          {
+            id: 'nav',
+            kind: 'navbar',
+            title: null,
+            items: [
+              { id: 'a', kind: 'title' },
+              { id: 'b', kind: 'text', text: 'rack 2' },
+              { id: 'c', kind: 'links', links: [link('l', 'NAS', 'http://nas.home/')] },
+              { id: 'd', kind: 'spacer' },
+              { id: 'e', kind: 'clock', showDate: true, hour12: false },
+              { id: 'f', kind: 'search', engine: 'duckduckgo', placeholder: 'Search the web' },
+            ],
+          },
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+        ]),
+        {},
+        { now: new Date('2026-09-11T15:04:00Z') },
+      ),
+    )
+    expect(rendered).toContain('<h1 class="nh-title">Home lab</h1>')
+    expect(rendered).toContain('rack 2')
+    expect(rendered).toContain('class="nh-nav-link" href="http://nas.home/"')
+    expect(rendered).toContain('class="nh-spacer"')
+    expect(rendered).toMatch(
+      /<time class="nh-clock"[^>]*>\d\d:\d\d · [A-Z][a-z]{2} 11 Sep<\/time>/,
+    )
+    expect(rendered).toContain('action="https://duckduckgo.com/" method="get"')
+    expect(rendered).toContain('name="q"')
+    expect(rendered).toContain('placeholder="Search the web"')
+  })
+
+  it('renders bookmark groups as lists of links, the display on the section', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+          {
+            id: 'links',
+            kind: 'bookmarks',
+            title: 'Links',
+            columns: { sm: 1, md: 2, lg: 3 },
+            display: 'chips',
+            groups: [
+              {
+                id: 'router',
+                title: 'Router',
+                links: [link('l1', 'FriendlyWrt', 'http://192.168.2.1/')],
+              },
+            ],
+          },
+        ]),
+        {},
+      ),
+    )
+    expect(rendered).toContain(
+      'class="nh-section nh-bookmarks" data-neo-section="links" data-neo-display="chips"',
+    )
+    expect(rendered).toContain('<h2 class="nh-section-title">Links</h2>')
+    expect(rendered).toContain('<h3 class="nh-group-title">Router</h3>')
+    expect(rendered).toContain('class="nh-bm" href="http://192.168.2.1/"')
+    // The glyph is the label's initial; the icon pipeline replaces it with an image later.
+    expect(rendered).toContain('aria-hidden="true">F</span>')
+  })
+
+  it('keeps one header landmark and one main, with later navbars inside main', () => {
+    const rendered = html(
+      dashboard(
+        withSections([
+          { id: 'nav', kind: 'navbar', title: null, items: [{ id: 'a', kind: 'title' }] },
+          { id: 'main', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+          {
+            id: 'nav2',
+            kind: 'navbar',
+            title: null,
+            items: [{ id: 'b', kind: 'text', text: 'lower' }],
+          },
+        ]),
+        {},
+      ),
+    )
+    expect(rendered.indexOf('<header')).toBeLessThan(rendered.indexOf('<main'))
+    expect(rendered.match(/<main/g)).toHaveLength(1)
+    expect(rendered.indexOf('lower')).toBeGreaterThan(rendered.indexOf('<main'))
+  })
+
+  it('shows the first-run hint only on the first grid, and only when the page is empty', () => {
+    const empty = html(
+      dashboard(
+        withSections([
+          { id: 'a', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+          { id: 'b', kind: 'grid', title: null, grid: {}, layouts: {}, widgetIds: [] },
+        ]),
+        {},
+      ),
+    )
+    expect(empty.match(/No widgets yet/g)).toHaveLength(1)
   })
 })

@@ -732,3 +732,146 @@ describe('no credential reaches config/, whatever the caller sends', () => {
     expect(all.join('')).toContain('admin')
   })
 })
+
+describe('sections', () => {
+  const SECTIONS = [
+    { id: 'nav', kind: 'navbar', items: [{ id: 't', kind: 'title' }] },
+    { id: 'main', kind: 'grid' },
+    { id: 'narrow', kind: 'grid', cols: { lg: 6 }, maxRows: 3 },
+    {
+      id: 'links',
+      kind: 'bookmarks',
+      columns: { lg: 3 },
+      display: 'chips',
+      groups: [
+        {
+          id: 'router',
+          title: 'Router',
+          links: [{ id: 'l1', label: 'FriendlyWrt', base: { host: '192.168.2.1', port: 80 } }],
+        },
+      ],
+    },
+  ]
+
+  const layoutFile = async () =>
+    JSON.parse(await readFile(join(dataDir, 'config', 'layouts', 'home.json'), 'utf8')) as {
+      layouts: Record<string, { i: string; x: number; y: number; w: number; h: number }[]>
+    }
+
+  it("replaces a page's sections whole and resolves them", async () => {
+    expect((await request('PATCH', '/api/pages/home', { sections: SECTIONS })).status).toBe(200)
+    const { body } = await request('GET', '/api/state')
+    const page = (body as { resolved: { pages: { sections: { id: string; kind: string }[] }[] } })
+      .resolved.pages[0]
+    expect(page?.sections.map((section) => section.kind)).toEqual([
+      'navbar',
+      'grid',
+      'grid',
+      'bookmarks',
+    ])
+  })
+
+  it('422s a malformed section list, naming the page, rather than 500ing', async () => {
+    const { status, body } = await request('PATCH', '/api/pages/home', {
+      sections: [{ id: 'x', kind: 'bookmarks', display: 'marquee' }],
+    })
+    expect(status).toBe(422)
+    expect((body as { error: string }).error).toContain('pages/home.json')
+  })
+
+  it('refuses a section list that would strand a widget', async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    await request('POST', '/api/widgets', { type: 'sonarr-queue', section: 'narrow' })
+    const { status, body } = await request('PATCH', '/api/pages/home', {
+      sections: SECTIONS.filter((section) => section.id !== 'narrow'),
+    })
+    expect(status).toBe(422)
+    expect((body as { error: string }).error).toContain('narrow')
+  })
+
+  it("places a widget inside its section's columns, without touching another section", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const main = (
+      (await request('POST', '/api/widgets', { type: 'sonarr-queue' })).body as {
+        id: string
+      }
+    ).id
+    const { status, body } = await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 8, h: 3 },
+    })
+    expect(status).toBe(201)
+    const narrow = (body as { id: string }).id
+
+    const file = await layoutFile()
+    const lg = file.layouts.lg ?? []
+    // An 8-wide request in a 6-column section is clamped to the section, not the page.
+    expect(lg.find((item) => item.i === narrow)).toMatchObject({ x: 0, y: 0, w: 6 })
+    // Both sit at the origin of their own board: coordinates are per section.
+    expect(lg.find((item) => item.i === main)).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it("refuses a widget the section's row cap has no room for", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 6, h: 3 },
+    })
+    const { status, body } = await request('POST', '/api/widgets', {
+      type: 'sonarr-queue',
+      section: 'narrow',
+      size: { w: 6, h: 3 },
+    })
+    // Refused on every authored tier: the widget exists, but says so rather than being hidden.
+    expect(status).toBe(201)
+    expect((body as { refusedBreakpoints: string[] }).refusedBreakpoints).toContain('lg')
+  })
+
+  it("saves a layout for one section and leaves the other sections' entries alone", async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const main = (
+      (await request('POST', '/api/widgets', { type: 'sonarr-queue' })).body as {
+        id: string
+      }
+    ).id
+    const narrow = (
+      (await request('POST', '/api/widgets', { type: 'sonarr-queue', section: 'narrow' })).body as {
+        id: string
+      }
+    ).id
+
+    const { status } = await request('PUT', '/api/pages/home/layout', {
+      breakpoint: 'lg',
+      section: 'narrow',
+      items: [{ i: narrow, x: 2, y: 0, w: 4, h: 3 }],
+    })
+    expect(status).toBe(200)
+    const lg = (await layoutFile()).layouts.lg ?? []
+    expect(lg.find((item) => item.i === narrow)).toMatchObject({ x: 2, w: 4 })
+    expect(lg.find((item) => item.i === main)).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it('moves a widget to another section and re-places it there', async () => {
+    await request('PATCH', '/api/pages/home', { sections: SECTIONS })
+    const id = (
+      (await request('POST', '/api/widgets', { type: 'sonarr-queue', size: { w: 8, h: 3 } }))
+        .body as { id: string }
+    ).id
+    const { status } = await request('PATCH', `/api/widgets/${id}`, { section: 'narrow' })
+    expect(status).toBe(200)
+
+    const { body } = await request('GET', '/api/state')
+    const sections = (
+      body as {
+        resolved: { pages: { sections: { id: string; widgetIds?: string[] }[] }[] }
+      }
+    ).resolved.pages[0]?.sections
+    expect(sections?.find((section) => section.id === 'narrow')?.widgetIds).toEqual([id])
+    expect(sections?.find((section) => section.id === 'main')?.widgetIds).toEqual([])
+    // Re-placed to fit the six columns it moved into.
+    const lg = (await layoutFile()).layouts.lg ?? []
+    expect(lg.find((item) => item.i === id)?.w).toBe(6)
+  })
+})

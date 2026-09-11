@@ -1,7 +1,8 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { dashboard } from '../shared/board.ts'
-import type { Resolved } from '../shared/resolved.ts'
+import { board, dashboard } from '../shared/board.ts'
+import type { Resolved, ResolvedPage } from '../shared/resolved.ts'
+import { emitPageCss } from '../shared/section-css.ts'
 import { AboutPanel, ConfigPanel, ThemePanel, WidgetsPanel } from './fab/panels.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
@@ -77,6 +78,47 @@ function TabPanel({
   }
 }
 
+/**
+ * The page's own stylesheet — board geometry and bookmark columns — kept current in the browser.
+ *
+ * The document arrives with this baked in, but it is baked as of the last publish. Adding a
+ * widget or a section changes the resolved page over SSE long before the next generation is
+ * written, and without this the new tile would sit at the top-left with no rules until a reload.
+ */
+function usePageCss(page: ResolvedPage | undefined): void {
+  useEffect(() => {
+    if (page === undefined) return
+    let element = document.getElementById('neo-page-css')
+    if (element === null) {
+      element = document.createElement('style')
+      element.id = 'neo-page-css'
+      document.head.append(element)
+    }
+    element.textContent = emitPageCss(page)
+  }, [page])
+}
+
+/** A clock that ticks: re-render on the minute, and only if the page actually has one. */
+function useClock(enabled: boolean): Date {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    if (!enabled) return
+    const tick = () => setNow(new Date())
+    tick()
+    const delay = 60_000 - (Date.now() % 60_000) + 50
+    let interval: ReturnType<typeof setInterval> | null = null
+    const timeout = setTimeout(() => {
+      tick()
+      interval = setInterval(tick, 60_000)
+    }, delay)
+    return () => {
+      clearTimeout(timeout)
+      if (interval !== null) clearInterval(interval)
+    }
+  }, [enabled])
+  return now
+}
+
 function App({ client }: { client: DashboardClient }) {
   const [state, setState] = useState(client.state)
   const [editing, setEditing] = useState(false)
@@ -97,12 +139,18 @@ function App({ client }: { client: DashboardClient }) {
   const page =
     state.resolved.pages.find((candidate) => candidate.id === state.resolved.defaultPage) ??
     state.resolved.pages[0]
+  usePageCss(page)
+  const now = useClock(
+    page?.sections.some(
+      (section) => section.kind === 'navbar' && section.items.some((item) => item.kind === 'clock'),
+    ) ?? false,
+  )
 
-  const saveLayout = async (breakpoint: string, items: LayoutItem[]) => {
+  const saveLayout = async (section: string, breakpoint: string, items: LayoutItem[]) => {
     await fetch(`/api/pages/${page?.id ?? 'home'}/layout`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ breakpoint, items }),
+      body: JSON.stringify({ section, breakpoint, items }),
     })
     await client.refresh()
   }
@@ -150,15 +198,25 @@ function App({ client }: { client: DashboardClient }) {
   return (
     <div data-neo-controls={hideControls ? 'hidden' : 'shown'}>
       {editing && page !== undefined ? (
-        <GridEditor
-          page={page}
-          widgets={state.resolved.widgets}
-          renderWidget={(widget) => widgetTile(widget, state.data[widget.id])}
-          onCommit={saveLayout}
-          onRemove={(id) => void removeWidget(id)}
-        />
+        // Edit mode is the page with every grid section swapped for an editor of its own; the
+        // navbar and the bookmark groups render exactly as they do in view mode.
+        <div id="neo-root-content">
+          {board(page, state.resolved, state.data, {
+            now,
+            renderGrid: (section) => (
+              <GridEditor
+                key={section.id}
+                section={section}
+                widgets={state.resolved.widgets}
+                renderWidget={(widget) => widgetTile(widget, state.data[widget.id])}
+                onCommit={(breakpoint, items) => saveLayout(section.id, breakpoint, items)}
+                onRemove={(id) => void removeWidget(id)}
+              />
+            ),
+          })}
+        </div>
       ) : (
-        dashboard(state.resolved, state.data)
+        dashboard(state.resolved, state.data, { now })
       )}
       <Fab
         pending={state.pending}

@@ -26,7 +26,17 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         id: 'home',
         title: 'Home',
         grid: page.grid,
-        layouts: { sm: [{ i: 'w1', x: 0, y: 0, w: 2, h: 3 }], md: [], lg: [] },
+        sections: [
+          { id: 'nav', kind: 'navbar', title: null, items: [{ id: 'title', kind: 'title' }] },
+          {
+            id: 'main',
+            kind: 'grid',
+            title: null,
+            grid: page.grid,
+            layouts: { sm: [{ i: 'w1', x: 0, y: 0, w: 2, h: 3 }], md: [], lg: [] },
+            widgetIds: ['w1'],
+          },
+        ],
         widgetIds: ['w1'],
       },
     ],
@@ -220,14 +230,24 @@ describe('publishing', () => {
     // A resolved tree the renderer cannot handle: a widget id that is not CSS-selector safe, which
     // the grid emitter refuses rather than interpolating.
     const broken = resolved()
+    const home = broken.pages[0] as (typeof broken.pages)[number]
     await expect(
       publish({
         resolved: {
           ...broken,
           pages: [
             {
-              ...(broken.pages[0] as (typeof broken.pages)[number]),
-              layouts: { sm: [{ i: 'evil"]{}', x: 0, y: 0, w: 1, h: 1 }] },
+              ...home,
+              sections: [
+                {
+                  id: 'main',
+                  kind: 'grid',
+                  title: null,
+                  grid: home.grid,
+                  layouts: { sm: [{ i: 'evil"]{}', x: 0, y: 0, w: 1, h: 1 }] },
+                  widgetIds: [],
+                },
+              ],
             },
           ],
         },

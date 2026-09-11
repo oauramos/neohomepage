@@ -4,8 +4,7 @@ import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { dashboard } from '../../shared/board.ts'
 import { FAVICON_LINK } from '../../shared/favicon.ts'
-import { emitGridCss, type Breakpoint, type GridConfig } from '../../shared/grid-css.ts'
-import type { LayoutItem } from '../../shared/grid-geometry.ts'
+import { emitPageCss } from '../../shared/section-css.ts'
 import type { Resolved } from '../../shared/resolved.ts'
 import { writeFileDurable } from '../store/atomic.ts'
 import { Generations } from '../store/generations.ts'
@@ -52,15 +51,6 @@ export type PublishResult = {
 /** A sentinel the smoke check looks for. If this is missing, the render produced nothing usable. */
 const ROOT_SENTINEL = 'id="neo-root"'
 
-function gridConfigFor(page: Resolved['pages'][number]): GridConfig {
-  return {
-    breakpoints: page.grid.breakpoints as readonly Breakpoint[],
-    rowHeight: page.grid.rowHeight,
-    margin: page.grid.margin,
-    containerPadding: page.grid.containerPadding,
-  }
-}
-
 /**
  * Read Vite's manifest to find the built asset filenames.
  *
@@ -94,12 +84,7 @@ export function renderDocument(options: {
 }): string {
   const { resolved } = options
 
-  const gridCss = resolved.pages
-    .map((page) => {
-      const layouts = page.layouts as Readonly<Record<string, readonly LayoutItem[]>>
-      return emitGridCss(gridConfigFor(page), layouts, `.neo-board[data-neo-page="${page.id}"]`)
-    })
-    .join('\n')
+  const gridCss = resolved.pages.map((page) => emitPageCss(page)).join('\n')
 
   const body = renderToStaticMarkup(dashboard(resolved, {}))
 

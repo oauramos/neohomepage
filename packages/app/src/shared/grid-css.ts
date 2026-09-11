@@ -43,7 +43,7 @@ export class UnsafeWidgetIdError extends Error {
   }
 }
 
-function assertSafeId(id: string): void {
+export function assertSafeId(id: string): void {
   if (!SAFE_ID.test(id)) throw new UnsafeWidgetIdError(id)
 }
 

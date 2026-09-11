@@ -195,3 +195,109 @@ describe('cross-file invariants', () => {
     ).toBe(true)
   })
 })
+
+describe('sections', () => {
+  const sectioned = (sections: unknown[]) =>
+    new Map([['home', pageSchema.parse({ id: 'home', sections })]])
+  const messages = (t: ConfigTree) => validateTree(t).map((p) => p.message)
+
+  it('accepts a page that declares none, and one that declares the usual pair', () => {
+    expect(validateTree(tree())).toEqual([])
+    const t = tree({
+      pages: sectioned([
+        { id: 'nav', kind: 'navbar', items: [{ id: 't', kind: 'title' }] },
+        { id: 'main', kind: 'grid' },
+      ]),
+    })
+    expect(validateTree(t)).toEqual([])
+  })
+
+  it('catches a widget naming a section that is not a grid on its page', () => {
+    const t = tree({
+      pages: sectioned([
+        { id: 'main', kind: 'grid' },
+        { id: 'links', kind: 'bookmarks' },
+      ]),
+      widgets: new Map([
+        ['w1', widget('w1', { section: 'links' })],
+        ['w2', widget('w2', { section: 'ghost' })],
+      ]),
+    })
+    expect(messages(t)).toEqual([
+      expect.stringContaining('section "links" is not a grid section'),
+      expect.stringContaining('section "ghost" is not a grid section'),
+    ])
+  })
+
+  it('catches duplicate ids among sections, groups, links and navbar items', () => {
+    const t = tree({
+      pages: sectioned([
+        { id: 'main', kind: 'grid' },
+        {
+          id: 'main',
+          kind: 'bookmarks',
+          groups: [
+            { id: 'g', title: 'A' },
+            { id: 'g', title: 'B' },
+          ],
+        },
+        {
+          id: 'nav',
+          kind: 'navbar',
+          items: [
+            { id: 'x', kind: 'title' },
+            { id: 'x', kind: 'spacer' },
+          ],
+        },
+      ]),
+    })
+    expect(messages(t)).toEqual([
+      expect.stringContaining('section "main" is declared twice'),
+      expect.stringContaining('group "g" is declared twice'),
+      expect.stringContaining('navbar item "x" is declared twice'),
+    ])
+  })
+
+  it('refuses a page whose declared sections leave widgets nowhere to go', () => {
+    const t = tree({ pages: sectioned([{ id: 'links', kind: 'bookmarks' }]) })
+    expect(messages(t)).toEqual([expect.stringContaining('at least one grid section')])
+  })
+
+  it('catches a section sizing a breakpoint the page does not have', () => {
+    const t = tree({ pages: sectioned([{ id: 'main', kind: 'grid', cols: { xl: 16 } }]) })
+    expect(messages(t)).toEqual([expect.stringContaining('breakpoint "xl"')])
+  })
+
+  it("bounds a layout entry by its section's columns and row cap, not the page's", () => {
+    const t = tree({
+      pages: sectioned([
+        { id: 'main', kind: 'grid' },
+        { id: 'narrow', kind: 'grid', cols: { lg: 6 }, maxRows: 2 },
+      ]),
+      widgets: new Map([
+        ['wide', widget('wide')],
+        ['tight', widget('tight', { section: 'narrow' })],
+      ]),
+      layouts: new Map([
+        [
+          'home',
+          layoutFileSchema.parse({
+            page: 'home',
+            layouts: {
+              lg: [
+                // Fine on the 12-column main section.
+                { i: 'wide', x: 4, y: 0, w: 8, h: 3 },
+                // The same geometry in the six-column, two-row section breaks both bounds.
+                { i: 'tight', x: 4, y: 0, w: 8, h: 3 },
+              ],
+            },
+          }),
+        ],
+      ]),
+    })
+    expect(messages(t)).toEqual([
+      expect.stringContaining('"tight" spans past column 6'),
+      expect.stringContaining('"tight" exceeds the 2-row limit'),
+    ])
+  })
+})

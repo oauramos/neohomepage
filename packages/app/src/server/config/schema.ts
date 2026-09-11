@@ -71,11 +71,167 @@ export const breakpointSchema = z
   })
   .catchall(z.unknown())
 
+/**
+ * Where a bookmark or a navbar link points, as parts rather than a URL string.
+ *
+ * The same keys as a target's `base`, for the same reason: nothing in config, in the API or in an
+ * MCP tool call is ever a URL. The server composes one at render time, and the path is held to
+ * the two rules the `targetUrl` opcode applies to a deep link.
+ */
+export const linkBaseSchema = z
+  .object({
+    scheme: z.enum(['http', 'https']).default('http'),
+    host: z.string().min(1).max(253),
+    port: z.int().min(1).max(65535),
+  })
+  .strict()
+
+export const linkPathSchema = z
+  .string()
+  .max(200)
+  .default('/')
+  .refine(
+    (value) => /^\/[A-Za-z0-9._~\-/?=&%#+:@!$'()*,;]*$/.test(value),
+    'must be an absolute path made of URL characters',
+  )
+  .refine(
+    (value) => !value.includes('..') && !value.includes('//'),
+    'must not contain ".." or "//"',
+  )
+
+/** An icon is named by slug and fetched by the server; a name is not a URL. */
+export const iconSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'must be a lowercase slug')
+  .nullable()
+  .default(null)
+
+export const bookmarkLinkSchema = z
+  .object({
+    id: idSchema,
+    label: z.string().min(1).max(64),
+    base: linkBaseSchema,
+    path: linkPathSchema,
+    icon: iconSlugSchema,
+  })
+  .catchall(z.unknown())
+
+export type BookmarkLink = z.infer<typeof bookmarkLinkSchema>
+
+export const bookmarkGroupSchema = z
+  .object({
+    id: idSchema,
+    title: z.string().min(1).max(64),
+    links: z.array(bookmarkLinkSchema).max(64).default([]),
+  })
+  .catchall(z.unknown())
+
+export type BookmarkGroup = z.infer<typeof bookmarkGroupSchema>
+
+/** The four ways a bookmark group can be drawn. A closed set: each one is CSS this build ships. */
+export const BOOKMARK_DISPLAYS = ['list', 'cards', 'icons', 'chips'] as const
+export type BookmarkDisplay = (typeof BOOKMARK_DISPLAYS)[number]
+
+/** Where a search box sends its query. Closed, because an engine is a URL and a URL is not config. */
+export const SEARCH_ENGINES = [
+  'duckduckgo',
+  'google',
+  'bing',
+  'brave',
+  'startpage',
+  'kagi',
+] as const
+export type SearchEngine = (typeof SEARCH_ENGINES)[number]
+
+/**
+ * What a navbar is made of, in order. Each item is one thing the user asked for in the header:
+ * the dashboard title, a line of text, a row of links, a clock, a search box, or a spacer that
+ * pushes what follows to the far edge.
+ */
+export const navItemSchema = z.discriminatedUnion('kind', [
+  z.object({ id: idSchema, kind: z.literal('title') }).catchall(z.unknown()),
+  z
+    .object({ id: idSchema, kind: z.literal('text'), text: z.string().min(1).max(120) })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('links'),
+      links: z.array(bookmarkLinkSchema).max(24).default([]),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('clock'),
+      showDate: z.boolean().default(true),
+      hour12: z.boolean().default(false),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('search'),
+      engine: z.enum(SEARCH_ENGINES).default('duckduckgo'),
+      placeholder: z.string().max(64).default('Search'),
+    })
+    .catchall(z.unknown()),
+  z.object({ id: idSchema, kind: z.literal('spacer') }).catchall(z.unknown()),
+])
+
+export type NavItem = z.infer<typeof navItemSchema>
+
+/**
+ * A page is a stack of sections, each one of three kinds.
+ *
+ * A `navbar` is the header; a `grid` is a free board of widgets with its own column count and row
+ * cap; `bookmarks` is named groups of links laid out in columns and drawn in one of four styles.
+ * Every per-breakpoint number here is a record keyed by breakpoint id and SPARSE: an absent key
+ * falls back to the page's grid for a grid section, and to a built-in default for bookmarks.
+ */
+export const sectionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('navbar'),
+      title: z.string().max(64).nullable().default(null),
+      items: z.array(navItemSchema).max(12).default([]),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('grid'),
+      title: z.string().max(64).nullable().default(null),
+      cols: z.record(idSchema, z.int().min(1).max(24)).default({}),
+      maxRows: z.int().min(1).max(200).nullable().default(null),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('bookmarks'),
+      title: z.string().max(64).nullable().default(null),
+      columns: z.record(idSchema, z.int().min(1).max(12)).default({}),
+      display: z.enum(BOOKMARK_DISPLAYS).default('list'),
+      groups: z.array(bookmarkGroupSchema).max(32).default([]),
+    })
+    .catchall(z.unknown()),
+])
+
+export type Section = z.infer<typeof sectionSchema>
+
 export const pageSchema = z
   .object({
     id: idSchema,
     title: z.string().min(1).max(64).default('Home'),
     icon: z.string().max(64).nullable().default(null),
+    /**
+     * Empty means the page every install had before sections existed: a header carrying the title
+     * over one grid. The resolver synthesises exactly that, so no file on disk needs a migration
+     * and a page that never opened the sections panel never grows the key.
+     */
+    sections: z.array(sectionSchema).max(24).default([]),
     grid: z
       .object({
         rowHeight: z.int().min(16).max(400).default(56),
@@ -207,6 +363,8 @@ export const widgetSchema = z
       .nullable()
       .default(null),
     title: z.string().max(64).nullable().default(null),
+    /** The grid section this widget sits in; null means the page's first grid section. */
+    section: idSchema.nullable().default(null),
     targetId: idSchema.nullable().default(null),
     /**
      * Composite widgets only: role name -> the targets bound to it, in the order the user chose.

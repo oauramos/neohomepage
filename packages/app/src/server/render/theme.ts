@@ -134,8 +134,74 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 /* Unbounded, a four-column tile on an ultrawide becomes a metre of button. The cap is a token so
    a preset — or the design panel — can widen it back to none. */
 .nh-header,main{max-width:var(--nh-max-width);margin-inline:auto}
-.nh-header{padding:24px 16px 8px}
+/* The navbar is a row of whatever the user put in it: title, text, links, a clock, a search box,
+   spacers. It wraps rather than overflows, so a phone gets two rows and never a scrollbar. */
+.nh-header{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;padding:24px 16px 8px}
 .nh-title{margin:0;font-size:1.25rem;font-weight:600;letter-spacing:-0.01em}
+.nh-nav-text{color:var(--nh-muted-foreground);font-size:0.875rem}
+.nh-nav-links{display:flex;flex-wrap:wrap;gap:2px}
+.nh-nav-link{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px;
+  border-radius:var(--nh-radius-control);text-decoration:none;color:var(--nh-foreground);
+  font-size:0.875rem}
+.nh-nav-link:hover{background:var(--nh-muted)}
+.nh-nav-link:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
+.nh-clock{font-variant-numeric:tabular-nums;color:var(--nh-muted-foreground);font-size:0.875rem;
+  white-space:nowrap}
+.nh-search{display:flex;align-items:stretch;flex:1 1 220px;max-width:420px}
+.nh-search-input{flex:1;min-width:0;min-height:36px;padding:6px 12px;font:inherit;font-size:0.875rem;
+  border:var(--nh-border-width) solid var(--nh-border);border-right:0;
+  border-radius:var(--nh-radius-control) 0 0 var(--nh-radius-control);
+  background:var(--nh-surface);color:var(--nh-surface-foreground)}
+.nh-search-input:focus-visible{outline:2px solid var(--nh-accent);outline-offset:-1px}
+.nh-search-go{min-height:36px;min-width:44px;font:inherit;font-size:1.125rem;cursor:pointer;
+  border:var(--nh-border-width) solid var(--nh-border);
+  border-radius:0 var(--nh-radius-control) var(--nh-radius-control) 0;
+  background:var(--nh-link-bg);color:var(--nh-link-color)}
+.nh-search-go:hover{background:var(--nh-link-bg-hover)}
+.nh-search-go:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
+.nh-spacer{flex:1 1 auto}
+/* A section title is set like a tile title: small caps in the muted colour, so it labels a
+   region without competing with the page title. */
+.nh-section-title{margin:20px 16px 4px;font-size:var(--nh-title-size);font-weight:600;
+  letter-spacing:var(--nh-title-tracking);text-transform:var(--nh-title-transform);
+  color:var(--nh-muted-foreground)}
+/* Bookmarks: named groups in columns (--nh-bm-cols comes from the page stylesheet, per
+   breakpoint), each group a surface like a tile, each link a full-width target. The display
+   attribute picks one of four looks; the markup is the same for all four. */
+.nh-bookmarks{padding:8px 16px 8px}
+.nh-bookmarks>.nh-section-title{margin-inline:0}
+.nh-groups{display:grid;grid-template-columns:repeat(var(--nh-bm-cols,1),minmax(0,1fr));gap:12px}
+.nh-group{min-width:0;background:var(--nh-surface);color:var(--nh-surface-foreground);
+  border:var(--nh-border-width) solid var(--nh-border);border-radius:var(--nh-radius);
+  box-shadow:var(--nh-shadow);padding:12px 14px}
+.nh-group-title{margin:0 0 8px;font-size:var(--nh-title-size);font-weight:600;
+  letter-spacing:var(--nh-title-tracking);text-transform:var(--nh-title-transform);
+  color:var(--nh-muted-foreground)}
+.nh-group-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.nh-bm{display:flex;align-items:center;gap:10px;min-height:32px;padding:4px 6px;
+  border-radius:var(--nh-radius-control);text-decoration:none;color:var(--nh-foreground);
+  font-size:0.875rem}
+.nh-bm:hover{background:var(--nh-muted)}
+.nh-bm:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
+.nh-bm-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nh-icon{flex:none;width:20px;height:20px}
+.nh-icon-glyph{display:inline-flex;align-items:center;justify-content:center;
+  border-radius:min(6px,var(--nh-radius));background:var(--nh-muted);
+  color:var(--nh-muted-foreground);font-size:0.6875rem;font-weight:700}
+.nh-bookmarks[data-neo-display="list"] .nh-icon{display:none}
+.nh-bookmarks[data-neo-display="chips"] .nh-group-links{flex-direction:row;flex-wrap:wrap;gap:6px}
+.nh-bookmarks[data-neo-display="chips"] .nh-bm{padding:4px 12px;background:var(--nh-muted);
+  border-radius:min(999px,max(var(--nh-radius),2px))}
+.nh-bookmarks[data-neo-display="chips"] .nh-bm:hover{background:var(--nh-link-bg-hover)}
+.nh-bookmarks[data-neo-display="chips"] .nh-icon{display:none}
+.nh-bookmarks[data-neo-display="cards"] .nh-group-links{display:grid;gap:8px;
+  grid-template-columns:repeat(auto-fill,minmax(132px,1fr))}
+.nh-bookmarks[data-neo-display="cards"] .nh-bm{flex-direction:column;justify-content:center;gap:6px;
+  min-height:64px;padding:10px 12px;text-align:center;background:var(--nh-link-bg);
+  color:var(--nh-link-color);font-weight:var(--nh-link-weight);border:var(--nh-link-border);
+  box-shadow:var(--nh-link-shadow)}
+.nh-bookmarks[data-neo-display="cards"] .nh-bm:hover{background:var(--nh-link-bg-hover)}
+.nh-bookmarks[data-neo-display="cards"] .nh-bm-label{white-space:normal}
 /* A theme change is a custom property on :root, which invalidates style for the whole document —
    and a board is thirty-odd tiles. Measured while dragging the radius slider: 13ms median and 63ms
    at the 95th percentile with 32 tiles, against 1.8ms and 3.3ms with four. The work is per-tile

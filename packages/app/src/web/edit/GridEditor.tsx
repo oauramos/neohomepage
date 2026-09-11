@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { getCompactor } from 'react-grid-layout/core'
 import type { EventCallback, Layout } from 'react-grid-layout'
 import type { LayoutItem } from '../../shared/grid-geometry.ts'
-import type { ResolvedPage, ResolvedWidget } from '../../shared/resolved.ts'
+import type { ResolvedGridSection, ResolvedWidget } from '../../shared/resolved.ts'
 
 /**
  * Edit mode.
@@ -27,14 +27,22 @@ const ResponsiveGrid = lazy(async () => {
 })
 
 export type GridEditorProps = {
-  readonly page: ResolvedPage
+  /** One grid section: its own columns, row cap and layouts, edited as a board of its own. */
+  readonly section: ResolvedGridSection
   readonly widgets: readonly ResolvedWidget[]
   readonly renderWidget: (widget: ResolvedWidget) => React.ReactNode
   readonly onCommit: (breakpoint: string, items: LayoutItem[]) => void | Promise<void>
   readonly onRemove?: (widgetId: string) => void
 }
 
-export function GridEditor({ page, widgets, renderWidget, onCommit, onRemove }: GridEditorProps) {
+export function GridEditor({
+  section,
+  widgets,
+  renderWidget,
+  onCommit,
+  onRemove,
+}: GridEditorProps) {
+  const page = section
   const container = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
   const [breakpoint, setBreakpoint] = useState(page.grid.authoritative)
@@ -75,13 +83,19 @@ export function GridEditor({ page, widgets, renderWidget, onCommit, onRemove }: 
     )
   }
 
-  const onPage = widgets.filter((widget) => widget.page === page.id)
+  const onPage = widgets.filter((widget) => section.widgetIds.includes(widget.id))
 
   return (
-    <div ref={container} className="nh-editor" data-neo-editing={breakpoint}>
+    <div
+      ref={container}
+      className="nh-editor"
+      data-neo-editing={breakpoint}
+      data-neo-section={section.id}
+    >
       <div className="nh-editor-bar">
         <span className="nh-editor-note">
-          Editing <strong>{breakpoint}</strong> ({cols[breakpoint] ?? '?'} columns)
+          {section.title === null ? 'Grid' : section.title}: editing <strong>{breakpoint}</strong> (
+          {cols[breakpoint] ?? '?'} columns)
         </span>
         {page.grid.maxRows !== null ? (
           <span className="nh-editor-note">max {page.grid.maxRows} rows</span>

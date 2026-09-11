@@ -1,4 +1,4 @@
-import type { Page, Theme } from '../server/config/schema.ts'
+import type { BookmarkDisplay, Page, SearchEngine, Theme } from '../server/config/schema.ts'
 import type { LayoutItem } from './grid-geometry.ts'
 
 /**
@@ -35,11 +35,77 @@ export type ResolvedWidget = {
   readonly href: string | null
 }
 
+/** A bookmark or navbar link with its destination composed: origin plus path, never a raw URL from config. */
+export type ResolvedLink = {
+  readonly id: string
+  readonly label: string
+  readonly href: string
+  readonly icon: string | null
+}
+
+export type ResolvedNavItem =
+  | { readonly id: string; readonly kind: 'title' }
+  | { readonly id: string; readonly kind: 'text'; readonly text: string }
+  | { readonly id: string; readonly kind: 'links'; readonly links: readonly ResolvedLink[] }
+  | {
+      readonly id: string
+      readonly kind: 'clock'
+      readonly showDate: boolean
+      readonly hour12: boolean
+    }
+  | {
+      readonly id: string
+      readonly kind: 'search'
+      readonly engine: SearchEngine
+      readonly placeholder: string
+    }
+  | { readonly id: string; readonly kind: 'spacer' }
+
+export type ResolvedNavbarSection = {
+  readonly id: string
+  readonly kind: 'navbar'
+  readonly title: string | null
+  readonly items: readonly ResolvedNavItem[]
+}
+
+/**
+ * A grid section carries a complete grid config of its own — the page's, with this section's
+ * column counts and row cap applied — so the renderer, the CSS emitter and the editor never have
+ * to know which numbers were overridden and which were inherited.
+ */
+export type ResolvedGridSection = {
+  readonly id: string
+  readonly kind: 'grid'
+  readonly title: string | null
+  readonly grid: Page['grid']
+  readonly layouts: Readonly<Record<string, readonly LayoutItem[]>>
+  readonly widgetIds: readonly string[]
+}
+
+export type ResolvedBookmarkGroup = {
+  readonly id: string
+  readonly title: string
+  readonly links: readonly ResolvedLink[]
+}
+
+export type ResolvedBookmarksSection = {
+  readonly id: string
+  readonly kind: 'bookmarks'
+  readonly title: string | null
+  /** Groups per row, keyed by breakpoint id — dense, every breakpoint present. */
+  readonly columns: Readonly<Record<string, number>>
+  readonly display: BookmarkDisplay
+  readonly groups: readonly ResolvedBookmarkGroup[]
+}
+
+export type ResolvedSection = ResolvedNavbarSection | ResolvedGridSection | ResolvedBookmarksSection
+
 export type ResolvedPage = {
   readonly id: string
   readonly title: string
   readonly grid: Page['grid']
-  readonly layouts: Readonly<Record<string, readonly LayoutItem[]>>
+  /** In display order. Always at least one grid section, even when the page declares none. */
+  readonly sections: readonly ResolvedSection[]
   readonly widgetIds: readonly string[]
 }
 

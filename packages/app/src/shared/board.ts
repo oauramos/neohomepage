@@ -1,6 +1,16 @@
 import { createElement as h, type ReactNode } from 'react'
 import type { ProjectionEnvelope } from '@neohomepage/catalog-schema'
-import type { Resolved, ResolvedPage, ResolvedWidget } from './resolved.ts'
+import { SEARCH_ACTIONS } from './links.ts'
+import type {
+  Resolved,
+  ResolvedBookmarksSection,
+  ResolvedGridSection,
+  ResolvedLink,
+  ResolvedNavbarSection,
+  ResolvedPage,
+  ResolvedSection,
+  ResolvedWidget,
+} from './resolved.ts'
 
 /**
  * The board, rendered identically at publish time and in the browser.
@@ -229,42 +239,251 @@ export function widgetTile(
   )
 }
 
-export function board(
-  page: ResolvedPage,
-  widgets: readonly ResolvedWidget[],
-  data: WidgetData,
-): ReactNode {
-  const onPage = widgets.filter((widget) => widget.page === page.id)
+export type RenderOptions = {
+  /** What a clock shows. The publish step passes the render instant; the browser ticks it. */
+  readonly now?: Date
+  /**
+   * Edit mode's hook: render a grid section as something other than a static board. Everything
+   * around it — navbar, bookmarks, section titles — stays the view-mode markup, so what the editor
+   * shows between the boards is exactly what the page will show.
+   */
+  readonly renderGrid?: (section: ResolvedGridSection) => ReactNode
+}
+
+/** Placeholder glyph for a link without an icon: its initial, in a rounded square the CSS draws. */
+function linkGlyph(link: ResolvedLink): ReactNode {
   return h(
-    'div',
-    { className: 'neo-board', 'data-neo-page': page.id },
-    // The most-seen screen in the product's life is the one before anybody has added anything,
-    // and it used to render as an empty div: a heading over blank space, with nothing naming the
-    // round button in the corner as the way in.
-    onPage.length === 0
-      ? h('div', { className: 'nh-board-empty', key: 'empty' }, [
-          h('strong', { key: 'title' }, 'No widgets yet'),
-          h(
-            'span',
-            { key: 'hint' },
-            'Open the editor with the button in the bottom-left corner to add your first service.',
-          ),
-        ])
-      : onPage.map((widget) => widgetTile(widget, data[widget.id])),
+    'span',
+    { className: 'nh-icon nh-icon-glyph', 'aria-hidden': 'true', key: 'icon' },
+    link.label.trim().charAt(0).toUpperCase(),
   )
 }
 
-export function dashboard(resolved: Resolved, data: WidgetData): ReactNode {
+function linkAnchor(link: ResolvedLink, className: string): ReactNode {
+  return h('a', { className, href: link.href, rel: 'noreferrer', key: link.id }, [
+    linkGlyph(link),
+    h('span', { className: 'nh-bm-label', key: 'label' }, link.label),
+  ])
+}
+
+/**
+ * Clock text in a fixed English format, so the baked page and the browser agree letter for
+ * letter and the no-op publish check is not defeated by a locale difference between the two.
+ */
+export function clockText(now: Date, hour12: boolean, showDate: boolean): string {
+  const part = (options: Intl.DateTimeFormatOptions, type: string) =>
+    new Intl.DateTimeFormat('en-US', options).formatToParts(now).find((p) => p.type === type)
+      ?.value ?? ''
+  const hh = part({ hour: '2-digit', hourCycle: hour12 ? 'h12' : 'h23' }, 'hour')
+  const mm = part({ minute: '2-digit' }, 'minute').padStart(2, '0')
+  const suffix = hour12 ? ` ${part({ hour: 'numeric', hour12: true }, 'dayPeriod')}` : ''
+  const time = `${hh}:${mm}${suffix}`
+  if (!showDate) return time
+  const weekday = part({ weekday: 'short' }, 'weekday')
+  const day = part({ day: 'numeric' }, 'day')
+  const month = part({ month: 'short' }, 'month')
+  return `${time} · ${weekday} ${day} ${month}`
+}
+
+function navbar(section: ResolvedNavbarSection, resolved: Resolved, now: Date): ReactNode {
+  return h(
+    'header',
+    { className: 'nh-header', 'data-neo-section': section.id, key: section.id },
+    section.items.map((item) => {
+      switch (item.kind) {
+        case 'title':
+          return h('h1', { className: 'nh-title', key: item.id }, resolved.title)
+        case 'text':
+          return h('span', { className: 'nh-nav-text', key: item.id }, item.text)
+        case 'links':
+          return h(
+            'nav',
+            { className: 'nh-nav-links', 'aria-label': 'Links', key: item.id },
+            item.links.map((link) => linkAnchor(link, 'nh-nav-link')),
+          )
+        case 'clock':
+          return h(
+            'time',
+            {
+              className: 'nh-clock',
+              dateTime: now.toISOString(),
+              'data-neo-clock': item.hour12 ? '12' : '24',
+              'data-neo-date': item.showDate ? 'on' : 'off',
+              key: item.id,
+            },
+            clockText(now, item.hour12, item.showDate),
+          )
+        case 'search':
+          // A plain GET form: it searches with JavaScript off, and the engine is one of a closed
+          // table this build ships, so nothing in config ever names where a query goes.
+          return h(
+            'form',
+            {
+              className: 'nh-search',
+              action: SEARCH_ACTIONS[item.engine],
+              method: 'get',
+              target: '_blank',
+              rel: 'noopener',
+              role: 'search',
+              key: item.id,
+            },
+            [
+              h('input', {
+                className: 'nh-search-input',
+                type: 'search',
+                name: 'q',
+                placeholder: item.placeholder,
+                'aria-label': item.placeholder,
+                autoComplete: 'off',
+                key: 'input',
+              }),
+              h(
+                'button',
+                { className: 'nh-search-go', type: 'submit', 'aria-label': 'Search', key: 'go' },
+                '⌕',
+              ),
+            ],
+          )
+        case 'spacer':
+          return h('span', { className: 'nh-spacer', 'aria-hidden': 'true', key: item.id })
+        default: {
+          const exhaustive: never = item
+          throw new Error(`unhandled navbar item ${String(exhaustive)}`)
+        }
+      }
+    }),
+  )
+}
+
+function sectionTitle(title: string | null): ReactNode {
+  return title === null ? null : h('h2', { className: 'nh-section-title', key: 'title' }, title)
+}
+
+function gridSection(
+  section: ResolvedGridSection,
+  page: ResolvedPage,
+  widgets: readonly ResolvedWidget[],
+  data: WidgetData,
+  showEmptyHint: boolean,
+): ReactNode {
+  const inSection = widgets.filter((widget) => section.widgetIds.includes(widget.id))
+  return h('div', { className: 'nh-section nh-section-grid', key: section.id }, [
+    sectionTitle(section.title),
+    h(
+      'div',
+      {
+        className: 'neo-board',
+        'data-neo-page': page.id,
+        'data-neo-section': section.id,
+        key: 'board',
+      },
+      // The most-seen screen in the product's life is the one before anybody has added anything,
+      // and it used to render as an empty div: a heading over blank space, with nothing naming
+      // the round button in the corner as the way in.
+      inSection.length === 0 && showEmptyHint
+        ? h('div', { className: 'nh-board-empty', key: 'empty' }, [
+            h('strong', { key: 'title' }, 'No widgets yet'),
+            h(
+              'span',
+              { key: 'hint' },
+              'Open the editor with the button in the bottom-left corner to add your first service.',
+            ),
+          ])
+        : inSection.map((widget) => widgetTile(widget, data[widget.id])),
+    ),
+  ])
+}
+
+function bookmarksSection(section: ResolvedBookmarksSection): ReactNode {
+  return h(
+    'section',
+    {
+      className: 'nh-section nh-bookmarks',
+      'data-neo-section': section.id,
+      'data-neo-display': section.display,
+      'aria-label': section.title ?? 'Bookmarks',
+      key: section.id,
+    },
+    [
+      sectionTitle(section.title),
+      h(
+        'div',
+        { className: 'nh-groups', key: 'groups' },
+        section.groups.map((group) =>
+          h('div', { className: 'nh-group', key: group.id }, [
+            h('h3', { className: 'nh-group-title', key: 'title' }, group.title),
+            h(
+              'ul',
+              { className: 'nh-group-links', key: 'links' },
+              group.links.map((link) => h('li', { key: link.id }, linkAnchor(link, 'nh-bm'))),
+            ),
+          ]),
+        ),
+      ),
+    ],
+  )
+}
+
+/**
+ * One page: its sections in order. A navbar is a landmark header; everything else sits inside
+ * one `main`, so a screen reader still finds exactly the two landmarks the old page had.
+ */
+export function board(
+  page: ResolvedPage,
+  resolved: Resolved,
+  data: WidgetData,
+  options: RenderOptions = {},
+): ReactNode {
+  const now = options.now ?? new Date()
+  const firstGrid = page.sections.find((section) => section.kind === 'grid')
+  const render = (section: ResolvedSection): ReactNode => {
+    switch (section.kind) {
+      case 'navbar':
+        return navbar(section, resolved, now)
+      case 'grid':
+        return options.renderGrid === undefined
+          ? gridSection(
+              section,
+              page,
+              resolved.widgets,
+              data,
+              section === firstGrid && page.widgetIds.length === 0,
+            )
+          : options.renderGrid(section)
+      case 'bookmarks':
+        return bookmarksSection(section)
+      default: {
+        const exhaustive: never = section
+        throw new Error(`unhandled section ${String(exhaustive)}`)
+      }
+    }
+  }
+
+  const leading: ReactNode[] = []
+  const rest: ReactNode[] = []
+  let inMain = false
+  for (const section of page.sections) {
+    if (!inMain && section.kind === 'navbar') leading.push(render(section))
+    else {
+      inMain = true
+      rest.push(render(section))
+    }
+  }
+  return [...leading, h('main', { key: 'main', 'data-neo-page': page.id }, rest)]
+}
+
+export function dashboard(
+  resolved: Resolved,
+  data: WidgetData,
+  options: RenderOptions = {},
+): ReactNode {
   const page =
     resolved.pages.find((candidate) => candidate.id === resolved.defaultPage) ?? resolved.pages[0]
-  return h('div', { id: 'neo-root-content' }, [
-    h(
-      'header',
-      { className: 'nh-header', key: 'header' },
-      h('h1', { className: 'nh-title' }, resolved.title),
-    ),
+  return h(
+    'div',
+    { id: 'neo-root-content' },
     page === undefined
       ? h('p', { className: 'nh-placeholder', key: 'empty' }, 'No pages configured yet.')
-      : h('main', { key: 'main' }, board(page, resolved.widgets, data)),
-  ])
+      : board(page, resolved, data, options),
+  )
 }
