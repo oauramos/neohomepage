@@ -75,6 +75,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
         category: view.category,
         kind: view.kind,
         icon: view.icon,
+        iconUrl: context.icons().fileFor(view.icon) === null ? null : `/assets/icons/${view.icon}`,
         version: view.version,
         template: view.template,
         shape: view.shape,
@@ -170,6 +171,8 @@ export function createApiRoutes(options: ApiOptions): Hono {
       bindings?: Record<string, string[]>
       /** Move to another grid section of the same page; the tile is re-placed there. */
       section?: string | null
+      /** How readings are drawn on this tile; merged, so one control can post one key. */
+      look?: { stats?: 'inherit' | 'plain' | 'boxed'; align?: 'inherit' | 'start' | 'center' }
     }
 
     const result = await handle(() =>
@@ -184,6 +187,7 @@ export function createApiRoutes(options: ApiOptions): Hono {
             ...widget,
             ...(body.title === undefined ? {} : { title: body.title }),
             ...(body.section === undefined ? {} : { section: body.section }),
+            ...(body.look === undefined ? {} : { look: { ...widget.look, ...body.look } }),
             ...(body.targetId === undefined ? {} : { targetId: body.targetId }),
             ...(body.bindings === undefined ? {} : { bindings: body.bindings }),
             // Merge rather than replace: a form that posts one field must not wipe the others.

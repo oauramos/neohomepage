@@ -134,6 +134,8 @@ test('the widget catalog and its generated form are reachable and clean', async 
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()
   await page.getByRole('button', { name: 'Widgets', exact: true }).click()
+  // The catalog opens on Browse (or on typing); the placed list is what the tab shows at rest.
+  await page.getByRole('button', { name: 'Browse', exact: true }).click()
   await page.getByRole('button', { name: /Sonarr queue/ }).click()
   await expect(page.getByRole('group', { name: /Where it lives/i })).toBeVisible()
 
@@ -148,6 +150,7 @@ test('every form control the generated form emits has a label', async ({ page })
   await page.goto(`${harness.baseURL}/`)
   await page.getByRole('button', { name: /editor/i }).click()
   await page.getByRole('button', { name: 'Widgets', exact: true }).click()
+  await page.getByRole('button', { name: 'Browse', exact: true }).click()
   await page.getByRole('button', { name: /Calendar/ }).click()
 
   const unlabelled = await page.evaluate(() => {

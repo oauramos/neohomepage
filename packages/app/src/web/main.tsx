@@ -3,7 +3,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { board, dashboard } from '../shared/board.ts'
 import type { Resolved, ResolvedPage } from '../shared/resolved.ts'
 import { emitPageCss } from '../shared/section-css.ts'
-import { AboutPanel, ConfigPanel, ThemePanel, WidgetsPanel } from './fab/panels.tsx'
+import { AboutPanel, ConfigPanel, ThemePanel } from './fab/panels.tsx'
+import { WidgetsPanel } from './fab/WidgetsPanel.tsx'
 import { SectionsPanel } from './fab/SectionsPanel.tsx'
 import { Fab, type Tab } from './fab/Fab.tsx'
 import { GridEditor } from './edit/GridEditor.tsx'
@@ -57,7 +58,7 @@ function TabPanel({
           <p className="nh-panel-note">
             {editing
               ? 'Drag a tile by its handle to move it, or the corner to resize. Changes save when you let go.'
-              : 'Turn on edit mode to rearrange the board.'}
+              : 'Turn on edit mode to rearrange the boards. This dialog closes so the whole page is yours to drag.'}
           </p>
           <button type="button" className="nh-button" onClick={onToggleEdit}>
             {editing ? 'Done editing' : 'Edit layout'}

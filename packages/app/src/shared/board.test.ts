@@ -19,6 +19,7 @@ const widget = (overrides: Partial<ResolvedWidget> = {}): ResolvedWidget => ({
   unsupported: false,
   href: null,
   iconUrl: null,
+  look: { stats: 'inherit', align: 'inherit' },
   ...overrides,
 })
 
@@ -153,6 +154,19 @@ describe('templates', () => {
     expect(rendered).toContain('href="http://10.0.0.5:80/"')
     expect(rendered).toContain('data-neo-chip="error"')
     expect(rendered).toContain('redirect')
+  })
+})
+
+describe("a tile's look", () => {
+  it('carries a chosen box and alignment as data attributes, and nothing when inheriting', () => {
+    const chosen = html(
+      widgetTile(widget({ look: { stats: 'boxed', align: 'center' } }), envelope()),
+    )
+    expect(chosen).toContain('data-neo-stats="boxed"')
+    expect(chosen).toContain('data-neo-align="center"')
+    const inherited = html(widgetTile(widget(), envelope()))
+    expect(inherited).not.toContain('data-neo-stats')
+    expect(inherited).not.toContain('data-neo-align')
   })
 })
 

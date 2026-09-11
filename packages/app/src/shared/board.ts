@@ -216,6 +216,8 @@ export function widgetTile(
       'data-neo-i': widget.id,
       'data-neo-state': state,
       'data-neo-template': widget.template,
+      ...(widget.look.stats === 'inherit' ? {} : { 'data-neo-stats': widget.look.stats }),
+      ...(widget.look.align === 'inherit' ? {} : { 'data-neo-align': widget.look.align }),
       className: 'nh-tile',
       'aria-labelledby': `${widget.id}-title`,
     },

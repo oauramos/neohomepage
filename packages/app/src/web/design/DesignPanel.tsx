@@ -12,6 +12,10 @@ import {
   COLOUR_GROUPS,
   FONT_STACKS,
   SHAPE_RESET_TOKENS,
+  STAT_ALIGNS,
+  STAT_STYLES,
+  statAlignOf,
+  statStyleOf,
   TITLE_CASES,
   TYPE_RESET_TOKENS,
   firstFamily,
@@ -733,6 +737,45 @@ export function DesignPanel({
             System stacks only. The board has to render with no network and no bundle, so a webfont
             would be a request the offline mode cannot make.
           </p>
+          <div className="nh-design-row">
+            <span className="nh-field-label">Readings</span>
+            <div className="nh-row nh-look">
+              <span className="nh-look-caption">Box</span>
+              <div className="nh-seg" role="group" aria-label="Reading box">
+                {STAT_STYLES.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className="nh-seg-item"
+                    aria-pressed={statStyleOf(tokens['stat-bg']).id === entry.id}
+                    onClick={() => {
+                      for (const [token, value] of Object.entries(entry.tokens))
+                        setShape(token, value)
+                    }}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+              <span className="nh-look-caption">Align</span>
+              <div className="nh-seg" role="group" aria-label="Reading alignment">
+                {STAT_ALIGNS.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className="nh-seg-item"
+                    aria-pressed={statAlignOf(tokens['stat-align']).id === entry.id}
+                    onClick={() => {
+                      for (const [token, value] of Object.entries(entry.tokens))
+                        setShape(token, value)
+                    }}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <div className="nh-seg" role="group" aria-label="Tile titles">
             {TITLE_CASES.map((entry) => (
               <button

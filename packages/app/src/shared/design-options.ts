@@ -133,7 +133,52 @@ export const COLOUR_GROUPS: readonly {
  * construction, not something a test could catch — what `design-options.test.ts` can catch, and
  * does, is this list naming a token that no longer exists.
  */
+/**
+ * How a reading is drawn on a tile: bare, or boxed in the muted fill; left, or centred. Two
+ * closed tables rather than free tokens, because these are the two questions the design panel
+ * asks and the values are the whole answer.
+ */
+export type StatStyle = {
+  readonly id: 'plain' | 'boxed'
+  readonly label: string
+  readonly tokens: Record<string, string>
+}
+export const STAT_STYLES: readonly StatStyle[] = [
+  { id: 'plain', label: 'Plain', tokens: { 'stat-bg': 'transparent', 'stat-padding': '0' } },
+  {
+    id: 'boxed',
+    label: 'Boxed',
+    tokens: { 'stat-bg': 'var(--nh-muted)', 'stat-padding': '8px 10px' },
+  },
+]
+
+export type StatAlign = {
+  readonly id: 'start' | 'center'
+  readonly label: string
+  readonly tokens: Record<string, string>
+}
+export const STAT_ALIGNS: readonly StatAlign[] = [
+  { id: 'start', label: 'Left', tokens: { 'stat-align': 'start' } },
+  { id: 'center', label: 'Centred', tokens: { 'stat-align': 'center' } },
+]
+
+export function statStyleOf(bg: string | undefined): StatStyle {
+  return (
+    STAT_STYLES.find((entry) => entry.tokens['stat-bg'] === bg) ?? (STAT_STYLES[0] as StatStyle)
+  )
+}
+
+export function statAlignOf(align: string | undefined): StatAlign {
+  return (
+    STAT_ALIGNS.find((entry) => entry.tokens['stat-align'] === align) ??
+    (STAT_ALIGNS[0] as StatAlign)
+  )
+}
+
 export const TYPE_RESET_TOKENS: readonly ShapeToken[] = [
+  'stat-bg',
+  'stat-padding',
+  'stat-align',
   'font-sans',
   'font-mono',
   'title-transform',

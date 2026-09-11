@@ -68,6 +68,9 @@ export const SHAPE_TOKENS = [
   'link-shadow',
   'link-weight',
   'max-width',
+  'stat-bg',
+  'stat-padding',
+  'stat-align',
 ] as const
 
 export type ShapeToken = (typeof SHAPE_TOKENS)[number]
@@ -92,6 +95,11 @@ export const SHAPE_DEFAULTS: Record<ShapeToken, string> = {
   'link-shadow': 'none',
   'link-weight': '600',
   'max-width': '1600px',
+  // A reading — "Running 10" — sits bare on the tile by default; a preset or the design panel can
+  // box it (a muted fill and some padding) and centre it, per dashboard, and a widget can override.
+  'stat-bg': 'transparent',
+  'stat-padding': '0',
+  'stat-align': 'start',
 }
 
 /**

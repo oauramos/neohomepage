@@ -90,10 +90,9 @@ const fetchIconFromCdn: IconFetch = async (url, maxBytes) => {
 /** Every icon slug the config names: each widget's manifest, each bookmark, each navbar link. */
 function iconSlugs(tree: ConfigTree, catalog: ReadonlyMap<string, Manifest>): Set<string> {
   const slugs = new Set<string>()
-  for (const widget of tree.widgets.values()) {
-    const icon = catalog.get(widget.type)?.icon
-    if (icon !== undefined) slugs.add(icon)
-  }
+  // The whole catalog, not only the placed types: the picker shows an icon per type, and
+  // sixteen small files once is cheaper than a picker of initials.
+  for (const manifest of catalog.values()) slugs.add(manifest.icon)
   for (const page of tree.pages.values()) {
     for (const section of effectiveSections(page)) {
       if (section.kind === 'bookmarks') {

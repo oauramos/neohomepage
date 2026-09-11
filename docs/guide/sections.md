@@ -29,8 +29,14 @@ Each grid section has its own **columns** per breakpoint (blank means the page's
 and 2) and its own **max rows**. With a row limit set, a widget that does not fit is refused with a
 message rather than pushed below the fold, which is the behaviour a wall display wants.
 
-A page can have several grids, each with a title. Widgets live in exactly one; the **Widgets** tab
-shows a section select per tile once there is more than one grid to choose from.
+A page can have several grids, each with a title. Widgets live in exactly one; a widget's row in
+the **Widgets** tab has a section select once there is more than one grid to choose from.
+
+### Readings
+
+A reading — "Running 10" — is bare and left-aligned by default. The design panel (Type → Readings)
+sets **Box** and **Align** for every tile, a preset can carry its own choice, and a widget's row in
+the Widgets tab can override either for that one tile.
 
 ## Bookmarks
 

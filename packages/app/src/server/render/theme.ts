@@ -260,6 +260,17 @@ body{margin:0;background:var(--nh-background);color:var(--nh-foreground);
 .nh-link:active{transform:translateY(1px)}
 .nh-link:focus-visible{outline:2px solid var(--nh-accent);outline-offset:2px}
 .nh-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}
+/* A reading's box and alignment are tokens, so a preset or the design panel sets them for the
+   whole dashboard; a widget that chose for itself carries the choice as a data attribute, which
+   wins. Boxed readings get the muted fill and the control radius, and centre their label too. */
+.nh-stat{min-width:0;background:var(--nh-stat-bg);padding:var(--nh-stat-padding);
+  border-radius:var(--nh-radius-control);text-align:var(--nh-stat-align)}
+.nh-tile[data-neo-stats="boxed"] .nh-stat{background:var(--nh-muted);padding:8px 10px}
+.nh-tile[data-neo-stats="plain"] .nh-stat{background:transparent;padding:0}
+.nh-tile[data-neo-align="center"] .nh-stat,.nh-tile[data-neo-align="center"] .nh-status,
+.nh-tile[data-neo-align="center"] .nh-placeholder{text-align:center;justify-content:center}
+.nh-tile[data-neo-align="start"] .nh-stat,.nh-tile[data-neo-align="start"] .nh-status,
+.nh-tile[data-neo-align="start"] .nh-placeholder{text-align:start;justify-content:flex-start}
 .nh-stat dt{font-size:0.6875rem;color:var(--nh-muted-foreground)}
 .nh-stat dd{margin:0;font-size:1.125rem;font-weight:600;font-variant-numeric:tabular-nums}
 /* The projection has been emitting a tone on every stat since v1 with no selector to receive it. */

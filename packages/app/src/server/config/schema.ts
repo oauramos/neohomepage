@@ -374,6 +374,17 @@ export const widgetSchema = z
     title: z.string().max(64).nullable().default(null),
     /** The grid section this widget sits in; null means the page's first grid section. */
     section: idSchema.nullable().default(null),
+    /**
+     * How this tile draws its readings, where it differs from the dashboard's default: boxed or
+     * bare, centred or not. `inherit` — the default — follows the theme's `stat-*` tokens, so a
+     * file only grows this key when someone chose for one tile.
+     */
+    look: z
+      .object({
+        stats: z.enum(['inherit', 'plain', 'boxed']).default('inherit'),
+        align: z.enum(['inherit', 'start', 'center']).default('inherit'),
+      })
+      .prefault({}),
     targetId: idSchema.nullable().default(null),
     /**
      * Composite widgets only: role name -> the targets bound to it, in the order the user chose.

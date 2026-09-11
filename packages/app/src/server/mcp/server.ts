@@ -419,6 +419,13 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
           .record(z.string().max(32), z.union([z.string(), z.number(), z.boolean()]))
           .optional(),
         section: z.string().max(64).optional(),
+        /** Boxed or bare readings, centred or not; `inherit` follows the theme. */
+        look: z
+          .object({
+            stats: z.enum(['inherit', 'plain', 'boxed']).optional(),
+            align: z.enum(['inherit', 'start', 'center']).optional(),
+          })
+          .optional(),
         baseRevision: z.string().max(64).optional(),
       },
     },
@@ -435,6 +442,7 @@ export function buildDashboardServer(deps: McpDeps): McpServer {
               ...widget,
               ...(input.title === undefined ? {} : { title: input.title }),
               ...(input.section === undefined ? {} : { section: input.section }),
+              ...(input.look === undefined ? {} : { look: { ...widget.look, ...input.look } }),
               ...(input.config === undefined
                 ? {}
                 : { config: { ...widget.config, ...input.config } }),

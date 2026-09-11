@@ -35,6 +35,11 @@ export type ResolvedWidget = {
   readonly href: string | null
   /** The cached icon for this widget's type, as a page-relative URL, or null until it is cached. */
   readonly iconUrl: string | null
+  /** This tile's own choice for how readings are drawn; `inherit` follows the theme tokens. */
+  readonly look: {
+    readonly stats: 'inherit' | 'plain' | 'boxed'
+    readonly align: 'inherit' | 'start' | 'center'
+  }
 }
 
 /** A bookmark or navbar link with its destination composed: origin plus path, never a raw URL from config. */

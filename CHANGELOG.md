@@ -25,6 +25,17 @@
   link shows its initial. Tiles show their type's icon beside the title.
 - **MCP**: `get_sections`, `set_sections`, `add_bookmark`; `add_widget`, `update_widget` and
   `set_layout` take a `section`; `describe_dashboard` reports the sections.
+- **Readings can be boxed and centred.** Three shape tokens — `stat-bg`, `stat-padding`,
+  `stat-align` — set it for the dashboard from the design panel (Type → Readings), a preset can
+  carry it, and a widget can choose for itself (`look.stats`, `look.align`) from its row in the
+  Widgets tab or through `update_widget`. "Running 10" in a muted box, centred, reads across a
+  room; bare and left-aligned is still the default.
+- **The Widgets tab is a list you can edit.** One search box at the top adds (type to narrow the
+  catalog, or Browse it); at rest the tab is the placed widgets, each row opening into its own
+  editor — title, section, readings, the options its manifest declares, where it reads from,
+  and a two-step Remove. Edits save half a second after the last change and the row says so.
+  Catalog entries show their icon and a badge when a credential is needed. The dialog is wider,
+  the tabs carry icons and start on Widgets, and below tablet width the tabs become a row.
 - **The page boots from the state it was published with.** The embedded state was written flat
   and read as `{resolved}`, so every load booted from an empty dashboard, painted the default theme
   over the baked one for a frame, then fetched what it already had. Found because a link tile

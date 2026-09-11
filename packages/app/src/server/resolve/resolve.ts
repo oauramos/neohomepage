@@ -147,6 +147,7 @@ function resolveWidget(
       widget.targetId === null ? undefined : targets.get(widget.targetId),
     ),
     iconUrl: iconUrl(manifest?.icon, icons),
+    look: { stats: widget.look.stats, align: widget.look.align },
   }
 }
 

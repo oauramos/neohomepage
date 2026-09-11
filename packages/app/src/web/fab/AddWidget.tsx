@@ -16,11 +16,14 @@ type CatalogEntry = {
   /** widget | bookmark | tool. Absent on a catalog older than the field, hence the fallback. */
   kind?: string
   icon: string
+  iconUrl?: string | null
   template: string
   shape: 'single' | 'composite'
   needsCredential: boolean
   someKindsNeedNoCredential: boolean
 }
+
+export type { CatalogEntry }
 
 type BindableKind = {
   name: string
@@ -71,9 +74,20 @@ let nextDraftUid = 0
 
 type TestResult = { ok: boolean; durationMs: number; code?: string; message?: string }
 
-export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: string }) {
+export type AddWidgetProps = {
+  readonly onAdded: () => void
+  /** Narrow the catalog to one kind; absent shows everything. */
+  readonly kind?: string
+  /** The search text, owned by the panel so the box can sit above the widget list. */
+  readonly query: string
+  /** Called when the form opens or closes, so the panel can hide the list behind it. */
+  readonly onEditing?: (editing: boolean) => void
+  /** Called when the user backs out of the catalog without choosing. */
+  readonly onCancel?: () => void
+}
+
+export function AddWidget({ onAdded, kind, query, onEditing, onCancel }: AddWidgetProps) {
   const [entries, setEntries] = useState<CatalogEntry[] | null>(null)
-  const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<WidgetSchema | null>(null)
   const [target, setTarget] = useState({ host: '', port: '', scheme: 'http', basePath: '' })
   const [targetValues, setTargetValues] = useState<FieldValues>({})
@@ -89,6 +103,10 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
       .then((payload) => setEntries(payload.manifests))
       .catch(() => setEntries([]))
   }, [])
+
+  useEffect(() => {
+    onEditing?.(selected !== null)
+  }, [selected, onEditing])
 
   const select = async (id: string) => {
     setError(null)
@@ -311,16 +329,6 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
     )
     return (
       <div className="nh-catalog">
-        <input
-          className="nh-input"
-          type="search"
-          // A placeholder is not a label: it disappears the moment you type, and a screen reader
-          // announcing "edit text" with no name leaves the one control on this panel unnamed.
-          aria-label="Search widgets"
-          placeholder="Search widgets"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
         {visible.length === 0 ? (
           <p className="nh-panel-note">
             {entries.length === 0
@@ -340,19 +348,37 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
                   className="nh-catalog-item"
                   onClick={() => void select(entry.id)}
                 >
-                  <span className="nh-catalog-name">{entry.displayName}</span>
-                  <span className="nh-catalog-meta">
-                    {entry.category}
-                    {entry.needsCredential
-                      ? entry.someKindsNeedNoCredential
-                        ? ' · some sources need an API key'
-                        : ' · needs an API key'
-                      : ''}
+                  {entry.iconUrl ? (
+                    <img
+                      className="nh-catalog-icon"
+                      src={entry.iconUrl}
+                      alt=""
+                      width={28}
+                      height={28}
+                    />
+                  ) : (
+                    <span className="nh-catalog-icon nh-catalog-glyph" aria-hidden="true">
+                      {entry.displayName.charAt(0)}
+                    </span>
+                  )}
+                  <span className="nh-catalog-text">
+                    <span className="nh-catalog-name">{entry.displayName}</span>
+                    <span className="nh-catalog-meta">{entry.category}</span>
                   </span>
+                  {entry.needsCredential ? (
+                    <span className="nh-badge" title="Needs an API key or a password">
+                      {entry.someKindsNeedNoCredential ? 'key · some' : 'key'}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             ))}
           </ul>
+        )}
+        {onCancel === undefined ? null : (
+          <button type="button" className="nh-button-quiet" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
     )
@@ -364,7 +390,13 @@ export function AddWidget({ onAdded, kind }: { onAdded: () => void; kind?: strin
         <button type="button" className="nh-button-quiet" onClick={() => setSelected(null)}>
           ← Back
         </button>
-        <strong>{selected.displayName}</strong>
+        <span className="nh-add-title">
+          <strong>Add {selected.displayName}</strong>
+          <span className="nh-panel-dim">
+            Step 2 of 2 ·{' '}
+            {selected.target === null && selected.shape === 'single' ? 'options' : 'connect it'}
+          </span>
+        </span>
       </div>
 
       {selected.shape === 'composite'

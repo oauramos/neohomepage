@@ -11,12 +11,66 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
  * discoverable rather than hunted for.
  */
 
-export type Tab = 'edit' | 'sections' | 'widgets' | 'theme' | 'config' | 'about'
+export type Tab = 'widgets' | 'sections' | 'edit' | 'theme' | 'config' | 'about'
+
+/** Sixteen-pixel line icons, drawn here so the editor ships no icon font and fetches nothing. */
+const ICONS: Record<Tab, ReactNode> = {
+  widgets: (
+    <>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </>
+  ),
+  sections: (
+    <>
+      <rect x="3" y="4" width="18" height="5" rx="1.5" />
+      <rect x="3" y="15" width="18" height="5" rx="1.5" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M5 9l-3 3 3 3" />
+      <path d="M19 9l3 3-3 3" />
+      <path d="M9 5l3-3 3 3" />
+      <path d="M9 19l3 3 3-3" />
+      <path d="M2 12h20" />
+      <path d="M12 2v20" />
+    </>
+  ),
+  theme: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" />
+    </>
+  ),
+  config: (
+    <>
+      <path d="M4 6h10" />
+      <path d="M18 6h2" />
+      <circle cx="16" cy="6" r="2" />
+      <path d="M4 18h2" />
+      <path d="M10 18h10" />
+      <circle cx="8" cy="18" r="2" />
+      <path d="M4 12h6" />
+      <path d="M14 12h6" />
+      <circle cx="12" cy="12" r="2" />
+    </>
+  ),
+  about: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 8v.01" />
+    </>
+  ),
+}
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'edit', label: 'Edit layout' },
-  { id: 'sections', label: 'Sections' },
   { id: 'widgets', label: 'Widgets' },
+  { id: 'sections', label: 'Sections' },
+  { id: 'edit', label: 'Layout' },
   { id: 'theme', label: 'Theme' },
   { id: 'config', label: 'Config' },
   { id: 'about', label: 'About' },
@@ -34,7 +88,7 @@ export function Fab({
   renderTab: (tab: Tab, close: () => void) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>('edit')
+  const [tab, setTab] = useState<Tab>('widgets')
   const [publishing, setPublishing] = useState(false)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
@@ -117,9 +171,20 @@ export function Fab({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true" className="nh-fab-glyph">
-          ⌘
-        </span>
+        <svg
+          aria-hidden="true"
+          className="nh-fab-glyph"
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {ICONS.config}
+        </svg>
         <span className="nh-sr-only">Open the dashboard editor</span>
         {pending ? (
           <span className="nh-fab-badge" title="unpublished changes">
@@ -192,7 +257,21 @@ export function Fab({
                     aria-current={tab === entry.id}
                     onClick={() => setTab(entry.id)}
                   >
-                    {entry.label}
+                    <svg
+                      aria-hidden="true"
+                      className="nh-tab-icon"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {ICONS[entry.id]}
+                    </svg>
+                    <span>{entry.label}</span>
                   </button>
                 ))}
               </nav>

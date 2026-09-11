@@ -56,6 +56,7 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         unsupported: false,
         href: null,
         iconUrl: null,
+        look: { stats: 'inherit', align: 'inherit' },
       },
     ],
     targets: [
