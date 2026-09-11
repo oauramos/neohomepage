@@ -44,6 +44,7 @@ function resolved(overrides: Partial<Resolved> = {}): Resolved {
         operations: ['queue'],
         pollIntervalMs: 60_000,
         unsupported: false,
+        href: null,
       },
     ],
     targets: [

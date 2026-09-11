@@ -23,6 +23,16 @@ export type ResolvedWidget = {
   readonly pollIntervalMs: number
   /** Absent from the catalog: renders as a labelled placeholder instead of vanishing. */
   readonly unsupported: boolean
+  /**
+   * Where a bookmark points: the bound target's origin plus the configured path, for the
+   * link-tile template only; null for everything else.
+   *
+   * Resolved here rather than read out of the projection, because a projection only exists once
+   * a fetch has succeeded — and a bookmark is a link first and a liveness check second. Most real
+   * services answer `GET /` with a redirect to a login page, a 401, or a self-signed certificate,
+   * and none of those is a reason for the link to vanish from the tile.
+   */
+  readonly href: string | null
 }
 
 export type ResolvedPage = {

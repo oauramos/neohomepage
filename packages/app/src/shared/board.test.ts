@@ -17,6 +17,7 @@ const widget = (overrides: Partial<ResolvedWidget> = {}): ResolvedWidget => ({
   operations: ['queue'],
   pollIntervalMs: 60_000,
   unsupported: false,
+  href: null,
   ...overrides,
 })
 
@@ -122,6 +123,35 @@ describe('templates', () => {
       ),
     )
     expect(rendered).toContain('data-neo-status="down"')
+  })
+
+  it('renders a link tile as a link before its probe has run', () => {
+    const rendered = html(
+      widgetTile(
+        widget({ template: 'link-tile', title: 'Nextcloud', href: 'http://10.0.0.5:80/' }),
+        undefined,
+      ),
+    )
+    expect(rendered).toContain('href="http://10.0.0.5:80/"')
+    expect(rendered).toContain('Nextcloud')
+  })
+
+  it('keeps the link when the probe failed, and shows the failure in the chip', () => {
+    // Most services answer `/` with a redirect to a login page. That is a fact about the probe,
+    // not a reason for the bookmark to stop being one.
+    const failed = {
+      projection: null,
+      meta: { fetchedAt: null, ageMs: 0, state: 'error', errorCode: 'redirect' },
+    } as unknown as ProjectionEnvelope
+    const rendered = html(
+      widgetTile(
+        widget({ template: 'link-tile', title: 'Nextcloud', href: 'http://10.0.0.5:80/' }),
+        failed,
+      ),
+    )
+    expect(rendered).toContain('href="http://10.0.0.5:80/"')
+    expect(rendered).toContain('data-neo-chip="error"')
+    expect(rendered).toContain('redirect')
   })
 })
 

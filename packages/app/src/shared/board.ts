@@ -118,10 +118,16 @@ function statusBlock(envelope: ProjectionEnvelope): ReactNode {
   ])
 }
 
-/** A plain link to the service, for widgets that are a bookmark rather than a reading. */
+/**
+ * A plain link to the service, for widgets that are a bookmark rather than a reading.
+ *
+ * The href comes from the resolved widget, not from the projection: a projection exists only after
+ * a probe has succeeded, and a bookmark whose service answers `/` with a login redirect, a 401 or a
+ * self-signed certificate is still a bookmark. The probe's verdict goes in the tile's chip.
+ */
 function linkBlock(widget: ResolvedWidget, envelope: ProjectionEnvelope | undefined): ReactNode {
   const first = envelope?.projection?.items?.[0]
-  const href = first?.href
+  const href = widget.href ?? first?.href
   const label = first?.subtitle ?? widget.title
   return href === undefined
     ? h('p', { className: 'nh-placeholder' }, label)

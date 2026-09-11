@@ -142,6 +142,64 @@ describe('precedence layers', () => {
   })
 })
 
+describe('a bookmark href', () => {
+  const LINK: Manifest = manifestSchema.parse({
+    ...MANIFEST,
+    id: 'service-link',
+    kind: 'bookmark',
+    config: [
+      { name: 'label', kind: 'string', label: 'Label', required: true },
+      { name: 'path', kind: 'string', label: 'Path', default: '/' },
+    ],
+    presentation: { template: 'link-tile' },
+    requires: { ...MANIFEST.requires, templates: ['link-tile'] },
+  })
+  const catalog = new Map([...CATALOG, ['service-link', LINK]])
+  const target = targetSchema.parse({
+    id: 'tCloud',
+    label: 'Nextcloud',
+    widgetType: 'service-link',
+    base: { scheme: 'https', host: 'cloud.home', port: 443 },
+  })
+  const link = (config: Record<string, unknown>) =>
+    widgetSchema.parse({ id: 'w1', page: 'home', type: 'service-link', targetId: 'tCloud', config })
+
+  it('is the bound target plus the configured path, resolved before any probe has run', () => {
+    const t = tree({
+      targets: new Map([['tCloud', target]]),
+      widgets: new Map([['w1', link({ path: '/apps/files' })]]),
+    })
+    expect(resolve({ tree: t, catalog, generatedAt: NOW }).widgets[0]?.href).toBe(
+      'https://cloud.home:443/apps/files',
+    )
+  })
+
+  it('follows a relocated target, so the laptop and the NAS get different links', () => {
+    const t = tree({ targets: new Map([['tCloud', target]]), widgets: new Map([['w1', link({})]]) })
+    const overrides = overridesSchema.parse({
+      targets: { tCloud: { base: { host: 'localhost' } } },
+    })
+    expect(resolve({ tree: t, catalog, overrides, generatedAt: NOW }).widgets[0]?.href).toBe(
+      'https://localhost:443/',
+    )
+  })
+
+  it('refuses the same paths the targetUrl opcode refuses', () => {
+    for (const path of ['/../etc', '//evil.example']) {
+      const t = tree({
+        targets: new Map([['tCloud', target]]),
+        widgets: new Map([['w1', link({ path })]]),
+      })
+      expect(resolve({ tree: t, catalog, generatedAt: NOW }).widgets[0]?.href).toBeNull()
+    }
+  })
+
+  it('is null for a widget that is a reading rather than a bookmark', () => {
+    const t = tree({ widgets: new Map([['w1', widget('w1')]]) })
+    expect(resolve({ tree: t, catalog, generatedAt: NOW }).widgets[0]?.href).toBeNull()
+  })
+})
+
 describe('polling intervals', () => {
   it('never polls faster than the manifest says the service tolerates', () => {
     const t = tree({ widgets: new Map([['w1', widget('w1', { poll: { intervalMs: 1000 } })]]) })

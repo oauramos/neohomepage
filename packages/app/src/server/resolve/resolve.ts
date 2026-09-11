@@ -50,9 +50,27 @@ function manifestDefaults(manifest: Manifest | undefined): Record<string, unknow
   return defaults
 }
 
+/**
+ * A bookmark's destination, built the way the `targetUrl` opcode builds a deep link: the bound
+ * target's origin, then a path that must be absolute and free of `..` and `//`. The same two
+ * rules, so a link tile cannot say anything about a target that its projection could not.
+ */
+function linkHref(
+  template: string,
+  config: Record<string, unknown>,
+  target: ResolvedTarget | undefined,
+): string | null {
+  if (template !== 'link-tile' || target === undefined) return null
+  const raw = typeof config.path === 'string' ? config.path : '/'
+  const path = raw.startsWith('/') ? raw : `/${raw}`
+  if (path.includes('..') || path.includes('//')) return null
+  return `${target.origin}${path}`
+}
+
 function resolveWidget(
   widget: Widget,
   catalog: ReadonlyMap<string, Manifest>,
+  targets: ReadonlyMap<string, ResolvedTarget>,
   overrides: Overrides,
   diagnostics: string[],
 ): ResolvedWidget {
@@ -70,12 +88,14 @@ function resolveWidget(
     ...(overrides.widgets[widget.id]?.config ?? {}),
   }
 
+  const template = manifest?.presentation.template ?? 'link-tile'
+
   return {
     id: widget.id,
     page: widget.page,
     type: widget.type,
     title: widget.title ?? manifest?.displayName ?? widget.type,
-    template: manifest?.presentation.template ?? 'link-tile',
+    template,
     icon: manifest?.icon ?? 'question-mark',
     targetId: widget.targetId,
     // A composite's bindings are only meaningful for the roles its manifest declares; a role that
@@ -100,6 +120,11 @@ function resolveWidget(
       widget.poll.intervalMs ?? manifest?.poll.defaultIntervalMs ?? 60_000,
     ),
     unsupported: manifest === undefined,
+    href: linkHref(
+      template,
+      config,
+      widget.targetId === null ? undefined : targets.get(widget.targetId),
+    ),
   }
 }
 
@@ -144,13 +169,15 @@ export function resolve(input: ResolveInput): Resolved {
   const overrides = input.overrides ?? EMPTY_OVERRIDES
   const diagnostics: string[] = []
 
-  const widgets = [...tree.widgets.values()]
-    .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
-    .map((widget) => resolveWidget(widget, catalog, overrides, diagnostics))
-
+  // Targets first: a widget's href is derived from the target it binds.
   const targets = [...tree.targets.values()]
     .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
     .map((target) => resolveTarget(target, overrides))
+  const targetsById = new Map(targets.map((target) => [target.id, target]))
+
+  const widgets = [...tree.widgets.values()]
+    .sort((a, b) => a.id.localeCompare(b.id, 'en-US'))
+    .map((widget) => resolveWidget(widget, catalog, targetsById, overrides, diagnostics))
 
   const pages: ResolvedPage[] = []
   for (const pageId of tree.dashboard.pages) {
