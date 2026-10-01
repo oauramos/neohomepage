@@ -33,7 +33,7 @@
     "eslint": "^10.10.0",
     "playwright": "1.63.0",
     "prettier": "^3.9.6",
-    "typescript": "5.9.3",
+    "typescript": "6.0.3",
     "typescript-eslint": "^8.69.0",
     "vitepress": "^1.6.4"
   }
