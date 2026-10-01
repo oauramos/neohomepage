@@ -30,11 +30,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "playwright": "1.63.0",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.69.0",
+    "typescript-eslint": "^8.71.0",
     "vitepress": "^1.6.4"
   }
 }
