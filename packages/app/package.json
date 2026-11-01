@@ -26,11 +26,11 @@
     "drill": "node scripts/restore-drill.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.5",
     "@modelcontextprotocol/server": "2.0.0",
     "@neohomepage/catalog-schema": "workspace:*",
     "chokidar": "^5.0.0",
-    "hono": "^4.13.7",
+    "hono": "^4.13.14",
     "ical.js": "2.2.1",
     "proper-lockfile": "^4.1.2",
     "react": "19.2.8",
